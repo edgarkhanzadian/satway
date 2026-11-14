@@ -24,6 +24,15 @@ const D = {
     '1e00000000000138800516037370db53547d845976e26dd5b5a92a7c7436ba7520d99ad0f0111a7e9aaa2ed22940efec98db0ece9b9475e61e1eec65a6e7f3af69ac',
   reclaimScript: '02b603b2752051b397d3ad5ab4f803565c0243d3c1fa9d5a8124b33547bb993ee1ebeb729ff2ac',
 };
+const REAL_TX_HEX =
+  '020000000001028ef08f51a0401825af15c238d7b2136d2405abd9bf02e0c1c8a697db2aeb296c0100000000fdffffff1e6ad5fd73606f585163f958b617134804bf611c2a0a7ffb175fded4280b3d1d0a00000000fdffffff02063031010000000022512022fee5c4094546d1da2432f6dbe24c23ffa8903e05e321f686700e45e9d54b2ecc0a0000000000001600142df601e9bf6db95982ff4579f18ca119f02c053102473044022045ec482d45a32b8f761cd402687ce8f9e6cc2d9b8ed5bba2c71a31fc099e77cd02200a644600d7174977f7185d630323b1f0dda4b5b81b2017bc8000639015bdd23501210251b397d3ad5ab4f803565c0243d3c1fa9d5a8124b33547bb993ee1ebeb729ff20247304402204c18dfb4eb01af4da5f1c66e9c0f79696e55803ec7c257cc7e34014af2c2d97a02202df05db704cbd99c121dd18cb908d5c2a5bd63baca86ad09dbd9c0ad82749b9c01210251b397d3ad5ab4f803565c0243d3c1fa9d5a8124b33547bb993ee1ebeb729ff200000000';
+const CHAIN: Record<number, { txid: string; hex: string }> = {
+  0: { txid: D.txid, hex: REAL_TX_HEX },
+  2: {
+    txid: '2f00c1314c251e6f45ba2707deb85e7eb3b8cd47383bd75d2412e3c5c77f9015',
+    hex: '02000000018ef08f51a0401825af15c238d7b2136d2405abd9bf02e0c1c8a697db2aeb296c010000000151fdffffff030100000000000000160014111111111111111111111111111111111111111101000000000000001600141111111111111111111111111111111111111111ac8a00000000000022512022fee5c4094546d1da2432f6dbe24c23ffa8903e05e321f686700e45e9d54b2e00000000',
+  },
+};
 const TIP = 975_805;
 const NOW = new Date('2026-11-14T12:00:00.000Z');
 const USDC: OneClickToken = {
@@ -79,6 +88,8 @@ interface World {
   payoutVout?: number | null;
   mint?: string | null;
   signerKey?: string;
+  txHex?: string;
+  notifyStatus?: number;
 }
 
 function world(w: World = {}) {
@@ -117,10 +128,17 @@ function world(w: World = {}) {
         ...Array.from({ length: w.payoutVout }, () => other),
         { scriptpubkey: D.scriptPubKey, value: 35_500 },
       ];
-      return jsonRes([{ txid: D.txid, vout, status: { confirmed: true, block_height: TIP - 2 } }]);
+      const txid = CHAIN[w.payoutVout]?.txid ?? D.txid;
+      return jsonRes([{ txid, vout, status: { confirmed: true, block_height: TIP - 2 } }]);
+    }
+    if (url.includes('/tx/') && url.endsWith('/hex')) {
+      const known = Object.values(CHAIN).find(t => url.endsWith(`/tx/${t.txid}/hex`));
+      if (!known) return new Response('Transaction not found', { status: 404 });
+      return new Response(w.txHex ?? known.hex);
     }
     if (url.endsWith('/deposit') && init?.method === 'POST') {
       posts.push({ url, body: bodyJson(init) });
+      if (w.notifyStatus) return jsonRes({ message: 'invalid transaction hex' }, w.notifyStatus);
       mint = 'pending';
       return jsonRes(emilyDeposit('pending'), 201);
     }
@@ -284,15 +302,47 @@ describe('checkProgress', () => {
       {
         url: 'https://sbtc-emily.com/deposit',
         body: {
-          bitcoinTxid: D.txid,
+          bitcoinTxid: CHAIN[2]?.txid,
           bitcoinTxOutputIndex: 2,
           depositScript: D.depositScript,
           reclaimScript: D.reclaimScript,
+          transactionHex: CHAIN[2]?.hex,
         },
       },
     ]);
     expect(snap.progress.stage).toBe('minting');
     expect(snap.payout).toMatchObject({ vout: 2, amountSats: 35_500 });
+    expect(snap.registrationError).toBeNull();
+  });
+
+  it('sends the real raw transaction for a payout at output 0', async () => {
+    const w = world({ swap: 'SUCCESS', payoutVout: 0 });
+    await checkProgress(config, w.backend, await receiptFor(w), w.fetchFn);
+    expect(w.posts.map(p => p.body)).toEqual([
+      {
+        bitcoinTxid: D.txid,
+        bitcoinTxOutputIndex: 0,
+        depositScript: D.depositScript,
+        reclaimScript: D.reclaimScript,
+        transactionHex: REAL_TX_HEX,
+      },
+    ]);
+  });
+
+  it('posts nothing and reports why when the raw transaction does not match', async () => {
+    const w = world({ swap: 'SUCCESS', payoutVout: 0, txHex: CHAIN[2]?.hex });
+    const snap = await checkProgress(config, w.backend, await receiptFor(w), w.fetchFn);
+    expect(w.posts).toHaveLength(0);
+    expect(snap.progress.stage).toBe('awaiting-notification');
+    expect(snap.registrationError).toMatch(/has txid/);
+  });
+
+  it('reports a rejected registration instead of dropping it', async () => {
+    const w = world({ swap: 'SUCCESS', payoutVout: 0, notifyStatus: 400 });
+    const snap = await checkProgress(config, w.backend, await receiptFor(w), w.fetchFn);
+    expect(w.posts).toHaveLength(1);
+    expect(snap.mint).toBeNull();
+    expect(snap.registrationError).toMatch(/HTTP 400 .*invalid transaction hex/);
   });
 
   it('still finds and registers the payout when the provider status is unavailable', async () => {

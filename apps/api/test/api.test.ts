@@ -15,6 +15,15 @@ const D = {
     '1e00000000000138800516037370db53547d845976e26dd5b5a92a7c7436ba7520d99ad0f0111a7e9aaa2ed22940efec98db0ece9b9475e61e1eec65a6e7f3af69ac',
   reclaimScript: '02b603b2752051b397d3ad5ab4f803565c0243d3c1fa9d5a8124b33547bb993ee1ebeb729ff2ac',
 };
+const REAL_TX_HEX =
+  '020000000001028ef08f51a0401825af15c238d7b2136d2405abd9bf02e0c1c8a697db2aeb296c0100000000fdffffff1e6ad5fd73606f585163f958b617134804bf611c2a0a7ffb175fded4280b3d1d0a00000000fdffffff02063031010000000022512022fee5c4094546d1da2432f6dbe24c23ffa8903e05e321f686700e45e9d54b2ecc0a0000000000001600142df601e9bf6db95982ff4579f18ca119f02c053102473044022045ec482d45a32b8f761cd402687ce8f9e6cc2d9b8ed5bba2c71a31fc099e77cd02200a644600d7174977f7185d630323b1f0dda4b5b81b2017bc8000639015bdd23501210251b397d3ad5ab4f803565c0243d3c1fa9d5a8124b33547bb993ee1ebeb729ff20247304402204c18dfb4eb01af4da5f1c66e9c0f79696e55803ec7c257cc7e34014af2c2d97a02202df05db704cbd99c121dd18cb908d5c2a5bd63baca86ad09dbd9c0ad82749b9c01210251b397d3ad5ab4f803565c0243d3c1fa9d5a8124b33547bb993ee1ebeb729ff200000000';
+const CHAIN: Record<number, { txid: string; hex: string }> = {
+  0: { txid: D.txid, hex: REAL_TX_HEX },
+  3: {
+    txid: '87fb3b6d3d8abe180aedb1034ff6ab6675260c5f350cf6c80cc4618dc330d14a',
+    hex: '02000000018ef08f51a0401825af15c238d7b2136d2405abd9bf02e0c1c8a697db2aeb296c010000000151fdffffff04010000000000000016001411111111111111111111111111111111111111110100000000000000160014111111111111111111111111111111111111111101000000000000001600141111111111111111111111111111111111111111ac8a00000000000022512022fee5c4094546d1da2432f6dbe24c23ffa8903e05e321f686700e45e9d54b2e00000000',
+  },
+};
 const USDC_BASE = 'nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near';
 const REFUND = '0x2527D02599Ba641c19FEa793cD0F167589a0f10D';
 
@@ -268,7 +277,7 @@ describe('runNotifier', () => {
   function payoutTx(vout: number, confirmed = true) {
     const other = { scriptpubkey: '0014' + '11'.repeat(20), value: 1 };
     return {
-      txid: D.txid,
+      txid: CHAIN[vout]?.txid ?? D.txid,
       vout: [
         ...Array.from({ length: vout }, () => other),
         { scriptpubkey: D.scriptPubKey, value: 35_000 },
@@ -277,11 +286,16 @@ describe('runNotifier', () => {
     };
   }
 
-  function world(opts: { txs: unknown[]; known?: boolean; notifyStatus?: number }) {
+  function world(opts: { txs: unknown[]; known?: boolean; notifyStatus?: number; txHex?: string }) {
     const calls: { url: string; body?: unknown }[] = [];
     function respond(url: string, init?: RequestInit): Response {
       calls.push({ url, body: init?.body ? bodyJson(init) : undefined });
       if (url.includes('/address/')) return jsonRes(opts.txs);
+      if (url.startsWith('https://btc.example/tx/')) {
+        const known = Object.values(CHAIN).find(t => url.endsWith(`/tx/${t.txid}/hex`));
+        if (!known) return new Response('Transaction not found', { status: 404 });
+        return new Response(opts.txHex ?? known.hex);
+      }
       if (init?.method === 'POST')
         return jsonRes(emilyDeposit('pending'), opts.notifyStatus ?? 201);
       return opts.known ? jsonRes(emilyDeposit('pending')) : jsonRes({ message: 'not found' }, 404);
@@ -311,15 +325,42 @@ describe('runNotifier', () => {
     const kv = await watching();
     const { fetchFn, calls } = world({ txs: [payoutTx(3)] });
     const report = await runNotifier(kv, endpoints, fetchFn);
-    expect(report.notified).toEqual([{ address: D.address, txid: D.txid, vout: 3 }]);
+    expect(report.notified).toEqual([{ address: D.address, txid: CHAIN[3]?.txid, vout: 3 }]);
     const sent = calls.find(c => c.body);
     expect(sent?.url).toBe('https://emily.example/deposit');
     expect(sent?.body).toEqual({
-      bitcoinTxid: D.txid,
+      bitcoinTxid: CHAIN[3]?.txid,
       bitcoinTxOutputIndex: 3,
       depositScript: D.depositScript,
       reclaimScript: D.reclaimScript,
+      transactionHex: CHAIN[3]?.hex,
     });
+    expect(kv.data.size).toBe(1);
+  });
+
+  it('sends the real raw transaction for the real payout', async () => {
+    const kv = await watching();
+    const { fetchFn, calls } = world({ txs: [payoutTx(0)] });
+    await runNotifier(kv, endpoints, fetchFn);
+    expect(calls.find(c => c.body)?.body).toEqual({
+      bitcoinTxid: D.txid,
+      bitcoinTxOutputIndex: 0,
+      depositScript: D.depositScript,
+      reclaimScript: D.reclaimScript,
+      transactionHex: REAL_TX_HEX,
+    });
+  });
+
+  it('posts nothing, keeps watching and says why when the raw transaction does not match', async () => {
+    const kv = await watching();
+    const { fetchFn, calls } = world({ txs: [payoutTx(0)], txHex: CHAIN[3]?.hex });
+    const report = await runNotifier(kv, endpoints, fetchFn);
+    expect(calls.some(c => c.body)).toBe(false);
+    expect(report.notified).toEqual([]);
+    expect(report.errors.map(e => e.address)).toEqual([D.address]);
+    expect(report.errors[0]?.message).toMatch(
+      new RegExp(`^Registering ${D.txid}:0 with the sBTC API failed: .*has txid`)
+    );
     expect(kv.data.size).toBe(1);
   });
 
@@ -344,6 +385,7 @@ describe('runNotifier', () => {
     const { fetchFn } = world({ txs: [payoutTx(0)], notifyStatus: 500 });
     const report = await runNotifier(kv, endpoints, fetchFn);
     expect(report.errors).toHaveLength(1);
+    expect(report.errors[0]?.message).toMatch(/^Registering .* with the sBTC API failed: HTTP 500/);
     expect(kv.data.size).toBe(1);
   });
 

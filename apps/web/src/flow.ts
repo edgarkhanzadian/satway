@@ -15,6 +15,7 @@ import {
   checkDepositAmount,
   deriveProgress,
   describeAmountProblem,
+  errorMessage,
   fetchDeposit,
   fetchLimits,
   fetchTipHeight,
@@ -142,6 +143,7 @@ export interface Snapshot {
   swap: OneClickSwapStatus | null;
   payout: Payout | null;
   mint: EmilyDepositStatus | null;
+  registrationError: string | null;
 }
 
 export async function checkProgress(
@@ -187,9 +189,10 @@ export async function checkProgress(
     tipHeight,
     reclaimLockBlocks: receipt.reclaimLockBlocks,
   });
+  let registrationError: string | null = null;
   if (progress.needsNotification && payout) {
     const registered = await notifyDeposit(
-      config.sbtcApiUrl,
+      config,
       {
         bitcoinTxid: payout.txid,
         bitcoinTxOutputIndex: payout.vout,
@@ -197,7 +200,10 @@ export async function checkProgress(
         reclaimScript: receipt.reclaimScript,
       },
       fetchFn
-    ).catch(() => null);
+    ).catch((err: unknown) => {
+      registrationError = errorMessage(err) ?? String(err);
+      return null;
+    });
     if (registered) {
       mint = registered.status;
       progress = deriveProgress({
@@ -209,5 +215,5 @@ export async function checkProgress(
       });
     }
   }
-  return { progress, swap, payout, mint };
+  return { progress, swap, payout, mint, registrationError };
 }

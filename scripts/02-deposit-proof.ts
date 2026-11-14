@@ -159,7 +159,7 @@ async function watch(args: string[]) {
 
     if (progress.needsNotification && payout) {
       if (record.notify) {
-        const res = await notifyDeposit(config.sbtcApiUrl, {
+        const res = await notifyDeposit(config, {
           bitcoinTxid: payout.txid,
           bitcoinTxOutputIndex: payout.vout,
           depositScript: record.deposit.depositScript,

@@ -18,7 +18,12 @@ import {
   providerFeesOf,
   z,
 } from '../src/index.js';
-import { REAL_DEPOSIT as D, REGISTRY_RESULT, jsonResponse } from './fixtures.js';
+import {
+  REAL_DEPOSIT as D,
+  REAL_DEPOSIT_TX_HEX,
+  REGISTRY_RESULT,
+  jsonResponse,
+} from './fixtures.js';
 import {
   REAL_DEPOSIT_TX,
   REAL_DRY_QUOTE,
@@ -198,9 +203,19 @@ describe('malformed sBTC and Bitcoin responses are rejected', () => {
     ).rejects.toBeInstanceOf(ResponseShapeError);
     await expect(
       notifyDeposit(
-        'https://emily.example',
-        { bitcoinTxid: D.txid, bitcoinTxOutputIndex: 0, depositScript: '', reclaimScript: '' },
-        serve(body, 201)
+        { btcApiUrl: 'https://btc.example', sbtcApiUrl: 'https://emily.example' },
+        {
+          bitcoinTxid: D.txid,
+          bitcoinTxOutputIndex: 0,
+          depositScript: D.depositScript,
+          reclaimScript: D.reclaimScript,
+        },
+        url =>
+          Promise.resolve(
+            url.startsWith('https://btc.example/tx/')
+              ? new Response(REAL_DEPOSIT_TX_HEX)
+              : jsonResponse(body, 201)
+          )
       )
     ).rejects.toBeInstanceOf(ResponseShapeError);
   });

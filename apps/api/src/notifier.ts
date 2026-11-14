@@ -90,7 +90,7 @@ export async function runNotifier(
         if (known) continue;
         allRegistered = false;
         await notifyDeposit(
-          config.sbtcApiUrl,
+          config,
           {
             bitcoinTxid: payout.txid,
             bitcoinTxOutputIndex: payout.vout,
@@ -98,7 +98,12 @@ export async function runNotifier(
             reclaimScript: deposit.reclaimScript,
           },
           fetchFn
-        );
+        ).catch((err: unknown) => {
+          throw new Error(
+            `Registering ${payout.txid}:${payout.vout} with the sBTC API failed: ${errorMessage(err) ?? String(err)}`,
+            { cause: err }
+          );
+        });
         report.notified.push({ address, txid: payout.txid, vout: payout.vout });
       }
       if (allRegistered) {

@@ -1,3 +1,5 @@
+import { fetchTransactionHex, verifyDepositTransaction } from './bitcoin.js';
+import type { NetworkConfig } from './config.js';
 import { type FetchLike, HttpError, defaultFetch, requestJson } from './http.js';
 import { z } from './schema.js';
 
@@ -57,16 +59,32 @@ export interface NotifyDepositInput {
   reclaimScript: string;
 }
 
+export type DepositEndpoints = Pick<NetworkConfig, 'btcApiUrl' | 'sbtcApiUrl'>;
+
 export async function notifyDeposit(
-  sbtcApiUrl: string,
+  endpoints: DepositEndpoints,
   input: NotifyDepositInput,
   fetchFn: FetchLike = defaultFetch
 ): Promise<EmilyDeposit> {
+  const { sbtcApiUrl } = endpoints;
+  const transactionHex = await fetchTransactionHex(endpoints.btcApiUrl, input.bitcoinTxid, fetchFn);
+  verifyDepositTransaction(transactionHex, {
+    txid: input.bitcoinTxid,
+    vout: input.bitcoinTxOutputIndex,
+    depositScript: input.depositScript,
+    reclaimScript: input.reclaimScript,
+  });
   try {
     return await requestJson(fetchFn, `${sbtcApiUrl}/deposit`, emilyDepositSchema, {
       method: 'POST',
       headers: { accept: 'application/json', 'content-type': 'application/json' },
-      body: JSON.stringify(input),
+      body: JSON.stringify({
+        bitcoinTxid: input.bitcoinTxid,
+        bitcoinTxOutputIndex: input.bitcoinTxOutputIndex,
+        depositScript: input.depositScript,
+        reclaimScript: input.reclaimScript,
+        transactionHex,
+      }),
     });
   } catch (err) {
     if (err instanceof HttpError && err.status === 409) {
