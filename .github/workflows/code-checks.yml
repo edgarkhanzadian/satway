@@ -1,0 +1,60 @@
+name: code-checks
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  code-checks:
+    name: code-checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: install
+        run: pnpm install --frozen-lockfile
+
+      - name: lint-eslint
+        run: pnpm lint
+
+      - name: lint-prettier
+        run: pnpm format:check
+
+      - name: lint-syncpack
+        run: pnpm syncpack:lint
+
+      - name: lint-filenames
+        run: pnpm lint:filenames
+
+      - name: typecheck
+        run: pnpm typecheck
+
+      - name: lint-deps
+        run: pnpm lint:deps
+
+      - name: test
+        run: pnpm test
+
+      - name: build
+        run: pnpm build
+
+      - name: check-bundle
+        run: pnpm check:bundle

@@ -1,0 +1,29 @@
+{
+  "name": "@stxonector/api",
+  "description": "Cloudflare Worker: 1Click proxy and sBTC signer notifier",
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "format": "prettier . --write --ignore-path ../../.prettierignore",
+    "format:check": "prettier . --check --ignore-path ../../.prettierignore",
+    "lint": "eslint --cache --max-warnings 0",
+    "lint:fix": "pnpm lint --fix",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@stxonector/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@stxonector/prettier-config": "workspace:*",
+    "@stxonector/tsconfig-config": "workspace:*",
+    "prettier": "3.5.1",
+    "typescript": "5.9.3",
+    "vitest": "3.2.7",
+    "wrangler": "3.114.17"
+  },
+  "prettier": "@stxonector/prettier-config",
+  "private": true
+}

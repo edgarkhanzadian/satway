@@ -1,0 +1,13 @@
+node_modules/
+pnpm-lock.yaml
+dist/
+stxonector-styles/
+build/
+coverage/
+package.json
+.wrangler/
+.proofs/
+.env*
+.dev.vars
+*.log
+.eslintcache

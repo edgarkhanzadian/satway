@@ -1,0 +1,20 @@
+name = "stxonector-api"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Runs the notifier every two minutes.
+[triggers]
+crons = ["*/2 * * * *"]
+
+# Create with: wrangler kv namespace create DEPOSITS
+# then paste the id here.
+[[kv_namespaces]]
+binding = "DEPOSITS"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+[vars]
+# Comma-separated origins allowed to call this API.
+ALLOWED_ORIGINS = "http://localhost:5173"
+
+# Secret, set with: wrangler secret put ONECLICK_JWT

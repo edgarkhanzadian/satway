@@ -1,0 +1,45 @@
+{
+  "name": "stxonector",
+  "description": "Deposit to sBTC on Stacks from other chains in one flow",
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r build",
+    "check:bundle": "node scripts/check-bundle.mjs",
+    "deposit-proof": "tsx scripts/02-deposit-proof.ts",
+    "dry-quote": "tsx scripts/01-dry-quote.ts",
+    "format": "prettier . --write",
+    "format:check": "prettier . --check",
+    "lint": "pnpm -r lint",
+    "lint:deps": "depcruise --config .dependency-cruiser.cjs .",
+    "lint:filenames": "ls-lint",
+    "lint:fix": "pnpm -r lint:fix",
+    "make-test-wallet": "tsx scripts/00-make-test-wallet.ts",
+    "reclaim": "tsx scripts/03-reclaim.ts",
+    "syncpack:fix": "syncpack fix-mismatches",
+    "syncpack:format": "syncpack format",
+    "syncpack:lint": "syncpack lint",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "@ls-lint/ls-lint": "2.2.3",
+    "@stxonector/eslint-config": "workspace:*",
+    "@stxonector/prettier-config": "workspace:*",
+    "@stxonector/tsconfig-config": "workspace:*",
+    "@trivago/prettier-plugin-sort-imports": "5.2.2",
+    "@types/node": "26.6.6",
+    "dependency-cruiser": "16.10.4",
+    "eslint": "9.34.0",
+    "prettier": "3.5.1",
+    "syncpack": "13.0.0",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.47.0"
+  },
+  "engines": {
+    "node": ">=26.13.1",
+    "pnpm": ">=10.33.0"
+  },
+  "packageManager": "pnpm@10.33.0+sha512.10568bb4a6afb58c9eb3630da90cc9516417abebd3fabbe6739f0ae795728da1491e9db5a544c76ad8eb7570f5c4bb3d6c637b2cb41bfdcdb47fa823c8649319",
+  "private": true
+}

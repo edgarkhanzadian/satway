@@ -1,0 +1,9 @@
+{
+  "extends": "./packages/tsconfig-config/tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "stxonector-styles/*": ["./apps/web/stxonector-styles/*"]
+    }
+  },
+  "files": []
+}

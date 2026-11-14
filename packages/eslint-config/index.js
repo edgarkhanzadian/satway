@@ -1,0 +1,137 @@
+// Copied from leather-io/mono packages/eslint-config/index.js (MIT).
+// Adapted: `ignoredTypeNames: ['To']` (a leather-specific type) removed from
+// @typescript-eslint/no-base-to-string; the `no-require-imports: off`
+// exception (an expo-image workaround) removed, so the rule's recommended
+// `error` applies. Added: a local `stxonector` plugin (no-comments,
+// no-same-package-barrel-import), stxonector/no-comments enabled at error, and
+// unused eslint-disable directives reported as errors. Everything else is
+// unchanged.
+import eslint from '@eslint/js';
+import eslintConfigPrettier from 'eslint-config-prettier';
+import tseslint from 'typescript-eslint';
+
+import { noCommentsRule } from './rules/no-comments.js';
+import { noEnumSyntax } from './rules/no-enum.js';
+import { noSamePackageBarrelImportRule } from './rules/no-same-package-barrel-import.js';
+
+export const stxonectorPlugin = {
+  rules: {
+    'no-comments': noCommentsRule,
+    'no-same-package-barrel-import': noSamePackageBarrelImportRule,
+  },
+};
+
+export const sharedRestrictedSyntax = [
+  noEnumSyntax,
+  {
+    selector: "CallExpression[callee.property.name='then']",
+    message: 'Use async/await instead of .then().',
+  },
+  {
+    selector: 'CallExpression[callee.type=/^(ArrowFunctionExpression|FunctionExpression)$/]',
+    message:
+      'Do not use an IIFE. Declare a named function and call it, or compute the value with a function.',
+  },
+  {
+    selector:
+      ':matches(ReturnStatement, ArrowFunctionExpression) > Literal[value=""], ReturnStatement > ConditionalExpression > Literal[value=""]',
+    message:
+      'Do not return an empty string as a sentinel. Return undefined or null and let the caller decide.',
+  },
+  {
+    selector:
+      ':matches(CallExpression, NewExpression) > LogicalExpression[operator=/^(\\?\\?|\\|\\|)$/][right.type="Literal"][right.value=""]',
+    message:
+      "Do not pass `x ?? ''` as an argument. Narrow the value first or let the callee accept undefined.",
+  },
+  {
+    selector:
+      ':matches(CallExpression, NewExpression) > LogicalExpression[operator=/^(\\?\\?|\\|\\|)$/][right.type="Literal"][right.value=0]',
+    message:
+      'Do not pass `x ?? 0` as an argument. A missing value is not zero: narrow it first or let the callee accept undefined.',
+  },
+  {
+    selector:
+      'LogicalExpression[operator=/^(\\?\\?|\\|\\|)$/][right.type="Identifier"][right.name=/^(NaN|Infinity)$/], LogicalExpression[operator=/^(\\?\\?|\\|\\|)$/][right.type="MemberExpression"][right.object.name="Number"][right.property.name=/^(NaN|POSITIVE_INFINITY|NEGATIVE_INFINITY)$/], LogicalExpression[operator=/^(\\?\\?|\\|\\|)$/][right.type="UnaryExpression"][right.argument.name="Infinity"]',
+    message:
+      'Do not fall back to NaN or Infinity. A missing value is not a number: handle it, or let the callee accept undefined.',
+  },
+  {
+    selector:
+      ':matches(FunctionDeclaration, FunctionExpression, ArrowFunctionExpression)[returnType.typeAnnotation.type="TSTypePredicate"][returnType.typeAnnotation.asserts=false]',
+    message:
+      'Do not declare an explicit type predicate. Let TypeScript infer it, or validate with a schema.',
+  },
+];
+
+export const sharedRestrictedImportPaths = [
+  {
+    name: 'lodash.get',
+    message: 'Dotted-path reads erase types. Parse the value with a schema instead.',
+  },
+  {
+    name: 'lodash/get',
+    message: 'Dotted-path reads erase types. Parse the value with a schema instead.',
+  },
+];
+
+export default tseslint.config(
+  eslint.configs.recommended,
+  ...tseslint.configs.recommendedTypeChecked,
+  eslintConfigPrettier,
+  {
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    linterOptions: {
+      reportUnusedDisableDirectives: 'error',
+    },
+    plugins: {
+      stxonector: stxonectorPlugin,
+    },
+    rules: {
+      'stxonector/no-comments': 'error',
+      'prefer-const': ['error', { ignoreReadBeforeAssign: false }],
+      'no-nested-ternary': 'error',
+      'no-restricted-syntax': ['error', ...sharedRestrictedSyntax],
+      'no-restricted-imports': ['error', { paths: sharedRestrictedImportPaths }],
+      'object-shorthand': ['error', 'always', { avoidExplicitReturnArrows: true }],
+      'no-duplicate-imports': ['error'],
+      'no-fallthrough': 'error',
+      'default-case': 'error',
+      radix: 'error',
+      'no-console': 'error',
+      '@typescript-eslint/consistent-type-definitions': ['error', 'interface'],
+      '@typescript-eslint/array-type': 'error',
+      '@typescript-eslint/consistent-type-assertions': ['error', { assertionStyle: 'never' }],
+      '@typescript-eslint/no-non-null-assertion': 'error',
+      '@typescript-eslint/consistent-type-imports': [
+        'error',
+        { prefer: 'type-imports', fixStyle: 'inline-type-imports' },
+      ],
+      '@typescript-eslint/no-meaningless-void-operator': 'error',
+      '@typescript-eslint/no-unused-vars': ['error', { destructuredArrayIgnorePattern: '^_' }],
+      '@typescript-eslint/no-base-to-string': 'error',
+      '@typescript-eslint/no-empty-object-type': 'error',
+      '@typescript-eslint/no-unsafe-function-type': 'error',
+      '@typescript-eslint/no-wrapper-object-types': 'error',
+      '@typescript-eslint/no-unnecessary-type-arguments': 'error',
+      '@typescript-eslint/no-unnecessary-type-parameters': 'error',
+      '@typescript-eslint/unbound-method': 'off',
+      'no-empty-function': 'off',
+      '@typescript-eslint/no-empty-function': 'error',
+      '@typescript-eslint/no-inferrable-types': 'error',
+      '@typescript-eslint/no-deprecated': 'off', // Needs decision. We can't have deprecated usages block the integration since we disallow warnings, but we do want to somehow track them.
+      'func-style': ['error', 'declaration'],
+      'prefer-arrow-callback': ['error', { allowNamedFunctions: true }],
+
+      // eslint rules moved from extension
+      '@typescript-eslint/no-floating-promises': ['error'],
+      '@typescript-eslint/no-unnecessary-type-assertion': ['error'],
+      '@typescript-eslint/method-signature-style': ['error', 'method'],
+    },
+  }
+);

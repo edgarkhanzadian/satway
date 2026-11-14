@@ -1,0 +1,4 @@
+{
+  "extends": "@stxonector/tsconfig-config/tsconfig.base.json",
+  "include": ["src"]
+}

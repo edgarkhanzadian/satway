@@ -1,0 +1,33 @@
+{
+  "name": "@stxonector/eslint-config",
+  "description": "Shared eslint configuration",
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "format": "prettier . --write --ignore-path ../../.prettierignore",
+    "format:check": "prettier . --check --ignore-path ../../.prettierignore",
+    "test": "node --test rules/no-comments.test.js"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./react": "./react.js",
+    "./rules/*": "./rules/*.js"
+  },
+  "dependencies": {
+    "@eslint/js": "9.34.0",
+    "eslint-config-prettier": "9.1.0",
+    "eslint-plugin-react": "7.37.2",
+    "eslint-plugin-react-hooks": "5.0.0",
+    "typescript-eslint": "8.47.0"
+  },
+  "devDependencies": {
+    "@stxonector/prettier-config": "workspace:*",
+    "eslint": "9.34.0",
+    "prettier": "3.5.1"
+  },
+  "peerDependencies": {
+    "eslint": ">=9.16.0"
+  },
+  "prettier": "@stxonector/prettier-config",
+  "private": true
+}

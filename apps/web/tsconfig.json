@@ -1,0 +1,11 @@
+{
+  "extends": "@stxonector/tsconfig-config/tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "types": ["vite/client"],
+    "paths": {
+      "stxonector-styles/*": ["./stxonector-styles/*"]
+    }
+  },
+  "include": ["src", "test", "vite.config.ts", "panda.config.ts"]
+}

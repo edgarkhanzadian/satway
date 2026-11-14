@@ -1,0 +1,76 @@
+import { defineRecipe } from '@pandacss/dev';
+
+export const buttonRecipe = defineRecipe({
+  description:
+    'Buttons: the sand secondary, the orange primary action, page tabs on the band and wallet options',
+  className: 'button',
+  base: {
+    fontFamily: 'sans',
+    textStyle: 'caps',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 'control',
+    paddingBlock: 'space.06',
+    paddingInline: 'space.08',
+    borderRadius: 'md',
+    cursor: 'pointer',
+    color: 'ink',
+    backgroundColor: 'sand',
+    borderWidth: 'hairline',
+    borderStyle: 'solid',
+    borderColor: 'transparent',
+    '&:hover:not(:disabled)': { backgroundColor: 'sand.raised' },
+    _disabled: {
+      cursor: 'not-allowed',
+      color: 'muted',
+      borderColor: 'edge',
+      borderStyle: 'dashed',
+      backgroundColor: 'transparent',
+    },
+  },
+  variants: {
+    variant: {
+      secondary: {},
+      primary: {
+        backgroundColor: 'action',
+        color: 'action.ink',
+        '&:hover:not(:disabled)': { backgroundColor: 'action.raised' },
+      },
+      tab: {
+        fontFamily: 'mono',
+        paddingInline: 'space.07',
+        color: 'band.ink',
+        backgroundColor: 'transparent',
+        '&:hover:not(:disabled)': { backgroundColor: 'band.wash' },
+        _pressed: {
+          backgroundColor: 'band.chip',
+          '&:hover:not(:disabled)': { backgroundColor: 'band.chip' },
+        },
+        _focusVisible: { outlineColor: 'band.ink' },
+      },
+    },
+    layout: {
+      inline: {},
+      stacked: {
+        display: 'grid',
+        justifyContent: 'stretch',
+        justifyItems: 'start',
+        gap: 'space.01',
+        textAlign: 'left',
+        textTransform: 'none',
+        letterSpacing: 'body',
+        fontSize: 'md',
+        fontWeight: 'regular',
+        lineHeight: 'snug',
+        paddingBlock: 'space.06',
+        paddingInline: 'space.08',
+        backgroundColor: 'surface',
+        borderColor: 'hairline',
+        borderRadius: 'lg',
+        '&:hover:not(:disabled)': { backgroundColor: 'surface', borderColor: 'ink' },
+      },
+    },
+  },
+  defaultVariants: { variant: 'secondary', layout: 'inline' },
+});
