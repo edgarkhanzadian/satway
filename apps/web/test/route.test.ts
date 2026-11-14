@@ -82,6 +82,14 @@ describe('routeState during a deposit', () => {
       },
     ],
     [
+      'payout-ambiguous',
+      {
+        stops: ['done', 'done', 'current', 'pending'],
+        legs: ['done', 'done', 'active'],
+        current: 2,
+      },
+    ],
+    [
       'awaiting-notification',
       {
         stops: ['done', 'done', 'current', 'pending'],
@@ -129,7 +137,35 @@ describe('routeState during a deposit', () => {
         current: 2,
       },
     ],
+    [
+      'reclaimed',
+      {
+        stops: ['done', 'done', 'failed', 'pending'],
+        legs: ['done', 'done', 'pending'],
+        current: 2,
+      },
+    ],
   ];
+
+  it('has a case for every stage', () => {
+    const covered = new Set(cases.map(([stage]) => stage));
+    const all: Record<Stage, true> = {
+      'awaiting-funds': true,
+      swapping: true,
+      'awaiting-payout': true,
+      'payout-unconfirmed': true,
+      'payout-ambiguous': true,
+      'awaiting-notification': true,
+      minting: true,
+      done: true,
+      refunded: true,
+      'swap-failed': true,
+      'mint-failed': true,
+      reclaimable: true,
+      reclaimed: true,
+    };
+    expect([...covered].sort()).toEqual(Object.keys(all).sort());
+  });
 
   it.each(cases)('maps %s', (stage, expected) => {
     expect(during(stage)).toEqual(expected);

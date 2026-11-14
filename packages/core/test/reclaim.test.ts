@@ -56,6 +56,15 @@ describe('buildReclaimPsbt', () => {
     expect(fee).toBeLessThan(5_000n);
   });
 
+  it('refuses an output whose value cannot cover the fee, with a clear message', () => {
+    expect(() =>
+      buildReclaimPsbt({ ...input, payout: { ...input.payout, amountSats: 546 } })
+    ).toThrow(/cannot cover the reclaim fee of about 630 sats/);
+    expect(() =>
+      buildReclaimPsbt({ ...input, payout: { ...input.payout, amountSats: 2_000 } })
+    ).not.toThrow();
+  });
+
   it('rejects a non-positive fee rate and a bad recipient', () => {
     expect(() => buildReclaimPsbt({ ...input, feeRate: 0 })).toThrow();
     expect(() =>

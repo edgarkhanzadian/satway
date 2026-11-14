@@ -6,11 +6,18 @@ import {
   type OneClickSwapStatus,
   type OneClickToken,
   MAINNET_CONFIG as config,
+  planReclaim,
 } from '@stxonector/core';
 
 import { createBackend } from '../src/backend.js';
 import { type Backend, checkProgress, prepareDeposit, toBaseUnits } from '../src/flow.js';
-import { type Receipt, verifyReceipt } from '../src/receipt.js';
+import {
+  type Receipt,
+  loadReceipts,
+  receiptId,
+  rememberReceipt,
+  verifyReceipt,
+} from '../src/receipt.js';
 import { pickAccount } from '../src/wallet.js';
 
 const D = {
@@ -81,24 +88,93 @@ function bodyJson(init: RequestInit): unknown {
   return parsed;
 }
 
+interface Out {
+  txid: string;
+  vout: number;
+  value: number;
+  confirmed: boolean;
+  height?: number;
+  time?: number;
+  spent?: boolean;
+}
+
 interface World {
   minOut?: string;
   rewrite?: Partial<OneClickQuoteRequest>;
   swap?: OneClickSwapStatus;
+  hashes?: string[];
   payoutVout?: number | null;
+  prior?: Out[];
+  outputs?: Out[];
+  fillers?: number;
   mint?: string | null;
+  mints?: Record<string, string>;
   signerKey?: string;
   txHex?: string;
   notifyStatus?: number;
+  failPostFor?: string;
+}
+
+const OTHER_SPK = '0014' + '11'.repeat(20);
+const AFTER = Date.parse(NOW.toISOString()) / 1000 + 3_600;
+
+function payoutOut(vout: number): Out {
+  return {
+    txid: CHAIN[vout]?.txid ?? D.txid,
+    vout,
+    value: 35_500,
+    confirmed: true,
+    height: TIP - 2,
+    time: AFTER,
+  };
+}
+
+function txJson(txid: string, outs: Out[]) {
+  const first = outs[0];
+  const width = Math.max(...outs.map(o => o.vout)) + 1;
+  const vout = Array.from({ length: width }, (_, i) => {
+    const o = outs.find(x => x.vout === i);
+    return o
+      ? { scriptpubkey: D.scriptPubKey, value: o.value }
+      : { scriptpubkey: OTHER_SPK, value: 1 };
+  });
+  const status = first?.confirmed
+    ? { confirmed: true, block_height: first.height, block_time: first.time }
+    : { confirmed: false };
+  return { txid, vout, status };
 }
 
 function world(w: World = {}) {
   const posts: { url: string; body: unknown }[] = [];
   const quotes: OneClickQuoteRequest[] = [];
   const registered: string[] = [];
-  let mint = w.mint ?? null;
+  const urls: string[] = [];
+  const emily = new Map<string, string>(Object.entries(w.mints ?? {}));
+  const payout = w.payoutVout == null ? null : payoutOut(w.payoutVout);
+  if (payout && w.mint) emily.set(`${payout.txid}:${payout.vout}`, w.mint);
+  const state = { arrived: false, tip: TIP };
+  const arriving = [...(w.outputs ?? []), ...(payout ? [payout] : [])];
+
+  function visible(): Out[] {
+    return [...(state.arrived ? arriving : []), ...(w.prior ?? [])];
+  }
+
+  function txs() {
+    const byTx = new Map<string, Out[]>();
+    for (const o of visible()) byTx.set(o.txid, [...(byTx.get(o.txid) ?? []), o]);
+    const real = [...byTx].map(([txid, outs]) => txJson(txid, outs));
+    const fillers = state.arrived
+      ? Array.from({ length: w.fillers ?? 0 }, (_, i) => ({
+          txid: (i + 1).toString(16).padStart(64, 'f'),
+          vout: [{ scriptpubkey: OTHER_SPK, value: 1 }],
+          status: { confirmed: true, block_height: TIP - 1, block_time: AFTER },
+        }))
+      : [];
+    return [...fillers, ...real];
+  }
 
   function fetchFn(url: string, init?: RequestInit): Promise<Response> {
+    urls.push(url);
     return later(() => route(url, init));
   }
 
@@ -116,20 +192,37 @@ function world(w: World = {}) {
         ],
       });
     }
-    if (url.endsWith('/blocks/tip/height')) return new Response(String(TIP));
+    if (url.endsWith('/blocks/tip/height')) return new Response(String(state.tip));
     if (url.includes('/outspend/'))
       return jsonRes({ spent: true, status: { confirmed: true, block_height: TIP - 1 } });
     if (url.endsWith('/limits'))
       return jsonRes({ pegCap: null, perDepositMinimum: 10_000, perDepositCap: null });
-    if (url.includes('/address/')) {
-      if (w.payoutVout == null) return jsonRes([]);
-      const other = { scriptpubkey: '0014' + '11'.repeat(20), value: 1 };
-      const vout = [
-        ...Array.from({ length: w.payoutVout }, () => other),
-        { scriptpubkey: D.scriptPubKey, value: 35_500 },
-      ];
-      const txid = CHAIN[w.payoutVout]?.txid ?? D.txid;
-      return jsonRes([{ txid, vout, status: { confirmed: true, block_height: TIP - 2 } }]);
+    const addr = `https://mempool.space/api/address/${D.address}`;
+    if (url === `${addr}/utxo`) {
+      return jsonRes(
+        visible()
+          .filter(o => !o.spent)
+          .map(o => ({
+            txid: o.txid,
+            vout: o.vout,
+            value: o.value,
+            status: o.confirmed
+              ? { confirmed: true, block_height: o.height, block_time: o.time }
+              : { confirmed: false },
+          }))
+      );
+    }
+    if (url === `${addr}/txs/mempool`) return jsonRes(txs().filter(t => !t.status.confirmed));
+    if (url.startsWith(`${addr}/txs/chain`)) {
+      const chain = txs().filter(t => t.status.confirmed);
+      const last = url.slice(`${addr}/txs/chain`.length).replace(/^\//, '');
+      const start = last === '' ? 0 : chain.findIndex(t => t.txid === last) + 1;
+      return jsonRes(chain.slice(start, start + 25));
+    }
+    const txMatch = /\/tx\/([0-9a-f]{64})$/.exec(url);
+    if (txMatch) {
+      const tx = txs().find(t => t.txid === txMatch[1]);
+      return tx ? jsonRes(tx) : new Response('Transaction not found', { status: 404 });
     }
     if (url.includes('/tx/') && url.endsWith('/hex')) {
       const known = Object.values(CHAIN).find(t => url.endsWith(`/tx/${t.txid}/hex`));
@@ -137,13 +230,25 @@ function world(w: World = {}) {
       return new Response(w.txHex ?? known.hex);
     }
     if (url.endsWith('/deposit') && init?.method === 'POST') {
-      posts.push({ url, body: bodyJson(init) });
+      const body = bodyJson(init);
+      posts.push({ url, body });
       if (w.notifyStatus) return jsonRes({ message: 'invalid transaction hex' }, w.notifyStatus);
-      mint = 'pending';
+      const key =
+        typeof body === 'object' &&
+        body !== null &&
+        'bitcoinTxid' in body &&
+        'bitcoinTxOutputIndex' in body
+          ? `${String(body.bitcoinTxid)}:${String(body.bitcoinTxOutputIndex)}`
+          : '';
+      if (key === w.failPostFor) return jsonRes({ message: 'Emily is down' }, 503);
+      emily.set(key, 'pending');
       return jsonRes(emilyDeposit('pending'), 201);
     }
-    if (url.includes('/deposit/'))
-      return mint ? jsonRes(emilyDeposit(mint)) : jsonRes({ message: 'nope' }, 404);
+    const dep = /\/deposit\/([0-9a-f]{64})\/(\d+)$/.exec(url);
+    if (dep) {
+      const status = emily.get(`${dep[1]}:${dep[2]}`);
+      return status ? jsonRes(emilyDeposit(status)) : jsonRes({ message: 'nope' }, 404);
+    }
     throw new Error(`unexpected url ${url}`);
   }
 
@@ -158,7 +263,10 @@ function world(w: World = {}) {
         return {
           status: w.swap,
           updatedAt: '',
-          swapDetails: { originChainTxHashes: [], destinationChainTxHashes: [] },
+          swapDetails: {
+            originChainTxHashes: [],
+            destinationChainTxHashes: (w.hashes ?? []).map(hash => ({ hash, explorerUrl: '' })),
+          },
         };
       });
     },
@@ -192,13 +300,21 @@ function world(w: World = {}) {
       },
     };
   }
-  return { fetchFn, backend, posts, quotes, registered };
+  function arrive() {
+    state.arrived = true;
+  }
+  function setTip(tip: number) {
+    state.tip = tip;
+  }
+  return { fetchFn, backend, posts, quotes, registered, urls, emily, arrive, setTip };
 }
 
 async function receiptFor(w: ReturnType<typeof world>): Promise<Receipt> {
-  return (
+  const receipt = (
     await prepareDeposit(config, w.backend, input, { dry: false, fetchFn: w.fetchFn, now: NOW })
   ).receipt;
+  w.arrive();
+  return receipt;
 }
 
 describe('toBaseUnits', () => {
@@ -369,6 +485,299 @@ describe('checkProgress', () => {
     const w = world({ swap: 'REFUNDED' });
     const snap = await checkProgress(config, w.backend, await receiptFor(w), w.fetchFn);
     expect(snap.progress).toMatchObject({ stage: 'refunded', terminal: true });
+  });
+});
+
+const REAL_OUT = `${D.txid}:0`;
+const OTHER_TXID = CHAIN[2]?.txid ?? '';
+const OTHER_OUT = `${OTHER_TXID}:2`;
+const OLD_TXID = 'cc'.repeat(32);
+const BEFORE = Date.parse(NOW.toISOString()) / 1000 - 86_400;
+
+function postedOutpoints(w: ReturnType<typeof world>): string[] {
+  return w.posts.map(p => {
+    const b = p.body;
+    return typeof b === 'object' && b !== null && 'bitcoinTxid' in b && 'bitcoinTxOutputIndex' in b
+      ? `${String(b.bitcoinTxid)}:${String(b.bitcoinTxOutputIndex)}`
+      : 'unknown';
+  });
+}
+
+describe('checkProgress: which output is the payout', () => {
+  it('a later unconfirmed 546-sat output does not hijack status or registration', async () => {
+    const w = world({
+      swap: 'SUCCESS',
+      payoutVout: 0,
+      outputs: [{ txid: OTHER_TXID, vout: 2, value: 546, confirmed: false }],
+    });
+    const snap = await checkProgress(config, w.backend, await receiptFor(w), w.fetchFn);
+    expect(snap.payout).toMatchObject({ txid: D.txid, vout: 0, amountSats: 35_500 });
+    expect(snap.progress.stage).toBe('minting');
+    expect(postedOutpoints(w)).toEqual([REAL_OUT]);
+    expect(snap.belowMinimum).toMatchObject([{ txid: OTHER_TXID, amountSats: 546 }]);
+  });
+
+  it('dust before the payout leaves the deposit waiting, then the real payout is picked', async () => {
+    const dust: Out = { txid: OTHER_TXID, vout: 2, value: 546, confirmed: false };
+    const before = world({ swap: 'PROCESSING', outputs: [dust] });
+    const receipt = await receiptFor(before);
+    const waiting = await checkProgress(config, before.backend, receipt, before.fetchFn);
+    expect(waiting.payout).toBeNull();
+    expect(waiting.progress).toMatchObject({ stage: 'swapping', terminal: false });
+    expect(before.posts).toHaveLength(0);
+
+    const after = world({ swap: 'SUCCESS', hashes: [D.txid], payoutVout: 0, outputs: [dust] });
+    after.arrive();
+    const paid = await checkProgress(config, after.backend, receipt, after.fetchFn);
+    expect(paid.payout).toMatchObject({ txid: D.txid, vout: 0 });
+    expect(paid.basis).toBe('hash');
+    expect(postedOutpoints(after)).toEqual([REAL_OUT]);
+  });
+
+  it('a second deposit on an address whose first payout was minted waits for its own payout', async () => {
+    const old: Out = {
+      txid: OLD_TXID,
+      vout: 0,
+      value: 50_000,
+      confirmed: true,
+      height: TIP - 5_000,
+      time: BEFORE,
+    };
+    const w = world({
+      swap: 'PENDING_DEPOSIT',
+      prior: [old],
+      mints: { [`${OLD_TXID}:0`]: 'confirmed' },
+    });
+    const receipt = await receiptFor(w);
+    expect(receipt.priorOutpoints).toEqual([`${OLD_TXID}:0`]);
+    const snap = await checkProgress(config, w.backend, receipt, w.fetchFn);
+    expect(snap.progress).toMatchObject({ stage: 'awaiting-funds', terminal: false });
+    expect(snap.payout).toBeNull();
+    expect(w.posts).toHaveLength(0);
+  });
+
+  it('an old receipt without a snapshot still ignores a payout confirmed long before it', async () => {
+    const old: Out = {
+      txid: OLD_TXID,
+      vout: 0,
+      value: 50_000,
+      confirmed: true,
+      height: TIP - 5_000,
+      time: BEFORE,
+    };
+    const w = world({
+      swap: 'PENDING_DEPOSIT',
+      prior: [old],
+      mints: { [`${OLD_TXID}:0`]: 'confirmed' },
+    });
+    const legacy = structuredClone(await receiptFor(w));
+    delete legacy.priorOutpoints;
+    delete legacy.priorTruncated;
+    const parsed = verifyReceipt(JSON.parse(JSON.stringify(legacy)));
+    expect(parsed.priorOutpoints).toBeUndefined();
+    const snap = await checkProgress(config, w.backend, parsed, w.fetchFn);
+    expect(snap.progress.stage).toBe('awaiting-funds');
+  });
+
+  it('the 1Click hash beats an attacker output in the amount range', async () => {
+    const w = world({
+      swap: 'SUCCESS',
+      hashes: [`0x${D.txid.toUpperCase()}`],
+      payoutVout: 0,
+      outputs: [{ txid: OTHER_TXID, vout: 2, value: 36_000, confirmed: false }],
+    });
+    const snap = await checkProgress(config, w.backend, await receiptFor(w), w.fetchFn);
+    expect(snap.payout).toMatchObject({ txid: D.txid });
+    expect(snap.basis).toBe('hash');
+    expect(snap.otherOutputs).toMatchObject([{ txid: OTHER_TXID, amountSats: 36_000 }]);
+    expect(postedOutpoints(w).sort()).toEqual([REAL_OUT, OTHER_OUT].sort());
+  });
+
+  it('without a hash, one candidate is selected by amount', async () => {
+    const w = world({ swap: 'SUCCESS', payoutVout: 0 });
+    const snap = await checkProgress(config, w.backend, await receiptFor(w), w.fetchFn);
+    expect(snap.basis).toBe('amount');
+    expect(snap.payout).toMatchObject({ txid: D.txid });
+  });
+
+  it('without a hash, two candidates are reported as ambiguous and both are registered', async () => {
+    const w = world({
+      swap: 'SUCCESS',
+      payoutVout: 0,
+      outputs: [{ txid: OTHER_TXID, vout: 2, value: 36_000, confirmed: false }],
+    });
+    const snap = await checkProgress(config, w.backend, await receiptFor(w), w.fetchFn);
+    expect(snap.payout).toBeNull();
+    expect(snap.progress.stage).toBe('payout-ambiguous');
+    expect(snap.candidates.map(c => c.txid).sort()).toEqual([D.txid, OTHER_TXID].sort());
+    expect(postedOutpoints(w).sort()).toEqual([REAL_OUT, OTHER_OUT].sort());
+  });
+
+  it('with 1Click unavailable, the payout is still found by amount', async () => {
+    const w = world({ payoutVout: 0 });
+    const snap = await checkProgress(config, w.backend, await receiptFor(w), w.fetchFn);
+    expect(snap.swap).toBeNull();
+    expect(snap.basis).toBe('amount');
+    expect(snap.progress.stage).toBe('minting');
+  });
+
+  it('one failed registration does not stop the next, and the error names the outpoint', async () => {
+    const w = world({
+      swap: 'SUCCESS',
+      payoutVout: 0,
+      outputs: [{ txid: OTHER_TXID, vout: 2, value: 36_000, confirmed: false }],
+      failPostFor: OTHER_OUT,
+    });
+    const snap = await checkProgress(config, w.backend, await receiptFor(w), w.fetchFn);
+    expect(postedOutpoints(w)).toHaveLength(2);
+    expect(snap.registrationErrors.map(e => e.outpoint)).toEqual([OTHER_OUT]);
+    expect(snap.registrationErrors[0]?.message).toMatch(/HTTP 503/);
+    expect(w.emily.get(REAL_OUT)).toBe('pending');
+  });
+});
+
+describe('checkProgress: busy addresses', () => {
+  it('finds the payout behind 60 newer transactions by paging history', async () => {
+    const w = world({ payoutVout: 0, fillers: 60 });
+    const snap = await checkProgress(config, w.backend, await receiptFor(w), w.fetchFn);
+    expect(snap.payout).toMatchObject({ txid: D.txid });
+    expect(snap.truncated).toBe(false);
+  });
+
+  it('reads the payout directly when 1Click reports its hash, without paging', async () => {
+    const w = world({ swap: 'SUCCESS', hashes: [D.txid], payoutVout: 0, fillers: 60 });
+    const receipt = await receiptFor(w);
+    const start = w.urls.length;
+    const snap = await checkProgress(config, w.backend, receipt, w.fetchFn);
+    const used = w.urls.slice(start);
+    expect(snap.payout).toMatchObject({ txid: D.txid });
+    expect(used.some(u => u.includes('/txs/'))).toBe(false);
+    expect(used.filter(u => !u.endsWith('/deposit'))).toHaveLength(6);
+  });
+
+  it('surfaces a truncated history instead of pretending it is complete', async () => {
+    const w = world({ payoutVout: 0, fillers: 300 });
+    const snap = await checkProgress(config, w.backend, await receiptFor(w), w.fetchFn);
+    expect(snap.truncated).toBe(true);
+  });
+});
+
+describe('checkProgress: timelock', () => {
+  it.each(['pending', 'accepted', 'rbf'])(
+    'Emily %s with the timelock passed and the output unspent -> reclaimable',
+    async mint => {
+      const w = world({ swap: 'SUCCESS', payoutVout: 0, mint });
+      const receipt = await receiptFor(w);
+      w.setTip(TIP + 2_000);
+      const snap = await checkProgress(config, w.backend, receipt, w.fetchFn);
+      expect(snap.progress.stage).toBe('reclaimable');
+      expect(w.posts).toHaveLength(0);
+    }
+  );
+
+  it('a confirmed mint is done', async () => {
+    const w = world({ swap: 'SUCCESS', payoutVout: 0, mint: 'confirmed' });
+    const receipt = await receiptFor(w);
+    w.setTip(TIP + 2_000);
+    const snap = await checkProgress(config, w.backend, receipt, w.fetchFn);
+    expect(snap.progress.stage).toBe('done');
+  });
+
+  it('a payout the signers already spent is not reclaimable', async () => {
+    const spent: Out = { ...payoutOut(0), spent: true };
+    const w = world({
+      swap: 'SUCCESS',
+      hashes: [D.txid],
+      outputs: [spent],
+      mints: { [REAL_OUT]: 'accepted' },
+    });
+    const receipt = await receiptFor(w);
+    w.setTip(TIP + 2_000);
+    const snap = await checkProgress(config, w.backend, receipt, w.fetchFn);
+    expect(snap.payout?.spent).toBe(true);
+    expect(snap.progress.stage).toBe('minting');
+  });
+});
+
+describe('reclaim target from a snapshot', () => {
+  function planOf(snap: Awaited<ReturnType<typeof checkProgress>>) {
+    return planReclaim({
+      outputs: snap.outputs,
+      selected: snap.payout,
+      tipHeight: snap.tipHeight,
+      reclaimLockBlocks: config.reclaimLockBlocks,
+    });
+  }
+  const dust: Out = {
+    txid: OTHER_TXID,
+    vout: 2,
+    value: 2_000,
+    confirmed: true,
+    height: TIP - 2,
+    time: AFTER,
+  };
+
+  it('targets the real payout, not a 2,000-sat output, once the timelock has passed', async () => {
+    const w = world({ swap: 'SUCCESS', hashes: [D.txid], payoutVout: 0, outputs: [dust] });
+    const receipt = await receiptFor(w);
+    w.setTip(TIP + 2_000);
+    const snap = await checkProgress(config, w.backend, receipt, w.fetchFn);
+    expect(snap.progress.stage).toBe('reclaimable');
+    const plan = planOf(snap);
+    expect(plan.target?.output).toMatchObject({ txid: D.txid, vout: 0 });
+    expect(plan.options.map(o => o.output.amountSats)).toEqual([35_500, 2_000]);
+  });
+
+  it('after the payout is reclaimed the remaining output is still offered, never by default', async () => {
+    const w = world({
+      swap: 'SUCCESS',
+      hashes: [D.txid],
+      outputs: [{ ...payoutOut(0), spent: true }, dust],
+    });
+    const receipt = await receiptFor(w);
+    w.setTip(TIP + 2_000);
+    const snap = await checkProgress(config, w.backend, receipt, w.fetchFn);
+    expect(snap.progress.stage).toBe('reclaimed');
+    const plan = planOf(snap);
+    expect(plan.target).toBeNull();
+    expect(plan.nothingLeft).toBe(false);
+    expect(plan.options.map(o => o.output.txid)).toEqual([OTHER_TXID]);
+  });
+
+  it('says nothing is left only when no output is unspent', async () => {
+    const w = world({
+      swap: 'SUCCESS',
+      hashes: [D.txid],
+      outputs: [{ ...payoutOut(0), spent: true }],
+    });
+    const receipt = await receiptFor(w);
+    const snap = await checkProgress(config, w.backend, receipt, w.fetchFn);
+    expect(planOf(snap).nothingLeft).toBe(true);
+  });
+});
+
+describe('rememberReceipt', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps two deposits to the same Bitcoin address apart', async () => {
+    const data = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => data.get(k) ?? null,
+      setItem: (k: string, v: string) => void data.set(k, v),
+    });
+    const first = await receiptFor(world());
+    const second = structuredClone(first);
+    second.createdAt = '2026-11-15T12:00:00.000Z';
+    second.quoteResponse.quote.depositAddress = '0x' + '77'.repeat(20);
+    rememberReceipt(first);
+    rememberReceipt(second);
+    rememberReceipt(first);
+    const stored = loadReceipts();
+    expect(stored).toHaveLength(2);
+    expect(new Set(stored.map(receiptId)).size).toBe(2);
+    expect(stored.every(r => r.depositAddress === D.address)).toBe(true);
   });
 });
 

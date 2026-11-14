@@ -13,6 +13,7 @@ import {
   checkProgress,
   prepareDeposit,
 } from './flow.js';
+import { PayoutDetails, PayoutNotices } from './payout-notes.js';
 import { type Receipt, downloadReceipt, rememberReceipt } from './receipt.js';
 import type { RouteUpdate } from './route.js';
 import type { SolanaPayOffer } from './solana-send.js';
@@ -174,7 +175,11 @@ export function Deposit(props: {
       rememberReceipt(prepared.receipt);
       downloadReceipt(prepared.receipt);
       await backend
-        .register(prepared.receipt.depositScript, prepared.receipt.reclaimScript)
+        .register(
+          prepared.receipt.depositScript,
+          prepared.receipt.reclaimScript,
+          prepared.receipt.quoteResponse.quote.depositAddress
+        )
         .catch(() => 'left-to-the-open-tab');
       setPreview(prepared);
       setActive(prepared.receipt);
@@ -490,6 +495,7 @@ function Tracking(props: {
         {progress?.message ?? 'Checking…'}
       </p>
       {problem && <p className={notice()}>{problem}</p>}
+      {snapshot && <PayoutNotices snapshot={snapshot} />}
 
       <dl className={details()}>
         <dt>sBTC recipient</dt>
@@ -500,15 +506,7 @@ function Tracking(props: {
         <dd>
           <code>{receipt.depositAddress}</code>
         </dd>
-        {snapshot?.payout && (
-          <>
-            <dt>Bitcoin payout</dt>
-            <dd>
-              {sats(snapshot.payout.amountSats)} in <code>{snapshot.payout.txid}</code>, output{' '}
-              {snapshot.payout.vout}
-            </dd>
-          </>
-        )}
+        {snapshot && <PayoutDetails snapshot={snapshot} />}
         {progress?.blocksUntilReclaim != null && progress.stage !== 'done' && (
           <>
             <dt>Reclaim available</dt>

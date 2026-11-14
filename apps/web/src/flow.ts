@@ -1,4 +1,5 @@
 import {
+  type AddressOutput,
   type EmilyDepositStatus,
   type FetchLike,
   type NetworkConfig,
@@ -7,22 +8,24 @@ import {
   type OneClickStatusResponse,
   type OneClickSwapStatus,
   type OneClickToken,
-  type Payout,
+  type OutpointSnapshot,
+  type PayoutBasis,
   type Progress,
+  type WatchedDepositContext,
+  applyRegistrations,
   assertQuoteMatchesRequest,
   buildDepositAddress,
   buildQuoteRequest,
   checkDepositAmount,
-  deriveProgress,
   describeAmountProblem,
   errorMessage,
-  fetchDeposit,
   fetchLimits,
-  fetchTipHeight,
   fetchVerifiedSigners,
-  findPayouts,
-  notifyDeposit,
+  observeDeposit,
+  outpointOf,
   providerFeesOf,
+  registerOutputs,
+  snapshotOutpoints,
 } from '@stxonector/core';
 
 import type { Receipt } from './receipt.js';
@@ -31,7 +34,11 @@ export interface Backend {
   tokens(): Promise<OneClickToken[]>;
   quote(request: OneClickQuoteRequest): Promise<OneClickQuoteResponse>;
   status(depositAddress: string, depositMemo?: string): Promise<OneClickStatusResponse>;
-  register(depositScript: string, reclaimScript: string): Promise<{ address: string }>;
+  register(
+    depositScript: string,
+    reclaimScript: string,
+    swapDepositAddress?: string
+  ): Promise<{ address: string }>;
 }
 
 export interface DepositInput {
@@ -63,6 +70,22 @@ export function toBaseUnits(amount: string, decimals: number): string {
   return units.toString();
 }
 
+async function snapshotPrior(
+  config: NetworkConfig,
+  address: string,
+  scriptPubKey: string,
+  fetchFn: FetchLike | undefined
+): Promise<OutpointSnapshot> {
+  try {
+    return await snapshotOutpoints(config.btcApiUrl, address, scriptPubKey, { fetchFn });
+  } catch (err) {
+    throw new Error(
+      `Could not read your Bitcoin deposit address, so the deposit was not started: ${errorMessage(err) ?? String(err)}`,
+      { cause: err }
+    );
+  }
+}
+
 export async function prepareDeposit(
   config: NetworkConfig,
   backend: Backend,
@@ -91,7 +114,10 @@ export async function prepareDeposit(
     dry: options.dry,
     now: options.now,
   });
-  const response = await backend.quote(request);
+  const [response, prior] = await Promise.all([
+    backend.quote(request),
+    options.dry ? null : snapshotPrior(config, deposit.address, deposit.scriptPubKey, fetchFn),
+  ]);
   assertQuoteMatchesRequest(request, response);
 
   const minimumSats = Number(response.quote.minAmountOut);
@@ -126,6 +152,7 @@ export async function prepareDeposit(
     },
     refundTo: input.refundTo.trim(),
     quoteResponse: response,
+    ...(prior ? { priorOutpoints: prior.outpoints, priorTruncated: prior.truncated } : {}),
   };
 
   return {
@@ -141,9 +168,33 @@ export async function prepareDeposit(
 export interface Snapshot {
   progress: Progress;
   swap: OneClickSwapStatus | null;
-  payout: Payout | null;
+  payout: AddressOutput | null;
+  basis: PayoutBasis | null;
   mint: EmilyDepositStatus | null;
+  candidates: AddressOutput[];
+  otherOutputs: AddressOutput[];
+  belowMinimum: AddressOutput[];
+  outputs: AddressOutput[];
+  mints: ReadonlyMap<string, EmilyDepositStatus | null>;
+  tipHeight: number | null;
+  truncated: boolean;
   registrationError: string | null;
+  registrationErrors: { outpoint: string; message: string }[];
+}
+
+export function depositContextOf(receipt: Receipt): WatchedDepositContext {
+  return {
+    createdAt: receipt.createdAt,
+    quoteTimestamp: receipt.quoteResponse.timestamp,
+    priorOutpoints: receipt.priorOutpoints,
+    priorTruncated: receipt.priorTruncated,
+    depositAddress: receipt.depositAddress,
+    depositScriptPubKey: receipt.depositScriptPubKey,
+    depositScript: receipt.depositScript,
+    reclaimScript: receipt.reclaimScript,
+    reclaimLockBlocks: receipt.reclaimLockBlocks,
+    minAmountOut: receipt.quoteResponse.quote.minAmountOut,
+  };
 }
 
 export async function checkProgress(
@@ -152,68 +203,39 @@ export async function checkProgress(
   receipt: Receipt,
   fetchFn?: FetchLike
 ): Promise<Snapshot> {
-  let swap: OneClickSwapStatus | null = null;
+  let status: OneClickStatusResponse | null = null;
   const swapAddress = receipt.quoteResponse.quote.depositAddress;
   if (swapAddress) {
     try {
-      swap = (await backend.status(swapAddress, receipt.quoteResponse.quote.depositMemo)).status;
+      status = await backend.status(swapAddress, receipt.quoteResponse.quote.depositMemo);
     } catch {
-      swap = null;
+      status = null;
     }
   }
 
-  const payouts = await findPayouts(
-    config.btcApiUrl,
-    receipt.depositAddress,
-    receipt.depositScriptPubKey,
-    fetchFn
+  const observed = await observeDeposit(config, depositContextOf(receipt), status, { fetchFn });
+  const results = await registerOutputs(config, receipt, observed.toRegister, fetchFn);
+  const o = applyRegistrations(observed, results, receipt.reclaimLockBlocks);
+  const { selection } = o;
+  const payout = selection.payout;
+  const candidateKeys = new Set(selection.candidates.map(outpointOf));
+  const registrationErrors = results.flatMap(r =>
+    r.error === null ? [] : [{ outpoint: r.outpoint, message: r.error }]
   );
-  const payout = payouts[0] ?? null;
-
-  let mint: EmilyDepositStatus | null = null;
-  if (payout) {
-    mint =
-      (await fetchDeposit(config.sbtcApiUrl, payout.txid, payout.vout, fetchFn))?.status ?? null;
-  }
-  let tipHeight: number | null = null;
-  try {
-    tipHeight = await fetchTipHeight(config.btcApiUrl, fetchFn);
-  } catch {
-    tipHeight = null;
-  }
-
-  let progress = deriveProgress({
-    swap,
+  return {
+    progress: o.progress,
+    swap: o.swap,
     payout,
-    mint,
-    tipHeight,
-    reclaimLockBlocks: receipt.reclaimLockBlocks,
-  });
-  let registrationError: string | null = null;
-  if (progress.needsNotification && payout) {
-    const registered = await notifyDeposit(
-      config,
-      {
-        bitcoinTxid: payout.txid,
-        bitcoinTxOutputIndex: payout.vout,
-        depositScript: receipt.depositScript,
-        reclaimScript: receipt.reclaimScript,
-      },
-      fetchFn
-    ).catch((err: unknown) => {
-      registrationError = errorMessage(err) ?? String(err);
-      return null;
-    });
-    if (registered) {
-      mint = registered.status;
-      progress = deriveProgress({
-        swap,
-        payout,
-        mint,
-        tipHeight,
-        reclaimLockBlocks: receipt.reclaimLockBlocks,
-      });
-    }
-  }
-  return { progress, swap, payout, mint, registrationError };
+    basis: selection.basis,
+    mint: payout ? (o.mints.get(outpointOf(payout)) ?? null) : null,
+    candidates: selection.ambiguous ? selection.candidates : [],
+    otherOutputs: selection.others.filter(x => !candidateKeys.has(outpointOf(x))),
+    belowMinimum: selection.belowMinimum,
+    outputs: o.outputs,
+    mints: o.mints,
+    tipHeight: o.tipHeight,
+    truncated: o.truncated,
+    registrationError: registrationErrors.map(e => e.message).join(' ') || null,
+    registrationErrors,
+  };
 }

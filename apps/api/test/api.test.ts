@@ -230,9 +230,13 @@ describe('HTTP handler', () => {
 
   it('registers a deposit and returns the derived address', async () => {
     const e = env();
+    function emptyAddress(url: string): Promise<Response> {
+      return Promise.resolve(jsonRes(url.includes('/address/') ? [] : {}));
+    }
     const res = await handle(
       post('/deposits', { depositScript: D.depositScript, reclaimScript: D.reclaimScript }),
-      e
+      e,
+      emptyAddress
     );
     expect(res.status).toBe(201);
     expect(await res.json()).toEqual({ address: D.address });
@@ -244,14 +248,168 @@ describe('HTTP handler', () => {
   });
 });
 
+const BTC = 'https://btc.example';
+const endpoints = {
+  btcApiUrl: BTC,
+  sbtcApiUrl: 'https://emily.example',
+  reclaimLockBlocks: 950,
+};
+const OTHER_SPK = '0014' + '11'.repeat(20);
+const TIP = 976_000;
+const NOW_S = Date.parse(NOW.toISOString()) / 1000;
+
+interface Tx {
+  txid: string;
+  vout: { scriptpubkey: string; value: number }[];
+  status: { confirmed: boolean; block_height?: number; block_time?: number };
+}
+
+function payoutTx(
+  vout: number,
+  opts: { confirmed?: boolean; value?: number; txid?: string } = {}
+): Tx {
+  const confirmed = opts.confirmed ?? true;
+  const other = { scriptpubkey: OTHER_SPK, value: 1 };
+  return {
+    txid: opts.txid ?? CHAIN[vout]?.txid ?? D.txid,
+    vout: [
+      ...Array.from({ length: vout }, () => other),
+      { scriptpubkey: D.scriptPubKey, value: opts.value ?? 35_000 },
+    ],
+    status: confirmed
+      ? { confirmed, block_height: TIP - 2, block_time: NOW_S + 3_600 }
+      : { confirmed },
+  };
+}
+
+function oldTx(): Tx {
+  return {
+    txid: 'cc'.repeat(32),
+    vout: [{ scriptpubkey: D.scriptPubKey, value: 50_000 }],
+    status: { confirmed: true, block_height: TIP - 5_000, block_time: NOW_S - 86_400 },
+  };
+}
+
+function world(opts: {
+  txs?: Tx[];
+  prior?: Tx[];
+  known?: boolean;
+  knownOutpoints?: string[];
+  notifyStatus?: number;
+  failPostFor?: string;
+  txHex?: string;
+  limitsDown?: boolean;
+  tooManyUtxos?: boolean;
+}) {
+  const calls: { url: string; body?: unknown }[] = [];
+  const emily = new Set(opts.knownOutpoints ?? []);
+  const state = { arrived: false, txs: [...(opts.txs ?? [])] };
+  function visible(): Tx[] {
+    return [...(state.arrived ? state.txs : []), ...(opts.prior ?? [])];
+  }
+  function respond(url: string, init?: RequestInit): Response {
+    calls.push({ url, body: init?.body ? bodyJson(init) : undefined });
+    const addr = `${BTC}/address/${D.address}`;
+    if (url === `${addr}/utxo`) {
+      if (opts.tooManyUtxos)
+        return new Response('Too many unspent transaction outputs (>500).', { status: 400 });
+      return jsonRes(
+        visible().flatMap(tx =>
+          tx.vout.flatMap((o, vout) =>
+            o.scriptpubkey === D.scriptPubKey
+              ? [{ txid: tx.txid, vout, value: o.value, status: tx.status }]
+              : []
+          )
+        )
+      );
+    }
+    if (url === `${addr}/txs/mempool`) return jsonRes(visible().filter(t => !t.status.confirmed));
+    if (url.startsWith(`${addr}/txs/chain`))
+      return jsonRes(visible().filter(t => t.status.confirmed));
+    if (url === `${BTC}/blocks/tip/height`) return new Response(String(TIP));
+    if (url.startsWith(`${BTC}/tx/`)) {
+      const known = Object.values(CHAIN).find(t => url.endsWith(`/tx/${t.txid}/hex`));
+      if (!known) return new Response('Transaction not found', { status: 404 });
+      return new Response(opts.txHex ?? known.hex);
+    }
+    if (url === 'https://emily.example/limits') {
+      if (opts.limitsDown) return jsonRes({ message: 'down' }, 503);
+      return jsonRes({ pegCap: null, perDepositMinimum: 10_000, perDepositCap: null });
+    }
+    if (init?.method === 'POST') {
+      const body = bodyJson(init);
+      const key =
+        typeof body === 'object' &&
+        body !== null &&
+        'bitcoinTxid' in body &&
+        'bitcoinTxOutputIndex' in body
+          ? `${String(body.bitcoinTxid)}:${String(body.bitcoinTxOutputIndex)}`
+          : 'unknown';
+      if (key === opts.failPostFor) return jsonRes({ message: 'Emily is down' }, 500);
+      if (!opts.notifyStatus || opts.notifyStatus < 300) emily.add(key);
+      return jsonRes(emilyDeposit('pending'), opts.notifyStatus ?? 201);
+    }
+    const dep = /\/deposit\/([0-9a-f]{64})\/(\d+)$/.exec(url);
+    if (dep && (opts.known || emily.has(`${dep[1]}:${dep[2]}`)))
+      return jsonRes(emilyDeposit('pending'));
+    return jsonRes({ message: 'not found' }, 404);
+  }
+  function fetchFn(url: string, init?: RequestInit): Promise<Response> {
+    return new Promise(resolve => resolve(respond(url, init)));
+  }
+  function arrive(...more: Tx[]) {
+    state.arrived = true;
+    state.txs.push(...more);
+  }
+  function posts() {
+    return calls.filter(c => c.body).map(c => c.body);
+  }
+  return { calls, fetchFn, arrive, posts, emily };
+}
+
+type World = ReturnType<typeof world>;
+
+async function watching(w: World, kv = memoryKv(), swapDepositAddress?: string) {
+  await registerDeposit(
+    kv,
+    { depositScript: D.depositScript, reclaimScript: D.reclaimScript, swapDepositAddress },
+    { btcApiUrl: BTC, fetchFn: w.fetchFn, now: NOW }
+  );
+  w.arrive();
+  return kv;
+}
+
+function outpointsPosted(w: World): string[] {
+  return w
+    .posts()
+    .map(b =>
+      typeof b === 'object' && b !== null && 'bitcoinTxid' in b && 'bitcoinTxOutputIndex' in b
+        ? `${String(b.bitcoinTxid)}:${String(b.bitcoinTxOutputIndex)}`
+        : 'unknown'
+    );
+}
+
+function record(kv: ReturnType<typeof memoryKv>): unknown {
+  const raw = kv.data.get(`dep:${D.address}`);
+  return raw ? JSON.parse(raw) : null;
+}
+
 describe('registerDeposit', () => {
+  function deps() {
+    return { btcApiUrl: BTC, fetchFn: world({}).fetchFn, now: NOW };
+  }
+
   it('ignores any address the caller sends and derives its own', async () => {
     const kv = memoryKv();
-    const { address } = await registerDeposit(kv, {
-      depositScript: D.depositScript,
-      reclaimScript: D.reclaimScript,
-      address: 'bc1pattacker',
-    });
+    const { address } = await registerDeposit(
+      kv,
+      {
+        depositScript: D.depositScript,
+        reclaimScript: D.reclaimScript,
+        address: 'bc1pattacker',
+      },
+      deps()
+    );
     expect(address).toBe(D.address);
     expect([...kv.data.keys()]).toEqual([`dep:${D.address}`]);
   });
@@ -267,66 +425,69 @@ describe('registerDeposit', () => {
       'a script that is not a deposit script',
       { depositScript: D.reclaimScript, reclaimScript: D.reclaimScript },
     ],
+    [
+      'a swap address that is not a short string',
+      { depositScript: D.depositScript, reclaimScript: D.reclaimScript, swapDepositAddress: 5 },
+    ],
   ])('rejects %s', async (_name, body) => {
-    await expect(registerDeposit(memoryKv(), body)).rejects.toThrow(BadRequest);
+    await expect(registerDeposit(memoryKv(), body, deps())).rejects.toThrow(BadRequest);
+  });
+
+  it('snapshots the outputs already on the address as prior', async () => {
+    const w = world({ prior: [oldTx()] });
+    const kv = await watching(w, memoryKv(), '0xswapA');
+    expect(record(kv)).toMatchObject({
+      registrations: [
+        {
+          createdAt: NOW.toISOString(),
+          priorOutpoints: [`${'cc'.repeat(32)}:0`],
+          swapDepositAddress: '0xswapA',
+        },
+      ],
+      registered: [],
+    });
+  });
+
+  it('records an unknown prior set when the Bitcoin API is down, and still watches', async () => {
+    const kv = memoryKv();
+    function down(): Promise<Response> {
+      return Promise.resolve(new Response('down', { status: 503 }));
+    }
+    await registerDeposit(
+      kv,
+      { depositScript: D.depositScript, reclaimScript: D.reclaimScript },
+      { btcApiUrl: BTC, fetchFn: down, now: NOW }
+    );
+    expect(record(kv)).toMatchObject({ registrations: [{ priorOutpoints: null }] });
+  });
+
+  it('keeps both deposits when the same address is registered twice, and ignores a repeat', async () => {
+    const w = world({});
+    const kv = await watching(w, memoryKv(), '0xswapA');
+    await watching(w, kv, '0xswapB');
+    await watching(w, kv, '0xswapA');
+    expect(record(kv)).toMatchObject({
+      registrations: [{ swapDepositAddress: '0xswapA' }, { swapDepositAddress: '0xswapB' }],
+    });
   });
 });
 
 describe('runNotifier', () => {
-  const endpoints = { btcApiUrl: 'https://btc.example', sbtcApiUrl: 'https://emily.example' };
-  function payoutTx(vout: number, confirmed = true) {
-    const other = { scriptpubkey: '0014' + '11'.repeat(20), value: 1 };
-    return {
-      txid: CHAIN[vout]?.txid ?? D.txid,
-      vout: [
-        ...Array.from({ length: vout }, () => other),
-        { scriptpubkey: D.scriptPubKey, value: 35_000 },
-      ],
-      status: { confirmed, block_height: confirmed ? 975_752 : undefined },
-    };
-  }
-
-  function world(opts: { txs: unknown[]; known?: boolean; notifyStatus?: number; txHex?: string }) {
-    const calls: { url: string; body?: unknown }[] = [];
-    function respond(url: string, init?: RequestInit): Response {
-      calls.push({ url, body: init?.body ? bodyJson(init) : undefined });
-      if (url.includes('/address/')) return jsonRes(opts.txs);
-      if (url.startsWith('https://btc.example/tx/')) {
-        const known = Object.values(CHAIN).find(t => url.endsWith(`/tx/${t.txid}/hex`));
-        if (!known) return new Response('Transaction not found', { status: 404 });
-        return new Response(opts.txHex ?? known.hex);
-      }
-      if (init?.method === 'POST')
-        return jsonRes(emilyDeposit('pending'), opts.notifyStatus ?? 201);
-      return opts.known ? jsonRes(emilyDeposit('pending')) : jsonRes({ message: 'not found' }, 404);
-    }
-    function fetchFn(url: string, init?: RequestInit): Promise<Response> {
-      return new Promise(resolve => resolve(respond(url, init)));
-    }
-    return { calls, fetchFn };
-  }
-
-  async function watching() {
-    const kv = memoryKv();
-    await registerDeposit(kv, { depositScript: D.depositScript, reclaimScript: D.reclaimScript });
-    return kv;
-  }
-
   it('does nothing while no payout has arrived', async () => {
-    const kv = await watching();
-    const { fetchFn, calls } = world({ txs: [] });
-    const report = await runNotifier(kv, endpoints, fetchFn);
+    const w = world({});
+    const kv = await watching(w);
+    const report = await runNotifier(kv, endpoints, w.fetchFn);
     expect(report).toMatchObject({ watched: 1, notified: [], finished: [], errors: [] });
-    expect(calls.some(c => c.body)).toBe(false);
+    expect(w.posts()).toEqual([]);
     expect(kv.data.size).toBe(1);
   });
 
   it('notifies the signers with the right output index, wherever the payout sits', async () => {
-    const kv = await watching();
-    const { fetchFn, calls } = world({ txs: [payoutTx(3)] });
-    const report = await runNotifier(kv, endpoints, fetchFn);
+    const w = world({ txs: [payoutTx(3)] });
+    const kv = await watching(w);
+    const report = await runNotifier(kv, endpoints, w.fetchFn);
     expect(report.notified).toEqual([{ address: D.address, txid: CHAIN[3]?.txid, vout: 3 }]);
-    const sent = calls.find(c => c.body);
+    const sent = w.calls.find(c => c.body);
     expect(sent?.url).toBe('https://emily.example/deposit');
     expect(sent?.body).toEqual({
       bitcoinTxid: CHAIN[3]?.txid,
@@ -335,29 +496,31 @@ describe('runNotifier', () => {
       reclaimScript: D.reclaimScript,
       transactionHex: CHAIN[3]?.hex,
     });
-    expect(kv.data.size).toBe(1);
+    expect(report.finished).toEqual([D.address]);
   });
 
   it('sends the real raw transaction for the real payout', async () => {
-    const kv = await watching();
-    const { fetchFn, calls } = world({ txs: [payoutTx(0)] });
-    await runNotifier(kv, endpoints, fetchFn);
-    expect(calls.find(c => c.body)?.body).toEqual({
-      bitcoinTxid: D.txid,
-      bitcoinTxOutputIndex: 0,
-      depositScript: D.depositScript,
-      reclaimScript: D.reclaimScript,
-      transactionHex: REAL_TX_HEX,
-    });
+    const w = world({ txs: [payoutTx(0)] });
+    const kv = await watching(w);
+    await runNotifier(kv, endpoints, w.fetchFn);
+    expect(w.posts()).toEqual([
+      {
+        bitcoinTxid: D.txid,
+        bitcoinTxOutputIndex: 0,
+        depositScript: D.depositScript,
+        reclaimScript: D.reclaimScript,
+        transactionHex: REAL_TX_HEX,
+      },
+    ]);
   });
 
   it('posts nothing, keeps watching and says why when the raw transaction does not match', async () => {
-    const kv = await watching();
-    const { fetchFn, calls } = world({ txs: [payoutTx(0)], txHex: CHAIN[3]?.hex });
-    const report = await runNotifier(kv, endpoints, fetchFn);
-    expect(calls.some(c => c.body)).toBe(false);
+    const w = world({ txs: [payoutTx(0)], txHex: CHAIN[3]?.hex });
+    const kv = await watching(w);
+    const report = await runNotifier(kv, endpoints, w.fetchFn);
+    expect(w.posts()).toEqual([]);
     expect(report.notified).toEqual([]);
-    expect(report.errors.map(e => e.address)).toEqual([D.address]);
+    expect(report.errors).toMatchObject([{ address: D.address, outpoint: `${D.txid}:0` }]);
     expect(report.errors[0]?.message).toMatch(
       new RegExp(`^Registering ${D.txid}:0 with the sBTC API failed: .*has txid`)
     );
@@ -365,28 +528,125 @@ describe('runNotifier', () => {
   });
 
   it('notifies an unconfirmed payout too, so minting is not delayed', async () => {
-    const kv = await watching();
-    const { fetchFn } = world({ txs: [payoutTx(0, false)] });
-    expect((await runNotifier(kv, endpoints, fetchFn)).notified).toHaveLength(1);
+    const w = world({ txs: [payoutTx(0, { confirmed: false })] });
+    const kv = await watching(w);
+    expect((await runNotifier(kv, endpoints, w.fetchFn)).notified).toHaveLength(1);
   });
 
   it('stops watching once the sBTC API has the deposit, without notifying again', async () => {
-    const kv = await watching();
-    const { fetchFn, calls } = world({ txs: [payoutTx(1)], known: true });
-    const report = await runNotifier(kv, endpoints, fetchFn);
+    const w = world({ txs: [payoutTx(3)], known: true });
+    const kv = await watching(w);
+    const report = await runNotifier(kv, endpoints, w.fetchFn);
     expect(report.finished).toEqual([D.address]);
     expect(report.notified).toEqual([]);
-    expect(calls.some(c => c.body)).toBe(false);
+    expect(w.posts()).toEqual([]);
     expect(kv.data.size).toBe(0);
   });
 
   it('keeps watching and reports the error when notification fails', async () => {
-    const kv = await watching();
-    const { fetchFn } = world({ txs: [payoutTx(0)], notifyStatus: 500 });
-    const report = await runNotifier(kv, endpoints, fetchFn);
+    const w = world({ txs: [payoutTx(0)], notifyStatus: 500 });
+    const kv = await watching(w);
+    const report = await runNotifier(kv, endpoints, w.fetchFn);
     expect(report.errors).toHaveLength(1);
     expect(report.errors[0]?.message).toMatch(/^Registering .* with the sBTC API failed: HTTP 500/);
     expect(kv.data.size).toBe(1);
+  });
+
+  it('registers only the real payout when a 546-sat output arrives after it, then finishes', async () => {
+    const dust = payoutTx(0, { txid: 'dd'.repeat(32), value: 546, confirmed: false });
+    const w = world({ txs: [dust, payoutTx(0)] });
+    const kv = await watching(w);
+    const report = await runNotifier(kv, endpoints, w.fetchFn);
+    expect(outpointsPosted(w)).toEqual([`${D.txid}:0`]);
+    expect(report.finished).toEqual([D.address]);
+  });
+
+  it('dust before the payout neither ends the watch nor is registered; the payout later does', async () => {
+    const dust = payoutTx(0, { txid: 'dd'.repeat(32), value: 546, confirmed: false });
+    const w = world({ txs: [dust] });
+    const kv = await watching(w);
+    const first = await runNotifier(kv, endpoints, w.fetchFn);
+    expect(first).toMatchObject({ notified: [], finished: [], errors: [] });
+    expect(kv.data.size).toBe(1);
+    w.arrive(payoutTx(0));
+    const second = await runNotifier(kv, endpoints, w.fetchFn);
+    expect(outpointsPosted(w)).toEqual([`${D.txid}:0`]);
+    expect(second.finished).toEqual([D.address]);
+    expect(kv.data.size).toBe(0);
+  });
+
+  it('a second deposit does not end on the first deposit’s old, already-registered payout', async () => {
+    const old = oldTx();
+    const w = world({ prior: [old], knownOutpoints: [`${old.txid}:0`] });
+    const kv = await watching(w);
+    const report = await runNotifier(kv, endpoints, w.fetchFn);
+    expect(report).toMatchObject({ finished: [], notified: [], errors: [] });
+    expect(kv.data.size).toBe(1);
+    w.arrive(payoutTx(0));
+    expect((await runNotifier(kv, endpoints, w.fetchFn)).finished).toEqual([D.address]);
+  });
+
+  it('two deposits registered on one address need two payouts before the watch ends', async () => {
+    const w = world({});
+    const kv = await watching(w, memoryKv(), '0xswapA');
+    await watching(w, kv, '0xswapB');
+    w.arrive(payoutTx(0));
+    const first = await runNotifier(kv, endpoints, w.fetchFn);
+    expect(first.notified).toHaveLength(1);
+    expect(first.finished).toEqual([]);
+    expect(record(kv)).toMatchObject({ registered: [{ outpoint: `${D.txid}:0` }] });
+    w.arrive(payoutTx(3));
+    const second = await runNotifier(kv, endpoints, w.fetchFn);
+    expect(second.notified).toEqual([{ address: D.address, txid: CHAIN[3]?.txid, vout: 3 }]);
+    expect(second.finished).toEqual([D.address]);
+  });
+
+  it('a failure on one output does not stop the next, and names the outpoint', async () => {
+    const w = world({
+      txs: [payoutTx(0, { value: 60_000 }), payoutTx(3)],
+      failPostFor: `${D.txid}:0`,
+    });
+    const kv = await watching(w);
+    const report = await runNotifier(kv, endpoints, w.fetchFn);
+    expect(outpointsPosted(w)).toEqual([`${D.txid}:0`, `${CHAIN[3]?.txid}:3`]);
+    expect(report.notified).toEqual([{ address: D.address, txid: CHAIN[3]?.txid, vout: 3 }]);
+    expect(report.errors).toMatchObject([{ address: D.address, outpoint: `${D.txid}:0` }]);
+  });
+
+  it('registers nothing and keeps watching when the sBTC minimum cannot be read', async () => {
+    const w = world({ txs: [payoutTx(0)], limitsDown: true });
+    const kv = await watching(w);
+    const report = await runNotifier(kv, endpoints, w.fetchFn);
+    expect(w.posts()).toEqual([]);
+    expect(report.errors[0]?.message).toMatch(/minimum/);
+    expect(kv.data.size).toBe(1);
+  });
+
+  it('reports an address with too many unspent outputs instead of treating it as empty', async () => {
+    const w = world({ tooManyUtxos: true });
+    const kv = await watching(w);
+    const report = await runNotifier(kv, endpoints, w.fetchFn);
+    expect(report.errors[0]?.message).toMatch(/too many/);
+    expect(kv.data.size).toBe(1);
+  });
+
+  it('tolerates an old-shaped record: old payouts are prior by time, new ones are registered', async () => {
+    const kv = memoryKv();
+    kv.data.set(
+      `dep:${D.address}`,
+      JSON.stringify({
+        depositScript: D.depositScript,
+        reclaimScript: D.reclaimScript,
+        createdAt: NOW.toISOString(),
+      })
+    );
+    const w = world({ prior: [oldTx()] });
+    const first = await runNotifier(kv, endpoints, w.fetchFn);
+    expect(first).toMatchObject({ watched: 1, notified: [], finished: [], errors: [] });
+    w.arrive(payoutTx(0));
+    const second = await runNotifier(kv, endpoints, w.fetchFn);
+    expect(outpointsPosted(w)).toEqual([`${D.txid}:0`]);
+    expect(second.finished).toEqual([D.address]);
   });
 
   it('drops a record whose stored scripts do not match its address', async () => {
@@ -399,15 +659,16 @@ describe('runNotifier', () => {
         createdAt: '',
       })
     );
-    const { fetchFn, calls } = world({ txs: [payoutTx(0)] });
-    const report = await runNotifier(kv, endpoints, fetchFn);
+    const w = world({ txs: [payoutTx(0)] });
+    const report = await runNotifier(kv, endpoints, w.fetchFn);
     expect(report.errors[0]?.message).toMatch(/do not match/);
-    expect(calls).toHaveLength(0);
+    expect(w.calls).toHaveLength(0);
     expect(kv.data.size).toBe(0);
   });
 
   it('one failing deposit does not block the others', async () => {
-    const kv = await watching();
+    const w = world({ txs: [payoutTx(0)] });
+    const kv = await watching(w);
     kv.data.set(
       'dep:bc1pforged',
       JSON.stringify({
@@ -416,8 +677,7 @@ describe('runNotifier', () => {
         createdAt: '',
       })
     );
-    const { fetchFn } = world({ txs: [payoutTx(0)] });
-    const report = await runNotifier(kv, endpoints, fetchFn);
+    const report = await runNotifier(kv, endpoints, w.fetchFn);
     expect(report.errors).toHaveLength(1);
     expect(report.notified).toHaveLength(1);
   });

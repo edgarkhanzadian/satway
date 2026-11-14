@@ -2,7 +2,7 @@ import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
 import { depositAddressFromScripts } from './deposit-address.js';
-import { type FetchLike, defaultFetch, requestJson, requestText } from './http.js';
+import { type FetchLike, HttpError, defaultFetch, requestJson, requestText } from './http.js';
 import { z } from './schema.js';
 
 export interface BtcTxOutput {
@@ -10,19 +10,47 @@ export interface BtcTxOutput {
   value: number;
 }
 
+export interface BtcTxStatus {
+  confirmed: boolean;
+  block_height?: number;
+  block_time?: number;
+}
+
 export interface BtcTx {
   txid: string;
   vout: BtcTxOutput[];
-  status: { confirmed: boolean; block_height?: number };
+  status: BtcTxStatus;
 }
+
+const btcTxStatusSchema: z.ZodType<BtcTxStatus> = z.looseObject({
+  confirmed: z.boolean(),
+  block_height: z.number().optional(),
+  block_time: z.number().optional(),
+});
 
 const btcTxSchema: z.ZodType<BtcTx> = z.looseObject({
   txid: z.string(),
   vout: z.array(z.looseObject({ scriptpubkey: z.string(), value: z.number() })),
-  status: z.looseObject({ confirmed: z.boolean(), block_height: z.number().optional() }),
+  status: btcTxStatusSchema,
 });
 
 const btcTxListSchema = z.array(btcTxSchema);
+
+interface BtcUtxo {
+  txid: string;
+  vout: number;
+  value: number;
+  status: BtcTxStatus;
+}
+
+const btcUtxoListSchema: z.ZodType<BtcUtxo[]> = z.array(
+  z.looseObject({
+    txid: z.string(),
+    vout: z.number(),
+    value: z.number(),
+    status: btcTxStatusSchema,
+  })
+);
 
 const outspendSchema = z.looseObject({ spent: z.boolean() });
 
@@ -32,6 +60,18 @@ export interface Payout {
   amountSats: number;
   confirmed: boolean;
   blockHeight: number | null;
+}
+
+export interface SeenOutput extends Payout {
+  blockTime: number | null;
+}
+
+export interface AddressOutput extends SeenOutput {
+  spent: boolean;
+}
+
+export function outpointOf(output: Pick<Payout, 'txid' | 'vout'>): string {
+  return `${output.txid.toLowerCase()}:${output.vout}`;
 }
 
 export function payoutsInTx(tx: BtcTx, depositScriptPubKey: string): Payout[] {
@@ -51,18 +91,193 @@ export function payoutsInTx(tx: BtcTx, depositScriptPubKey: string): Payout[] {
   return found;
 }
 
-export async function findPayouts(
+function seenInTx(tx: BtcTx, depositScriptPubKey: string): SeenOutput[] {
+  return payoutsInTx(tx, depositScriptPubKey).map(p => ({
+    ...p,
+    blockTime: tx.status.block_time ?? null,
+  }));
+}
+
+export const ESPLORA_CHAIN_PAGE_SIZE = 25;
+export const ESPLORA_MEMPOOL_LIMIT = 50;
+export const DEFAULT_HISTORY_PAGES = 8;
+export const MAX_DIRECT_TX_LOOKUPS = 4;
+
+export class TooManyOutputsError extends Error {
+  constructor(readonly address: string) {
+    super(
+      `The Bitcoin API refuses to list the unspent outputs of ${address} because there are too many. Check the address in a block explorer.`
+    );
+    this.name = 'TooManyOutputsError';
+  }
+}
+
+export async function fetchUnspentOutputs(
+  btcApiUrl: string,
+  depositAddress: string,
+  fetchFn: FetchLike = defaultFetch
+): Promise<AddressOutput[]> {
+  let utxos: BtcUtxo[];
+  try {
+    utxos = await requestJson(
+      fetchFn,
+      `${btcApiUrl}/address/${depositAddress}/utxo`,
+      btcUtxoListSchema
+    );
+  } catch (err) {
+    if (err instanceof HttpError && err.status === 400 && /too many/i.test(err.body)) {
+      throw new TooManyOutputsError(depositAddress);
+    }
+    throw err;
+  }
+  return utxos.map(u => ({
+    txid: u.txid.toLowerCase(),
+    vout: u.vout,
+    amountSats: u.value,
+    confirmed: u.status.confirmed,
+    blockHeight: u.status.block_height ?? null,
+    blockTime: u.status.block_time ?? null,
+    spent: false,
+  }));
+}
+
+export interface AddressHistory {
+  outputs: SeenOutput[];
+  truncated: boolean;
+  requests: number;
+}
+
+export async function fetchAddressHistory(
   btcApiUrl: string,
   depositAddress: string,
   depositScriptPubKey: string,
+  options: { maxPages?: number; fetchFn?: FetchLike } = {}
+): Promise<AddressHistory> {
+  const fetchFn = options.fetchFn ?? defaultFetch;
+  const maxPages = Math.max(1, options.maxPages ?? DEFAULT_HISTORY_PAGES);
+  const base = `${btcApiUrl}/address/${depositAddress}/txs`;
+  const mempool = await requestJson(fetchFn, `${base}/mempool`, btcTxListSchema);
+  const txs: BtcTx[] = [...mempool];
+  let truncated = mempool.length >= ESPLORA_MEMPOOL_LIMIT;
+  let pages = 0;
+  let lastSeen: string | null = null;
+  for (;;) {
+    const url: string = lastSeen === null ? `${base}/chain` : `${base}/chain/${lastSeen}`;
+    const page = await requestJson(fetchFn, url, btcTxListSchema);
+    pages += 1;
+    txs.push(...page);
+    const last = page.at(-1);
+    if (!last || page.length < ESPLORA_CHAIN_PAGE_SIZE || last.txid === lastSeen) break;
+    if (pages >= maxPages) {
+      truncated = true;
+      break;
+    }
+    lastSeen = last.txid;
+  }
+  return {
+    outputs: txs.flatMap(tx => seenInTx(tx, depositScriptPubKey)),
+    truncated,
+    requests: pages + 1,
+  };
+}
+
+export async function fetchTransaction(
+  btcApiUrl: string,
+  txid: string,
   fetchFn: FetchLike = defaultFetch
-): Promise<Payout[]> {
-  const txs = await requestJson(
-    fetchFn,
-    `${btcApiUrl}/address/${depositAddress}/txs`,
-    btcTxListSchema
+): Promise<BtcTx | null> {
+  const wanted = txid.toLowerCase();
+  if (!TXID.test(wanted)) throw new Error(`Not a Bitcoin txid: ${txid}`);
+  try {
+    return await requestJson(fetchFn, `${btcApiUrl}/tx/${wanted}`, btcTxSchema);
+  } catch (err) {
+    if (err instanceof HttpError && (err.status === 404 || err.status === 400)) return null;
+    throw err;
+  }
+}
+
+export interface DepositOutputs {
+  outputs: AddressOutput[];
+  truncated: boolean;
+  historyRead: boolean;
+  requests: number;
+}
+
+export interface DepositOutputsOptions {
+  txids?: readonly string[];
+  history?: 'always' | 'never' | 'when-no-txid-match';
+  maxPages?: number;
+  fetchFn?: FetchLike;
+}
+
+function addSeen(into: Map<string, SeenOutput>, outputs: readonly SeenOutput[]): void {
+  for (const o of outputs) {
+    const key = outpointOf(o);
+    if (!into.has(key)) into.set(key, { ...o, txid: o.txid.toLowerCase() });
+  }
+}
+
+export async function fetchDepositOutputs(
+  btcApiUrl: string,
+  depositAddress: string,
+  depositScriptPubKey: string,
+  options: DepositOutputsOptions = {}
+): Promise<DepositOutputs> {
+  const fetchFn = options.fetchFn ?? defaultFetch;
+  const seen = new Map<string, SeenOutput>();
+  let requests = 0;
+  let matched = false;
+  const txids = [...new Set((options.txids ?? []).map(t => t.toLowerCase()))].filter(t =>
+    TXID.test(t)
   );
-  return txs.flatMap(tx => payoutsInTx(tx, depositScriptPubKey));
+  for (const txid of txids.slice(0, MAX_DIRECT_TX_LOOKUPS)) {
+    const tx = await fetchTransaction(btcApiUrl, txid, fetchFn);
+    requests += 1;
+    if (!tx) continue;
+    const found = seenInTx(tx, depositScriptPubKey);
+    if (found.length > 0) matched = true;
+    addSeen(seen, found);
+  }
+  const mode = options.history ?? 'when-no-txid-match';
+  const readHistory = mode === 'always' || (mode === 'when-no-txid-match' && !matched);
+  let truncated = false;
+  if (readHistory) {
+    const history = await fetchAddressHistory(btcApiUrl, depositAddress, depositScriptPubKey, {
+      maxPages: options.maxPages,
+      fetchFn,
+    });
+    requests += history.requests;
+    truncated = history.truncated;
+    addSeen(seen, history.outputs);
+  }
+  const unspent = await fetchUnspentOutputs(btcApiUrl, depositAddress, fetchFn);
+  requests += 1;
+  const unspentKeys = new Set(unspent.map(outpointOf));
+  const outputs: AddressOutput[] = [...unspent];
+  for (const [key, o] of seen) {
+    if (unspentKeys.has(key)) continue;
+    outputs.push({ ...o, spent: o.confirmed });
+  }
+  return { outputs, truncated, historyRead: readHistory, requests };
+}
+
+export interface OutpointSnapshot {
+  outpoints: string[];
+  truncated: boolean;
+}
+
+export async function snapshotOutpoints(
+  btcApiUrl: string,
+  depositAddress: string,
+  depositScriptPubKey: string,
+  options: { maxPages?: number; fetchFn?: FetchLike } = {}
+): Promise<OutpointSnapshot> {
+  const res = await fetchDepositOutputs(btcApiUrl, depositAddress, depositScriptPubKey, {
+    history: 'always',
+    maxPages: options.maxPages,
+    fetchFn: options.fetchFn,
+  });
+  return { outpoints: res.outputs.map(outpointOf).sort(), truncated: res.truncated };
 }
 
 export async function fetchTipHeight(

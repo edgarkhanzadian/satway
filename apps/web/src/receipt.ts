@@ -22,6 +22,8 @@ export interface Receipt {
   origin: { chain: string; symbol: string; assetId: string };
   refundTo: string;
   quoteResponse: OneClickQuoteResponse;
+  priorOutpoints?: string[];
+  priorTruncated?: boolean;
 }
 
 const REQUIRED_TEXT = [
@@ -54,6 +56,8 @@ const receiptSchema: z.ZodType<Receipt> = z.looseObject({
   origin: z.looseObject({ chain: z.string(), symbol: z.string(), assetId: z.string() }),
   refundTo: text,
   quoteResponse: oneClickQuoteResponseSchema,
+  priorOutpoints: z.array(z.string().regex(/^[0-9a-f]{64}:\d+$/)).optional(),
+  priorTruncated: z.boolean().optional(),
 });
 
 function parseReceipt(value: unknown): Receipt {
@@ -113,9 +117,14 @@ export function loadReceipts(): Receipt[] {
   }
 }
 
+export function receiptId(receipt: Receipt): string {
+  return `${receipt.quoteResponse.quote.depositAddress ?? receipt.depositAddress}|${receipt.createdAt}`;
+}
+
 export function rememberReceipt(receipt: Receipt): void {
   try {
-    const rest = loadReceipts().filter(r => r.depositAddress !== receipt.depositAddress);
+    const id = receiptId(receipt);
+    const rest = loadReceipts().filter(r => receiptId(r) !== id);
     localStorage.setItem(KEY, JSON.stringify([receipt, ...rest].slice(0, 20)));
   } catch {
     return;

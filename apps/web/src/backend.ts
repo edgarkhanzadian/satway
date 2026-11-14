@@ -50,7 +50,11 @@ export function createBackend(baseUrl: string): Backend {
       if (depositMemo) params.set('depositMemo', depositMemo);
       return call(`${base}/status?${params.toString()}`, oneClickStatusResponseSchema);
     },
-    register: (depositScript, reclaimScript) =>
-      call(`${base}/deposits`, registeredSchema, jsonPost({ depositScript, reclaimScript })),
+    register: (depositScript, reclaimScript, swapDepositAddress) =>
+      call(
+        `${base}/deposits`,
+        registeredSchema,
+        jsonPost({ depositScript, reclaimScript, swapDepositAddress })
+      ),
   };
 }

@@ -1,23 +1,28 @@
 import type { Payout } from './bitcoin.js';
 import type { EmilyDepositStatus } from './emily.js';
 import type { OneClickSwapStatus } from './oneclick.js';
+import { blocksUntilReclaimFor } from './payout-selection.js';
 
 export type Stage =
   | 'awaiting-funds'
   | 'swapping'
   | 'awaiting-payout'
   | 'payout-unconfirmed'
+  | 'payout-ambiguous'
   | 'awaiting-notification'
   | 'minting'
   | 'done'
   | 'refunded'
   | 'swap-failed'
   | 'mint-failed'
-  | 'reclaimable';
+  | 'reclaimable'
+  | 'reclaimed';
 
 export interface Observations {
   swap: OneClickSwapStatus | null;
   payout: Payout | null;
+  payoutSpent?: boolean;
+  ambiguousMints?: readonly (EmilyDepositStatus | null)[];
   mint: EmilyDepositStatus | null;
   tipHeight: number | null;
   reclaimLockBlocks: number;
@@ -31,81 +36,124 @@ export interface Progress {
   blocksUntilReclaim: number | null;
 }
 
-function blocksUntilReclaim(o: Observations): number | null {
-  if (!o.payout?.confirmed || o.payout.blockHeight === null || o.tipHeight === null) return null;
-  const confirmations = o.tipHeight - o.payout.blockHeight + 1;
-  return Math.max(0, o.reclaimLockBlocks - confirmations);
-}
-
-export function deriveProgress(o: Observations): Progress {
-  const untilReclaim = blocksUntilReclaim(o);
+function payoutProgress(o: Observations, payout: Payout): Progress {
+  const untilReclaim = blocksUntilReclaimFor(payout, o.tipHeight, o.reclaimLockBlocks);
   const base = { needsNotification: false, blocksUntilReclaim: untilReclaim };
 
-  if (o.payout) {
-    if (o.mint === 'confirmed') {
+  if (o.mint === 'confirmed') {
+    return {
+      ...base,
+      stage: 'done',
+      terminal: true,
+      message: 'sBTC has been minted to your Stacks address.',
+    };
+  }
+  if (o.payoutSpent === true) {
+    if (o.mint === null || o.mint === 'failed') {
       return {
         ...base,
-        stage: 'done',
-        terminal: true,
-        message: 'sBTC has been minted to your Stacks address.',
-      };
-    }
-    if (o.mint === 'failed') {
-      if (untilReclaim === 0) {
-        return {
-          ...base,
-          stage: 'reclaimable',
-          terminal: true,
-          message:
-            'The sBTC signers rejected this deposit. You can reclaim your BTC now from the recovery page.',
-        };
-      }
-      return {
-        ...base,
-        stage: 'mint-failed',
+        blocksUntilReclaim: null,
+        stage: 'reclaimed',
         terminal: true,
         message:
-          untilReclaim === null
-            ? 'The sBTC signers rejected this deposit. Your BTC can be reclaimed after the timelock.'
-            : `The sBTC signers rejected this deposit. Your BTC can be reclaimed in about ${untilReclaim} blocks.`,
-      };
-    }
-    if (!o.payout.confirmed) {
-      return {
-        ...base,
-        needsNotification: o.mint === null,
-        stage: 'payout-unconfirmed',
-        terminal: false,
-        message: 'BTC is on its way to your deposit address. Waiting for Bitcoin confirmations.',
-      };
-    }
-    if (o.mint === null) {
-      if (untilReclaim === 0) {
-        return {
-          ...base,
-          needsNotification: false,
-          stage: 'reclaimable',
-          terminal: true,
-          message:
-            'This deposit was never processed. You can reclaim your BTC now from the recovery page.',
-        };
-      }
-      return {
-        ...base,
-        needsNotification: true,
-        stage: 'awaiting-notification',
-        terminal: false,
-        message: 'BTC arrived. Registering the deposit with the sBTC signers.',
+          'The BTC from this payout has already been moved out of the deposit address, most likely by a reclaim. Nothing is left to reclaim from it.',
       };
     }
     return {
       ...base,
+      blocksUntilReclaim: null,
       stage: 'minting',
       terminal: false,
-      message: 'BTC arrived and the deposit is registered. Waiting for the signers to mint sBTC.',
+      message: 'The sBTC signers have taken in this deposit. Waiting for them to mint sBTC.',
     };
   }
+  if (o.mint === 'failed') {
+    if (untilReclaim === 0) {
+      return {
+        ...base,
+        stage: 'reclaimable',
+        terminal: true,
+        message:
+          'The sBTC signers rejected this deposit. You can reclaim your BTC now from the recovery page.',
+      };
+    }
+    return {
+      ...base,
+      stage: 'mint-failed',
+      terminal: true,
+      message:
+        untilReclaim === null
+          ? 'The sBTC signers rejected this deposit. Your BTC can be reclaimed after the timelock.'
+          : `The sBTC signers rejected this deposit. Your BTC can be reclaimed in about ${untilReclaim} blocks.`,
+    };
+  }
+  if (!payout.confirmed) {
+    return {
+      ...base,
+      needsNotification: o.mint === null,
+      stage: 'payout-unconfirmed',
+      terminal: false,
+      message: 'BTC is on its way to your deposit address. Waiting for Bitcoin confirmations.',
+    };
+  }
+  if (untilReclaim === 0) {
+    if (o.mint === null) {
+      return {
+        ...base,
+        stage: 'reclaimable',
+        terminal: true,
+        message:
+          'This deposit was never processed. You can reclaim your BTC now from the recovery page.',
+      };
+    }
+    return {
+      ...base,
+      stage: 'reclaimable',
+      terminal: false,
+      message:
+        'The timelock has passed and the sBTC signers have not minted this deposit. You can reclaim your BTC now from the recovery page; until you do, the signers may still mint it.',
+    };
+  }
+  if (o.mint === null) {
+    return {
+      ...base,
+      needsNotification: true,
+      stage: 'awaiting-notification',
+      terminal: false,
+      message: 'BTC arrived. Registering the deposit with the sBTC signers.',
+    };
+  }
+  return {
+    ...base,
+    stage: 'minting',
+    terminal: false,
+    message: 'BTC arrived and the deposit is registered. Waiting for the signers to mint sBTC.',
+  };
+}
 
+function ambiguousProgress(mints: readonly (EmilyDepositStatus | null)[]): Progress {
+  const base = { needsNotification: false, blocksUntilReclaim: null };
+  if (mints.every(m => m === 'confirmed')) {
+    return {
+      ...base,
+      stage: 'done',
+      terminal: true,
+      message: `sBTC has been minted for each of the ${mints.length} payments that arrived at your deposit address.`,
+    };
+  }
+  return {
+    ...base,
+    stage: 'payout-ambiguous',
+    terminal: false,
+    message: `${mints.length} payments that could each be this deposit arrived at your deposit address, and the swap provider has not said which one is yours. Each is being registered with the sBTC signers; they are listed below.`,
+  };
+}
+
+export function deriveProgress(o: Observations): Progress {
+  if (o.payout) return payoutProgress(o, o.payout);
+  if (o.ambiguousMints && o.ambiguousMints.length > 1) return ambiguousProgress(o.ambiguousMints);
+
+  const base = { needsNotification: false, blocksUntilReclaim: null };
   switch (o.swap) {
     case null:
     case 'PENDING_DEPOSIT':

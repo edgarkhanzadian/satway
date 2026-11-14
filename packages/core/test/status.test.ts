@@ -112,6 +112,61 @@ describe('deriveProgress: after the payout', () => {
     expect(p).toMatchObject({ stage: 'reclaimable', needsNotification: false, terminal: true });
   });
 
+  it.each(['pending', 'accepted', 'reprocessing', 'rbf'] as const)(
+    'mint %s past the timelock with the output unspent -> reclaimable, signers may still mint',
+    mint => {
+      const p = deriveProgress(
+        obs({ payout: payout(), mint, tipHeight: 1_949, payoutSpent: false })
+      );
+      expect(p).toMatchObject({ stage: 'reclaimable', terminal: false, needsNotification: false });
+      expect(p.blocksUntilReclaim).toBe(0);
+      expect(p.message).toMatch(/may still mint/);
+    }
+  );
+
+  it('a confirmed mint stays done past the timelock', () => {
+    const p = deriveProgress(obs({ payout: payout(), mint: 'confirmed', tipHeight: 9_999 }));
+    expect(p.stage).toBe('done');
+  });
+
+  it('an output the signers already spent is never reclaimable', () => {
+    for (const mint of ['pending', 'accepted', 'rbf'] as const) {
+      const p = deriveProgress(
+        obs({ payout: payout(), mint, tipHeight: 9_999, payoutSpent: true })
+      );
+      expect(p.stage).toBe('minting');
+      expect(p.blocksUntilReclaim).toBeNull();
+    }
+  });
+
+  it('a spent output that was never registered or was rejected has been reclaimed', () => {
+    for (const mint of [null, 'failed'] as const) {
+      const p = deriveProgress(
+        obs({ payout: payout(), mint, tipHeight: 9_999, payoutSpent: true })
+      );
+      expect(p).toMatchObject({ stage: 'reclaimed', terminal: true, needsNotification: false });
+    }
+  });
+});
+
+describe('deriveProgress: several possible payouts', () => {
+  it('says plainly that it cannot tell which payment is the deposit', () => {
+    const p = deriveProgress(obs({ swap: null, ambiguousMints: [null, 'pending'] }));
+    expect(p).toMatchObject({ stage: 'payout-ambiguous', terminal: false });
+    expect(p.message).toMatch(/^2 payments/);
+  });
+
+  it('is done when every one of them has been minted', () => {
+    const p = deriveProgress(obs({ ambiguousMints: ['confirmed', 'confirmed'] }));
+    expect(p).toMatchObject({ stage: 'done', terminal: true });
+  });
+
+  it('a single candidate list is not ambiguous', () => {
+    expect(deriveProgress(obs({ swap: 'SUCCESS', ambiguousMints: [null] })).stage).toBe(
+      'awaiting-payout'
+    );
+  });
+
   it('every state has a message that says what happens next', () => {
     const swaps = [
       null,

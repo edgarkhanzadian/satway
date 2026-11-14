@@ -109,7 +109,11 @@ export async function handle(
     }
 
     if (request.method === 'POST' && url.pathname === '/deposits') {
-      return json(await registerDeposit(env.DEPOSITS, await readJson(request)), 201, cors);
+      const registered = await registerDeposit(env.DEPOSITS, await readJson(request), {
+        btcApiUrl: config.btcApiUrl,
+        fetchFn,
+      });
+      return json(registered, 201, cors);
     }
 
     return json({ message: 'Not found' }, 404, cors);

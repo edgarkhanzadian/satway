@@ -1,23 +1,29 @@
 import {
-  type EmilyDepositStatus,
   OneClickClient,
-  type OneClickSwapStatus,
+  type OneClickStatusResponse,
+  applyRegistrations,
   buildDepositAddress,
   buildQuoteRequest,
   checkDepositAmount,
   MAINNET_CONFIG as config,
-  deriveProgress,
-  fetchDeposit,
   fetchLimits,
-  fetchTipHeight,
   fetchVerifiedSigners,
-  findPayouts,
-  notifyDeposit,
+  observeDeposit,
+  outpointOf,
   providerFeesOf,
+  registerOutputs,
+  snapshotOutpoints,
 } from '@stxonector/core';
 
 import { loadEnv, optional, required } from './lib/env.js';
-import { type ProofRecord, loadProof, log, reclaimKeyFromEnv, saveProof } from './lib/proof.js';
+import {
+  type ProofRecord,
+  contextOfProof,
+  loadProof,
+  log,
+  reclaimKeyFromEnv,
+  saveProof,
+} from './lib/proof.js';
 
 loadEnv();
 const client = new OneClickClient(config.oneClickBaseUrl, { jwt: optional('ONECLICK_JWT') });
@@ -60,6 +66,7 @@ async function quote(args: string[]) {
     depositAddress: deposit.address,
     dry: false,
   });
+  const prior = await snapshotOutpoints(config.btcApiUrl, deposit.address, deposit.scriptPubKey);
   const response = await client.quote(request);
   const q = response.quote;
 
@@ -84,6 +91,8 @@ async function quote(args: string[]) {
     refundTo,
     quoteResponse: response,
     notify,
+    priorOutpoints: prior.outpoints,
+    priorTruncated: prior.truncated,
     events: [],
   };
   const path = saveProof(`${record.createdAt.replace(/[:.]/g, '-')}.json`, record);
@@ -118,61 +127,63 @@ async function watch(args: string[]) {
   console.log(`Following ${path}`);
   console.log(`sBTC deposit address ${record.deposit.address}\n`);
 
+  const ctx = contextOfProof(record);
   for (;;) {
-    let swap: OneClickSwapStatus | null = null;
+    let status: OneClickStatusResponse | null = null;
     try {
-      swap = (await client.status(swapAddress, record.quoteResponse.quote.depositMemo)).status;
+      status = await client.status(swapAddress, record.quoteResponse.quote.depositMemo);
     } catch {
-      swap = null;
+      status = null;
     }
 
-    const payouts = await findPayouts(
-      config.btcApiUrl,
-      record.deposit.address,
-      record.deposit.scriptPubKey
-    );
-    const payout = payouts[0] ?? null;
-    if (payouts.length > 1)
+    let observed = await observeDeposit(config, ctx, status);
+    const { selection } = observed;
+    const payout = selection.payout;
+    if (observed.truncated) {
       log(
         record,
         'warning',
-        `${payouts.length} payouts to the deposit address; following the first`
+        'address history is longer than the page cap; older outputs unchecked'
       );
-
-    let mint: EmilyDepositStatus | null = null;
-    if (payout) {
-      mint = (await fetchDeposit(config.sbtcApiUrl, payout.txid, payout.vout))?.status ?? null;
     }
-    const tipHeight = await fetchTipHeight(config.btcApiUrl);
-    const progress = deriveProgress({
-      swap,
-      payout,
-      mint,
-      tipHeight,
-      reclaimLockBlocks: record.reclaimLockBlocks,
-    });
+    if (selection.ambiguous) {
+      log(
+        record,
+        'warning',
+        `${selection.candidates.length} possible payouts and no 1Click hash: ${selection.candidates.map(c => `${outpointOf(c)} ${c.amountSats} sats`).join(', ')}`
+      );
+    }
+    for (const o of selection.others) {
+      log(record, 'other-output', `${outpointOf(o)} ${o.amountSats} sats also paid the address`);
+    }
+    for (const o of selection.belowMinimum) {
+      log(record, 'below-minimum', `${outpointOf(o)} ${o.amountSats} sats cannot be minted`);
+    }
 
+    const progress = observed.progress;
     const detail = payout
-      ? `payout ${payout.txid}:${payout.vout} ${payout.amountSats} sats${progress.blocksUntilReclaim !== null ? `, reclaimable in ${progress.blocksUntilReclaim} blocks` : ''}`
-      : `swap ${swap ?? 'not seen yet'}`;
+      ? `payout ${outpointOf(payout)} ${payout.amountSats} sats (matched by ${selection.basis ?? 'unknown'})${progress.blocksUntilReclaim !== null ? `, reclaimable in ${progress.blocksUntilReclaim} blocks` : ''}`
+      : `swap ${observed.swap ?? 'not seen yet'}`;
     log(record, progress.stage, detail);
 
-    if (progress.needsNotification && payout) {
+    if (observed.toRegister.length > 0) {
       if (record.notify) {
-        const res = await notifyDeposit(config, {
-          bitcoinTxid: payout.txid,
-          bitcoinTxOutputIndex: payout.vout,
-          depositScript: record.deposit.depositScript,
-          reclaimScript: record.deposit.reclaimScript,
-        });
-        log(
-          record,
-          'notified',
-          `signers told about output ${payout.vout}; sBTC API status ${res.status}`
-        );
+        const results = await registerOutputs(config, record.deposit, observed.toRegister);
+        for (const r of results) {
+          if (r.error === null) {
+            log(
+              record,
+              'notified',
+              `signers told about ${r.outpoint}; sBTC API status ${r.status ?? '?'}`
+            );
+          } else {
+            log(record, 'notify-failed', `${r.outpoint}: ${r.error}`);
+          }
+        }
+        observed = applyRegistrations(observed, results, record.reclaimLockBlocks);
       } else {
         log(record, 'not-notifying', 'reclaim drill: leaving the payout unregistered');
-        if (payout.confirmed) {
+        if (payout?.confirmed) {
           saveProof(path, record);
           console.log(
             `\nPayout confirmed and left unregistered. Run "pnpm reclaim" once ${progress.blocksUntilReclaim ?? record.reclaimLockBlocks} more blocks have passed.`
@@ -184,9 +195,11 @@ async function watch(args: string[]) {
 
     saveProof(path, record);
 
-    if (progress.terminal) {
-      console.log(`\n${progress.message}`);
-      if (progress.stage === 'done' && payout) {
+    const final = observed.progress;
+    if (final.terminal) {
+      console.log(`\n${final.message}`);
+      const mint = payout ? (observed.mints.get(outpointOf(payout)) ?? null) : null;
+      if (final.stage === 'done' && payout) {
         record.result = {
           payoutTxid: payout.txid,
           payoutVout: payout.vout,
@@ -205,7 +218,7 @@ async function watch(args: string[]) {
           `  elapsed               ${Math.round((Date.now() - Date.parse(record.createdAt)) / 60000)} minutes`
         );
       }
-      process.exit(progress.stage === 'done' ? 0 : 2);
+      process.exit(final.stage === 'done' ? 0 : 2);
     }
     await new Promise(r => setTimeout(r, 30_000));
   }

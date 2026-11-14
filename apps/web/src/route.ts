@@ -46,6 +46,11 @@ const BY_STAGE: Record<Stage, Row> = {
     legs: ['done', 'active', 'pending'],
     current: 2,
   },
+  'payout-ambiguous': {
+    stops: ['done', 'done', 'current', 'pending'],
+    legs: ['done', 'done', 'active'],
+    current: 2,
+  },
   'awaiting-notification': {
     stops: ['done', 'done', 'current', 'pending'],
     legs: ['done', 'done', 'active'],
@@ -73,6 +78,11 @@ const BY_STAGE: Record<Stage, Row> = {
     current: 2,
   },
   reclaimable: {
+    stops: ['done', 'done', 'failed', 'pending'],
+    legs: ['done', 'done', 'pending'],
+    current: 2,
+  },
+  reclaimed: {
     stops: ['done', 'done', 'failed', 'pending'],
     legs: ['done', 'done', 'pending'],
     current: 2,

@@ -7,10 +7,11 @@ import {
   OneClickClient,
   ResponseShapeError,
   buildQuoteRequest,
+  fetchAddressHistory,
   fetchDeposit,
   fetchLimits,
+  fetchUnspentOutputs,
   fetchVerifiedSigners,
-  findPayouts,
   isOutputSpent,
   notifyDeposit,
   oneClickQuoteResponseSchema,
@@ -79,21 +80,23 @@ describe('real mainnet responses pass and keep every field', () => {
   });
 
   it('mempool.space transactions and outspends', async () => {
-    const payouts = await findPayouts(
-      'https://btc.example',
-      D.address,
-      D.scriptPubKey,
-      serve([REAL_DEPOSIT_TX])
-    );
-    expect(payouts).toEqual([
+    function chainOnly(url: string): Promise<Response> {
+      return Promise.resolve(jsonResponse(url.endsWith('/txs/chain') ? [REAL_DEPOSIT_TX] : []));
+    }
+    const history = await fetchAddressHistory('https://btc.example', D.address, D.scriptPubKey, {
+      fetchFn: chainOnly,
+    });
+    expect(history.outputs).toEqual([
       {
         txid: D.txid,
         vout: 0,
         amountSats: D.amountSats,
         confirmed: true,
         blockHeight: D.blockHeight,
+        blockTime: 1794637952,
       },
     ]);
+    expect(history.truncated).toBe(false);
     expect(await isOutputSpent('https://btc.example', D.txid, 0, serve(REAL_OUTSPEND))).toBe(true);
   });
 });
@@ -236,7 +239,16 @@ describe('malformed sBTC and Bitcoin responses are rejected', () => {
       status: { confirmed: true },
     };
     await expect(
-      findPayouts('https://btc.example', D.address, D.scriptPubKey, serve([tx]))
+      fetchAddressHistory('https://btc.example', D.address, D.scriptPubKey, {
+        fetchFn: serve([tx]),
+      })
+    ).rejects.toBeInstanceOf(ResponseShapeError);
+  });
+
+  it('an unspent output whose value is text', async () => {
+    const utxo = { txid: D.txid, vout: 0, value: '1', status: { confirmed: true } };
+    await expect(
+      fetchUnspentOutputs('https://btc.example', D.address, serve([utxo]))
     ).rejects.toBeInstanceOf(ResponseShapeError);
   });
 

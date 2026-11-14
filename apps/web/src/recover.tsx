@@ -5,17 +5,24 @@ import { styled } from 'stxonector-styles/jsx';
 import { actions, button, details, field, notice, sheet } from 'stxonector-styles/recipes';
 
 import {
+  type ReclaimOption,
+  type ReclaimPlan,
   buildReclaimPsbt,
   MAINNET_CONFIG as config,
   errorMessage,
   finalizeSignedReclaim,
+  findReclaimOption,
   isOutputSpent,
+  outpointOf,
   parseWith,
+  planReclaim,
+  reclaimAmountProblem,
   z,
 } from '@stxonector/core';
 
 import { type Backend, type Snapshot, checkProgress } from './flow.js';
-import { type Receipt, loadReceipts, verifyReceipt } from './receipt.js';
+import { PayoutDetails, PayoutNotices } from './payout-notes.js';
+import { type Receipt, loadReceipts, receiptId, verifyReceipt } from './receipt.js';
 import type { RouteUpdate } from './route.js';
 import { type WalletAccount, signReclaimWithWallet } from './wallet.js';
 
@@ -24,6 +31,18 @@ const feesSchema = z.looseObject({ halfHourFee: z.number() });
 const fields = field();
 
 const afterActions = cx(notice(), css({ marginTop: 'space.08' }));
+
+function chooseOption(plan: ReclaimPlan, chosen: string | null): ReclaimOption | null {
+  if (chosen !== null) return findReclaimOption(plan, chosen);
+  return plan.target?.ready ? plan.target : null;
+}
+
+function optionLabel(o: ReclaimOption): string {
+  const amount = `${o.output.amountSats.toLocaleString('en-US')} sats, ${outpointOf(o.output)}`;
+  if (o.ready) return `${amount}: reclaimable now`;
+  if (o.blocksUntilReclaim === null) return `${amount}: waiting for its first confirmation`;
+  return `${amount}: reclaimable in about ${o.blocksUntilReclaim} blocks`;
+}
 
 export function Recover(props: {
   backend: Backend;
@@ -35,6 +54,7 @@ export function Recover(props: {
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [to, setTo] = useState('');
+  const [chosen, setChosen] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -44,6 +64,7 @@ export function Recover(props: {
     setError(null);
     setMessage(null);
     setSnapshot(null);
+    setChosen(null);
     try {
       const verified = verifyReceipt(value);
       setReceipt(verified);
@@ -63,8 +84,19 @@ export function Recover(props: {
     }
   }
 
+  const plan = snapshot
+    ? planReclaim({
+        outputs: snapshot.outputs,
+        selected: snapshot.payout,
+        tipHeight: snapshot.tipHeight,
+        reclaimLockBlocks: receipt?.reclaimLockBlocks ?? config.reclaimLockBlocks,
+      })
+    : null;
+  const choice = plan ? chooseOption(plan, chosen) : null;
+
   async function reclaim() {
-    if (!receipt || !snapshot?.payout || !props.account) return;
+    if (!receipt || !choice || !props.account) return;
+    const output = choice.output;
     setBusy(true);
     setError(null);
     try {
@@ -73,27 +105,37 @@ export function Recover(props: {
           `Connect the wallet that owns ${receipt.reclaimKeyAddress}; this deposit can only be reclaimed with its key.`
         );
       }
-      if (await isOutputSpent(config.btcApiUrl, snapshot.payout.txid, snapshot.payout.vout)) {
-        throw new Error('That Bitcoin has already moved. There is nothing left to reclaim.');
+      if (!choice.ready) {
+        throw new Error('The timelock on that output has not passed yet.');
+      }
+      if (await isOutputSpent(config.btcApiUrl, output.txid, output.vout)) {
+        throw new Error(
+          'That output has already been spent. Choose another one, if any is listed.'
+        );
       }
       const feesUrl = `${config.btcApiUrl}/v1/fees/recommended`;
       const fees = parseWith(feesSchema, await (await fetch(feesUrl)).json(), feesUrl);
+      const feeRate = Math.max(1, fees.halfHourFee);
+      const tooSmall = reclaimAmountProblem(output.amountSats, feeRate);
+      if (tooSmall) throw new Error(tooSmall);
       const { psbtHex } = buildReclaimPsbt({
-        payout: snapshot.payout,
+        payout: output,
         bitcoinAddress: to.trim(),
         stacksAddress: receipt.stacksAddress,
         reclaimPublicKey: receipt.reclaimPublicKey,
         signersPublicKey: receipt.signersPublicKey,
         maxSignerFeeSats: receipt.maxSignerFeeSats,
         reclaimLockBlocks: receipt.reclaimLockBlocks,
-        feeRate: Math.max(1, fees.halfHourFee),
+        feeRate,
       });
       const signed = await signReclaimWithWallet(psbtHex, props.account);
       const { txHex, txid } = finalizeSignedReclaim(signed);
       const res = await fetch(`${config.btcApiUrl}/tx`, { method: 'POST', body: txHex });
       if (!res.ok)
         throw new Error(`The Bitcoin network rejected the transaction: ${await res.text()}`);
-      setMessage(`Reclaim sent. Transaction ${txid}.`);
+      setMessage(`Reclaim sent for ${outpointOf(output)}. Transaction ${txid}.`);
+      setChosen(null);
+      setSnapshot(await checkProgress(config, props.backend, receipt));
     } catch (err) {
       setError(errorMessage(err) ?? null);
     } finally {
@@ -102,7 +144,9 @@ export function Recover(props: {
   }
 
   const progress = snapshot?.progress;
-  const reclaimable = progress?.stage === 'reclaimable';
+  const reclaimable =
+    plan !== null && (progress?.stage === 'reclaimable' || plan.options.some(o => o.ready));
+  const nothingLeft = plan !== null && plan.nothingLeft && (snapshot?.outputs.length ?? 0) > 0;
 
   const stage = progress?.stage ?? null;
   useEffect(() => {
@@ -149,7 +193,7 @@ export function Recover(props: {
               Choose a deposit
             </option>
             {saved.map((r, i) => (
-              <option key={r.depositAddress} value={i}>
+              <option key={receiptId(r)} value={i}>
                 {r.quoteResponse.quote.amountInFormatted} {r.origin.symbol}, started{' '}
                 {new Date(r.createdAt).toLocaleString()}
               </option>
@@ -187,16 +231,9 @@ export function Recover(props: {
             <dd>
               <code>{receipt.reclaimKeyAddress}</code>
             </dd>
-            {snapshot?.payout && (
-              <>
-                <dt>Bitcoin payout</dt>
-                <dd>
-                  {snapshot.payout.amountSats.toLocaleString('en-US')} sats in{' '}
-                  <code>{snapshot.payout.txid}</code>
-                </dd>
-              </>
-            )}
+            {snapshot && <PayoutDetails snapshot={snapshot} />}
           </dl>
+          {snapshot && <PayoutNotices snapshot={snapshot} />}
 
           {progress && !progress.terminal && (
             <div className={actions()}>
@@ -206,8 +243,39 @@ export function Recover(props: {
             </div>
           )}
 
-          {reclaimable && (
+          {nothingLeft && (
+            <p className={notice()}>
+              No unspent BTC is left at this deposit address. There is nothing left to reclaim.
+            </p>
+          )}
+
+          {reclaimable && plan && (
             <>
+              <label className={fields.label}>
+                Output to reclaim
+                <select
+                  className={fields.control}
+                  value={choice ? outpointOf(choice.output) : ''}
+                  onChange={e => setChosen(e.target.value)}
+                >
+                  <option value="" disabled>
+                    Choose an output
+                  </option>
+                  {plan.options.map(o => (
+                    <option
+                      key={outpointOf(o.output)}
+                      value={outpointOf(o.output)}
+                      disabled={!o.ready}
+                    >
+                      {optionLabel(o)}
+                    </option>
+                  ))}
+                </select>
+                <small className={fields.hint}>
+                  Each output is reclaimed in its own transaction. Outputs too small to cover the
+                  network fee are refused.
+                </small>
+              </label>
               <label className={fields.label}>
                 Send the reclaimed BTC to
                 <input
@@ -221,7 +289,7 @@ export function Recover(props: {
               <div className={actions()}>
                 <button
                   className={button({ variant: 'primary' })}
-                  disabled={busy || !to || !props.account}
+                  disabled={busy || !to || !props.account || !choice?.ready}
                   onClick={() => void reclaim()}
                 >
                   {busy ? 'Working…' : 'Reclaim BTC'}

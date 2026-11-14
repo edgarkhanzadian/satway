@@ -5,6 +5,8 @@ export * from './emily.js';
 export * from './validate.js';
 export * from './oneclick.js';
 export * from './bitcoin.js';
+export * from './payout-selection.js';
+export * from './observe-deposit.js';
 export * from './status.js';
 export * from './reclaim.js';
 export { HttpError, type FetchLike } from './http.js';
