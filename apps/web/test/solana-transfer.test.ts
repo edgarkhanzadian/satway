@@ -8,7 +8,7 @@ import {
 } from '@solana/kit';
 import { describe, expect, it } from 'vitest';
 
-import type { OneClickToken } from '@stxonector/core';
+import type { OneClickToken } from '@portage/core';
 
 import type { RawAccount } from '../src/solana-rpc.js';
 import {

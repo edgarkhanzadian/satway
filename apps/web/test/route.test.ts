@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { Stage } from '@stxonector/core';
+import type { Stage } from '@portage/core';
 
 import { type RouteState, STOPS, STOP_STATUS_TEXT, routeState } from '../src/route.js';
 

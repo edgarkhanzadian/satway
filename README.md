@@ -1,4 +1,4 @@
-# stxonector
+# Portage
 
 Deposit to sBTC on Stacks from other chains in one flow.
 
@@ -63,8 +63,8 @@ Styling uses [PandaCSS](https://panda-css.com), structured like leather-io/mono.
 (colour, type, spacing, radii, keyframes), recipes and global styles live in
 `packages/panda-preset`; `apps/web/panda.config.ts` loads it with `strictTokens` and
 `strictPropertyValues` on. `pnpm install` runs `panda codegen` (the web app's `prepare` script),
-which writes the git-ignored `apps/web/stxonector-styles`; `lint`, `typecheck`, `build` and `dev`
-run it again first. App code imports from `stxonector-styles/*` only: no `.css` files besides
+which writes the git-ignored `apps/web/portage-styles`; `lint`, `typecheck`, `build` and `dev`
+run it again first. App code imports from `portage-styles/*` only: no `.css` files besides
 `src/app.css` and Fontsource, no inline styles, no literal class names and no `[value]` escape
 hatches (ESLint and dependency-cruiser enforce this).
 
@@ -72,8 +72,8 @@ Local development:
 
 ```sh
 cp .env.example .env.local
-pnpm --filter @stxonector/api dev      # http://localhost:8787
-pnpm --filter @stxonector/web dev      # http://localhost:5173
+pnpm --filter @portage/api dev      # http://localhost:8787
+pnpm --filter @portage/web dev      # http://localhost:5173
 ```
 
 ## Mainnet proof (moves real funds, small amounts)
@@ -119,6 +119,6 @@ Content-Security-Policy is generated from it.
 - Responses from 1Click, Hiro, Emily, mempool.space and the wallet are checked
   with zod schemas before use. The schemas keep unknown fields, so a stored quote
   response keeps every field the provider sent. zod runs in `jitless` mode (set in
-  `packages/core/src/schema.ts`; import `z` from `@stxonector/core`), so it never
+  `packages/core/src/schema.ts`; import `z` from `@portage/core`), so it never
   needs `eval` under the page's CSP.
 - `@stacks/connect` bundles WalletConnect, which is most of the bundle size.

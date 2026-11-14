@@ -16,7 +16,7 @@ import {
   priorOutputsOf,
   signerKeyOfDepositScript,
   snapshotOutpoints,
-} from '@stxonector/core';
+} from '@portage/core';
 
 import { BadRequest } from './proxy.js';
 import {

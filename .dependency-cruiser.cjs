@@ -40,7 +40,7 @@ module.exports = {
     {
       name: 'core-only-through-its-entry',
       severity: 'error',
-      comment: 'Outside packages/core, import @stxonector/core through its package entry only.',
+      comment: 'Outside packages/core, import @portage/core through its package entry only.',
       from: { path: '^(?:apps|scripts)/' },
       to: { path: '^packages/core/', pathNot: '^packages/core/src/index[.]ts$' },
     },
@@ -48,9 +48,9 @@ module.exports = {
       name: 'styled-system-only-in-web',
       severity: 'error',
       comment:
-        'The generated Panda styled-system (apps/web/stxonector-styles) is for apps/web only. Nothing else may import it.',
+        'The generated Panda styled-system (apps/web/portage-styles) is for apps/web only. Nothing else may import it.',
       from: { pathNot: '^apps/web/' },
-      to: { path: '(^|/)stxonector-styles(/|$)' },
+      to: { path: '(^|/)portage-styles(/|$)' },
     },
     {
       name: 'panda-preset-is-standalone',
@@ -64,7 +64,7 @@ module.exports = {
       name: 'panda-preset-only-through-panda-config',
       severity: 'error',
       comment:
-        'App code uses the generated stxonector-styles modules. The preset itself is loaded by panda.config.ts only.',
+        'App code uses the generated portage-styles modules. The preset itself is loaded by panda.config.ts only.',
       from: { path: '^apps/', pathNot: '^apps/web/panda[.]config[.]ts$' },
       to: { path: '^packages/panda-preset/' },
     },
@@ -242,7 +242,7 @@ module.exports = {
   ],
   options: {
     doNotFollow: {
-      path: ['node_modules', '[.]pnpm-store', '^apps/web/stxonector-styles/'],
+      path: ['node_modules', '[.]pnpm-store', '^apps/web/portage-styles/'],
     },
     exclude: {
       path: [

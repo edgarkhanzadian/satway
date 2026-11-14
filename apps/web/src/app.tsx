@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 
-import { styled } from 'stxonector-styles/jsx';
-import { button, sheet } from 'stxonector-styles/recipes';
+import { styled } from 'portage-styles/jsx';
+import { button, sheet } from 'portage-styles/recipes';
 
 import { createBackend } from './backend.js';
 import { Deposit } from './deposit.js';
@@ -47,7 +47,7 @@ export function App() {
           color="band.ink"
         >
           <styled.h1 textStyle="wordmark" margin="space.00" marginRight="auto">
-            stxonector
+            portage
           </styled.h1>
           <styled.nav aria-label="Page" display="flex" gap="space.02">
             <button
@@ -178,11 +178,11 @@ export function App() {
           borderTopColor="hairline"
         >
           <styled.span fontSize="lg" fontWeight="medium" letterSpacing="wordmark">
-            stxonector
+            portage
           </styled.span>
           <styled.p margin="space.00" fontSize="sm" color="muted">
-            stxonector is an independent project, not affiliated with or endorsed by Stacks or the
-            sBTC signers.
+            Portage is an independent project, not affiliated with or endorsed by Stacks or the sBTC
+            signers.
           </styled.p>
         </styled.footer>
       </styled.div>

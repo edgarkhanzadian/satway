@@ -22,7 +22,7 @@ import {
   selectPayout,
   signReclaimPsbt,
   z,
-} from '@stxonector/core';
+} from '@portage/core';
 
 import { loadEnv, optional } from './lib/env.js';
 import { contextOfProof, loadProof, reclaimKeyFromEnv } from './lib/proof.js';

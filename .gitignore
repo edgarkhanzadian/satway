@@ -1,6 +1,6 @@
 node_modules
 dist
-stxonector-styles
+portage-styles
 .env
 .env.local
 .env.*.local

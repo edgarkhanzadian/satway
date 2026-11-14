@@ -13,7 +13,7 @@ import {
   providerFeesOf,
   registerOutputs,
   snapshotOutpoints,
-} from '@stxonector/core';
+} from '@portage/core';
 
 import { loadEnv, optional, required } from './lib/env.js';
 import {

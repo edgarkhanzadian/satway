@@ -2,8 +2,8 @@
 // Adapted: `ignoredTypeNames: ['To']` (a leather-specific type) removed from
 // @typescript-eslint/no-base-to-string; the `no-require-imports: off`
 // exception (an expo-image workaround) removed, so the rule's recommended
-// `error` applies. Added: a local `stxonector` plugin (no-comments,
-// no-same-package-barrel-import), stxonector/no-comments enabled at error, and
+// `error` applies. Added: a local `portage` plugin (no-comments,
+// no-same-package-barrel-import), portage/no-comments enabled at error, and
 // unused eslint-disable directives reported as errors. Everything else is
 // unchanged.
 import eslint from '@eslint/js';
@@ -14,7 +14,7 @@ import { noCommentsRule } from './rules/no-comments.js';
 import { noEnumSyntax } from './rules/no-enum.js';
 import { noSamePackageBarrelImportRule } from './rules/no-same-package-barrel-import.js';
 
-export const stxonectorPlugin = {
+export const portagePlugin = {
   rules: {
     'no-comments': noCommentsRule,
     'no-same-package-barrel-import': noSamePackageBarrelImportRule,
@@ -90,10 +90,10 @@ export default tseslint.config(
       reportUnusedDisableDirectives: 'error',
     },
     plugins: {
-      stxonector: stxonectorPlugin,
+      portage: portagePlugin,
     },
     rules: {
-      'stxonector/no-comments': 'error',
+      'portage/no-comments': 'error',
       'prefer-const': ['error', { ignoreReadBeforeAssign: false }],
       'no-nested-ternary': 'error',
       'no-restricted-syntax': ['error', ...sharedRestrictedSyntax],

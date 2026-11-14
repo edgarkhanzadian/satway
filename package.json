@@ -1,5 +1,5 @@
 {
-  "name": "stxonector",
+  "name": "portage",
   "description": "Deposit to sBTC on Stacks from other chains in one flow",
   "type": "module",
   "scripts": {
@@ -23,9 +23,9 @@
   },
   "devDependencies": {
     "@ls-lint/ls-lint": "2.2.3",
-    "@stxonector/eslint-config": "workspace:*",
-    "@stxonector/prettier-config": "workspace:*",
-    "@stxonector/tsconfig-config": "workspace:*",
+    "@portage/eslint-config": "workspace:*",
+    "@portage/prettier-config": "workspace:*",
+    "@portage/tsconfig-config": "workspace:*",
     "@trivago/prettier-plugin-sort-imports": "5.2.2",
     "@types/node": "26.6.6",
     "dependency-cruiser": "16.10.4",

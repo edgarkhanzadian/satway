@@ -5,7 +5,7 @@ import {
   oneClickTokensSchema,
   parseWith,
   z,
-} from '@stxonector/core';
+} from '@portage/core';
 
 import type { Backend } from './flow.js';
 

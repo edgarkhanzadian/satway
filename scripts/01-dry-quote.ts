@@ -11,7 +11,7 @@ import {
   errorMessage,
   fetchLimits,
   fetchVerifiedSigners,
-} from '@stxonector/core';
+} from '@portage/core';
 
 import { loadEnv, optional } from './lib/env.js';
 

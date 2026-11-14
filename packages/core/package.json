@@ -1,5 +1,5 @@
 {
-  "name": "@stxonector/core",
+  "name": "@portage/core",
   "description": "sBTC deposit, signer, quote and reclaim logic. No UI, no keys.",
   "version": "0.0.0",
   "type": "module",
@@ -22,14 +22,14 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "@stxonector/prettier-config": "workspace:*",
-    "@stxonector/tsconfig-config": "workspace:*",
+    "@portage/prettier-config": "workspace:*",
+    "@portage/tsconfig-config": "workspace:*",
     "prettier": "3.5.1",
     "typescript": "5.9.3",
     "vitest": "3.2.7"
   },
   "main": "./src/index.ts",
-  "prettier": "@stxonector/prettier-config",
+  "prettier": "@portage/prettier-config",
   "private": true,
   "types": "./src/index.ts"
 }

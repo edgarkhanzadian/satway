@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { css, cx } from 'stxonector-styles/css';
-import { styled } from 'stxonector-styles/jsx';
-import { actions, button, details, field, link, notice, sheet } from 'stxonector-styles/recipes';
+import { css, cx } from 'portage-styles/css';
+import { styled } from 'portage-styles/jsx';
+import { actions, button, details, field, link, notice, sheet } from 'portage-styles/recipes';
 
-import { type OneClickToken, MAINNET_CONFIG as config, errorMessage } from '@stxonector/core';
+import { type OneClickToken, MAINNET_CONFIG as config, errorMessage } from '@portage/core';
 
 import {
   type Backend,
@@ -60,7 +60,7 @@ const sendFailure = cx(notice({ tone: 'error' }), sendLine);
 const sendActions = cx(actions(), css({ marginBlock: 'space.08' }));
 const refundNote = cx(
   notice(),
-  css({ marginBlock: 'space.02', '.stxonector-actions + &': { marginTop: 'space.08' } })
+  css({ marginBlock: 'space.02', '.portage-actions + &': { marginTop: 'space.08' } })
 );
 
 const solanaPay = css({ marginTop: 'space.08', '& svg': { maxWidth: 'qrCompact' } });

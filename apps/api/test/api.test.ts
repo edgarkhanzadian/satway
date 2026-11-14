@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildQuoteRequest, MAINNET_CONFIG as config } from '@stxonector/core';
+import { buildQuoteRequest, MAINNET_CONFIG as config } from '@portage/core';
 
 import { type Env, handle } from '../src/index.js';
 import { registerDeposit, runNotifier } from '../src/notifier.js';

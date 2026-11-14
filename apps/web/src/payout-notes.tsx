@@ -1,6 +1,6 @@
-import { notice } from 'stxonector-styles/recipes';
+import { notice } from 'portage-styles/recipes';
 
-import { type AddressOutput, type EmilyDepositStatus, outpointOf } from '@stxonector/core';
+import { type AddressOutput, type EmilyDepositStatus, outpointOf } from '@portage/core';
 
 import type { Snapshot } from './flow.js';
 

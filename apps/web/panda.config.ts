@@ -6,10 +6,10 @@ export default defineConfig({
   include: ['./src/**/*.{ts,tsx}'],
   exclude: [],
 
-  presets: ['@stxonector/panda-preset/config'],
+  presets: ['@portage/panda-preset/config'],
 
   jsxFramework: 'react',
-  prefix: 'stxonector',
+  prefix: 'portage',
 
   strictTokens: true,
   strictPropertyValues: true,
@@ -21,5 +21,5 @@ export default defineConfig({
     },
   },
 
-  outdir: 'stxonector-styles',
+  outdir: 'portage-styles',
 });

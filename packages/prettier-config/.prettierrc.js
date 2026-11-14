@@ -1,5 +1,5 @@
 // Copied from leather-io/mono packages/prettier-config/.prettierrc.js (MIT).
-// Import groups adapted: @leather.io scope -> @stxonector, extension-only
+// Import groups adapted: @leather.io scope -> @portage, extension-only
 // aliases (@shared, @app, ...) removed.
 const defaultConfig = {
   printWidth: 100,
@@ -14,7 +14,7 @@ const defaultConfig = {
 export default {
   ...defaultConfig,
   plugins: ['@trivago/prettier-plugin-sort-imports'],
-  importOrder: ['^react', '<THIRD_PARTY_MODULES>', '^@stxonector/(.*)$', '^[./]'],
+  importOrder: ['^react', '<THIRD_PARTY_MODULES>', '^@portage/(.*)$', '^[./]'],
   importOrderSeparation: true,
   importOrderSortSpecifiers: true,
   importOrderSideEffects: false,

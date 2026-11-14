@@ -14,13 +14,13 @@ importers:
       '@ls-lint/ls-lint':
         specifier: 2.2.3
         version: 2.2.3
-      '@stxonector/eslint-config':
+      '@portage/eslint-config':
         specifier: workspace:*
         version: link:packages/eslint-config
-      '@stxonector/prettier-config':
+      '@portage/prettier-config':
         specifier: workspace:*
         version: link:packages/prettier-config
-      '@stxonector/tsconfig-config':
+      '@portage/tsconfig-config':
         specifier: workspace:*
         version: link:packages/tsconfig-config
       '@trivago/prettier-plugin-sort-imports':
@@ -53,14 +53,14 @@ importers:
 
   apps/api:
     dependencies:
-      '@stxonector/core':
+      '@portage/core':
         specifier: workspace:*
         version: link:../../packages/core
     devDependencies:
-      '@stxonector/prettier-config':
+      '@portage/prettier-config':
         specifier: workspace:*
         version: link:../../packages/prettier-config
-      '@stxonector/tsconfig-config':
+      '@portage/tsconfig-config':
         specifier: workspace:*
         version: link:../../packages/tsconfig-config
       prettier:
@@ -84,6 +84,9 @@ importers:
       '@fontsource/dm-mono':
         specifier: 5.3.0
         version: 5.3.0
+      '@portage/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@scure/base':
         specifier: 1.2.6
         version: 1.2.6
@@ -99,9 +102,6 @@ importers:
       '@stacks/connect':
         specifier: 8.2.7
         version: 8.2.7(@types/react@18.3.12)(lit@3.3.0)(react@18.3.1)(typescript@5.9.3)(zod@3.22.4)
-      '@stxonector/core':
-        specifier: workspace:*
-        version: link:../../packages/core
       '@walletconnect/universal-provider':
         specifier: 2.26.0
         version: 2.26.0(typescript@5.9.3)(zod@3.22.4)
@@ -118,13 +118,13 @@ importers:
       '@pandacss/dev':
         specifier: 1.7.1
         version: 1.7.1(typescript@5.9.3)
-      '@stxonector/panda-preset':
+      '@portage/panda-preset':
         specifier: workspace:*
         version: link:../../packages/panda-preset
-      '@stxonector/prettier-config':
+      '@portage/prettier-config':
         specifier: workspace:*
         version: link:../../packages/prettier-config
-      '@stxonector/tsconfig-config':
+      '@portage/tsconfig-config':
         specifier: workspace:*
         version: link:../../packages/tsconfig-config
       '@types/react':
@@ -167,10 +167,10 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
-      '@stxonector/prettier-config':
+      '@portage/prettier-config':
         specifier: workspace:*
         version: link:../prettier-config
-      '@stxonector/tsconfig-config':
+      '@portage/tsconfig-config':
         specifier: workspace:*
         version: link:../tsconfig-config
       prettier:
@@ -201,7 +201,7 @@ importers:
         specifier: 8.47.0
         version: 8.47.0(eslint@9.34.0)(typescript@5.9.3)
     devDependencies:
-      '@stxonector/prettier-config':
+      '@portage/prettier-config':
         specifier: workspace:*
         version: link:../prettier-config
       eslint:
@@ -217,10 +217,10 @@ importers:
         specifier: 1.7.1
         version: 1.7.1(typescript@5.9.3)
     devDependencies:
-      '@stxonector/prettier-config':
+      '@portage/prettier-config':
         specifier: workspace:*
         version: link:../prettier-config
-      '@stxonector/tsconfig-config':
+      '@portage/tsconfig-config':
         specifier: workspace:*
         version: link:../tsconfig-config
       prettier:
@@ -241,7 +241,7 @@ importers:
 
   packages/tsconfig-config:
     devDependencies:
-      '@stxonector/prettier-config':
+      '@portage/prettier-config':
         specifier: workspace:*
         version: link:../prettier-config
       prettier:
@@ -253,6 +253,9 @@ importers:
       '@noble/curves':
         specifier: 1.9.7
         version: 1.9.7
+      '@portage/core':
+        specifier: workspace:*
+        version: link:../packages/core
       '@scure/base':
         specifier: 1.2.6
         version: 1.2.6
@@ -268,17 +271,14 @@ importers:
       '@stacks/transactions':
         specifier: 7.7.0
         version: 7.7.0
-      '@stxonector/core':
-        specifier: workspace:*
-        version: link:../packages/core
       sbtc:
         specifier: 0.3.2
         version: 0.3.2
     devDependencies:
-      '@stxonector/prettier-config':
+      '@portage/prettier-config':
         specifier: workspace:*
         version: link:../packages/prettier-config
-      '@stxonector/tsconfig-config':
+      '@portage/tsconfig-config':
         specifier: workspace:*
         version: link:../packages/tsconfig-config
       prettier:

@@ -26,7 +26,7 @@ import {
   providerFeesOf,
   registerOutputs,
   snapshotOutpoints,
-} from '@stxonector/core';
+} from '@portage/core';
 
 import type { Receipt } from './receipt.js';
 

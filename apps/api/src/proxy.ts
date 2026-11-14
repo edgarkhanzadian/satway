@@ -3,7 +3,7 @@ import {
   type OneClickAppFee,
   type OneClickQuoteRequest,
   isMainnetTaproot,
-} from '@stxonector/core';
+} from '@portage/core';
 
 export class BadRequest extends Error {}
 
@@ -62,7 +62,7 @@ export function sanitizeQuoteRequest(body: unknown, config: FeeConfig): OneClick
     recipient,
     recipientType: 'DESTINATION_CHAIN',
     deadline,
-    referral: 'stxonector',
+    referral: 'portage',
   };
 
   const expected: OneClickAppFee[] =

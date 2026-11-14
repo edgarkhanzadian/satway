@@ -1,7 +1,7 @@
 import { base64, hex } from '@scure/base';
 import { connect, disconnect, request } from '@stacks/connect';
 
-import { assertMainnetStandardAddress, toXOnly } from '@stxonector/core';
+import { assertMainnetStandardAddress, toXOnly } from '@portage/core';
 
 export interface WalletAccount {
   stacksAddress: string;

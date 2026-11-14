@@ -1,6 +1,6 @@
 import { base58 } from '@scure/base';
 
-import { type OneClickToken, parseWith, z } from '@stxonector/core';
+import { type OneClickToken, parseWith, z } from '@portage/core';
 
 export interface Eip1193Provider {
   request(args: { method: string; params?: unknown[] }): Promise<unknown>;
@@ -90,7 +90,7 @@ export function nextRefundField(field: RefundField, walletAddress: string | null
 }
 
 type SessionStore = Pick<Storage, 'getItem' | 'setItem'>;
-const SENT_TX_PREFIX = 'stxonector:sent-tx:';
+export const SENT_TX_PREFIX = 'portage:sent-tx:';
 const TX_HASH = /^0x[0-9a-fA-F]{64}$/;
 
 function sessionStore(): SessionStore {

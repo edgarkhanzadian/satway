@@ -25,7 +25,7 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
 } from '@solana/kit';
 
-import type { OneClickToken } from '@stxonector/core';
+import type { OneClickToken } from '@portage/core';
 
 import { formatUnits } from './solana-pay.js';
 import type { LatestBlockhash, RawAccount } from './solana-rpc.js';

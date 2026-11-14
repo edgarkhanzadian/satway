@@ -3,41 +3,41 @@ import { defineConfig } from 'eslint/config';
 import baseConfig, {
   sharedRestrictedImportPaths,
   sharedRestrictedSyntax,
-} from '@stxonector/eslint-config';
-import reactConfig from '@stxonector/eslint-config/react';
+} from '@portage/eslint-config';
+import reactConfig from '@portage/eslint-config/react';
 
 const coreDeepImport = {
-  group: ['@stxonector/core/*'],
-  message: 'Import from the package entry @stxonector/core, not from its internal files.',
+  group: ['@portage/core/*'],
+  message: 'Import from the package entry @portage/core, not from its internal files.',
 };
 
 const zodThroughCore = {
   group: ['zod', 'zod/*'],
   message:
-    "Import z from @stxonector/core (./schema.js inside core). It turns on zod's jitless mode before any schema exists, so no eval runs under the page's script-src 'self'.",
+    "Import z from @portage/core (./schema.js inside core). It turns on zod's jitless mode before any schema exists, so no eval runs under the page's script-src 'self'.",
 };
 
 const stylesOnlyInWeb = {
-  group: ['stxonector-styles', 'stxonector-styles/*'],
+  group: ['portage-styles', 'portage-styles/*'],
   message: 'The generated Panda styled-system belongs to apps/web. Nothing else may import it.',
 };
 
 const rawCssInWeb = {
   group: ['*.css', '!./app.css', '!@fontsource/*/*.css', '!@fontsource-variable/*/*.css'],
   message:
-    'Style through Panda (css(), styled props or a recipe from @stxonector/panda-preset). The only CSS imports are ./app.css (the Panda entry) and Fontsource font files.',
+    'Style through Panda (css(), styled props or a recipe from @portage/panda-preset). The only CSS imports are ./app.css (the Panda entry) and Fontsource font files.',
 };
 
 const presetOnlyThroughPanda = {
-  group: ['@stxonector/panda-preset', '@stxonector/panda-preset/*'],
+  group: ['@portage/panda-preset', '@portage/panda-preset/*'],
   message:
-    'The preset is consumed by panda.config.ts only. Use the generated stxonector-styles modules in app code.',
+    'The preset is consumed by panda.config.ts only. Use the generated portage-styles modules in app code.',
 };
 
 const pandaEscapeHatch = {
   selector: 'Literal[value=/^\\[.+\\]$/]',
   message:
-    "Panda's [value] escape hatch bypasses the tokens. Add or reuse a token in @stxonector/panda-preset instead.",
+    "Panda's [value] escape hatch bypasses the tokens. Add or reuse a token in @portage/panda-preset instead.",
 };
 
 const webRestrictedSyntax = [
@@ -49,12 +49,12 @@ const webRestrictedSyntax = [
   },
   {
     selector: "JSXAttribute[name.name='className'][value.type='Literal']",
-    message: 'No literal class names. Use css(), cx() or a recipe from stxonector-styles.',
+    message: 'No literal class names. Use css(), cx() or a recipe from portage-styles.',
   },
   {
     selector:
       "JSXAttribute[name.name='className'] > JSXExpressionContainer > :matches(Literal, TemplateLiteral)",
-    message: 'No literal class names. Use css(), cx() or a recipe from stxonector-styles.',
+    message: 'No literal class names. Use css(), cx() or a recipe from portage-styles.',
   },
 ];
 
@@ -72,7 +72,7 @@ const coreRestrictedImports = {
     { group: ['react/*', 'react-dom/*'], message: 'packages/core is UI-free.' },
     stylesOnlyInWeb,
     {
-      group: ['@stxonector/*'],
+      group: ['@portage/*'],
       message: 'packages/core must not import other workspace packages.',
     },
   ],
@@ -83,7 +83,7 @@ export default defineConfig([
     files: ['{packages,apps,scripts}/**/*.{ts,tsx}'],
     extends: [baseConfig],
     rules: {
-      'stxonector/no-same-package-barrel-import': 'error',
+      'portage/no-same-package-barrel-import': 'error',
     },
   },
   {
@@ -96,7 +96,7 @@ export default defineConfig([
     ignores: [
       '**/*.{js,cjs,mjs}',
       '**/node_modules/',
-      '**/stxonector-styles/',
+      '**/portage-styles/',
       '**/panda.config*.ts',
       '**/dist/',
       '**/.wrangler/',
@@ -165,7 +165,7 @@ export default defineConfig([
           patterns: [
             stylesOnlyInWeb,
             {
-              group: ['@stxonector/*'],
+              group: ['@portage/*'],
               message:
                 'The preset holds design values only. It must not import app code or other workspace packages.',
             },

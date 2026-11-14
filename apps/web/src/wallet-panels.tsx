@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { css, cva, cx } from 'stxonector-styles/css';
-import { actions, button, details, notice } from 'stxonector-styles/recipes';
+import { css, cva, cx } from 'portage-styles/css';
+import { actions, button, details, notice } from 'portage-styles/recipes';
 
-import { errorMessage } from '@stxonector/core';
+import { errorMessage } from '@portage/core';
 
 import {
   type SolanaWalletOption,

@@ -210,7 +210,7 @@ export function buildQuoteRequest(
     recipient: input.depositAddress,
     recipientType: 'DESTINATION_CHAIN',
     deadline: deadline.toISOString(),
-    referral: 'stxonector',
+    referral: 'portage',
   };
   if (config.appFeeBps > 0) {
     if (!config.appFeeRecipient) throw new Error('App fee is set but has no recipient');

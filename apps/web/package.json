@@ -1,5 +1,5 @@
 {
-  "name": "@stxonector/web",
+  "name": "@portage/web",
   "description": "Browser app: deposit flow, status tracking, recovery",
   "version": "0.0.0",
   "type": "module",
@@ -19,12 +19,12 @@
   "dependencies": {
     "@fontsource-variable/instrument-sans": "5.3.0",
     "@fontsource/dm-mono": "5.3.0",
+    "@portage/core": "workspace:*",
     "@scure/base": "1.2.6",
     "@solana-program/system": "0.16.0",
     "@solana-program/token": "0.18.0",
     "@solana/kit": "8.6.0",
     "@stacks/connect": "8.2.7",
-    "@stxonector/core": "workspace:*",
     "@walletconnect/universal-provider": "2.26.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
@@ -32,9 +32,9 @@
   },
   "devDependencies": {
     "@pandacss/dev": "1.7.1",
-    "@stxonector/panda-preset": "workspace:*",
-    "@stxonector/prettier-config": "workspace:*",
-    "@stxonector/tsconfig-config": "workspace:*",
+    "@portage/panda-preset": "workspace:*",
+    "@portage/prettier-config": "workspace:*",
+    "@portage/tsconfig-config": "workspace:*",
     "@types/react": "18.3.12",
     "@types/react-dom": "18.3.1",
     "@vitejs/plugin-react": "4.7.0",
@@ -43,6 +43,6 @@
     "vite": "6.4.6",
     "vitest": "3.2.7"
   },
-  "prettier": "@stxonector/prettier-config",
+  "prettier": "@portage/prettier-config",
   "private": true
 }

@@ -1,6 +1,6 @@
 import { base64 } from '@scure/base';
 
-import { errorMessage } from '@stxonector/core';
+import { errorMessage } from '@portage/core';
 
 export interface RpcResponse {
   ok: boolean;

@@ -4,7 +4,7 @@ import {
   buildDepositAddress,
   oneClickQuoteResponseSchema,
   z,
-} from '@stxonector/core';
+} from '@portage/core';
 
 export interface Receipt {
   version: 1;
@@ -97,11 +97,11 @@ export function verifyReceipt(value: unknown): Receipt {
   return r;
 }
 
-const KEY = 'stxonector.receipts.v1';
+export const RECEIPTS_KEY = 'portage.receipts.v1';
 
 export function loadReceipts(): Receipt[] {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = localStorage.getItem(RECEIPTS_KEY);
     if (!raw) return [];
     const list: unknown = JSON.parse(raw);
     if (!Array.isArray(list)) return [];
@@ -125,14 +125,14 @@ export function rememberReceipt(receipt: Receipt): void {
   try {
     const id = receiptId(receipt);
     const rest = loadReceipts().filter(r => receiptId(r) !== id);
-    localStorage.setItem(KEY, JSON.stringify([receipt, ...rest].slice(0, 20)));
+    localStorage.setItem(RECEIPTS_KEY, JSON.stringify([receipt, ...rest].slice(0, 20)));
   } catch {
     return;
   }
 }
 
 export function receiptFileName(receipt: Receipt): string {
-  return `stxonector-deposit-${receipt.createdAt.slice(0, 10)}-${receipt.depositAddress.slice(-8)}.json`;
+  return `portage-deposit-${receipt.createdAt.slice(0, 10)}-${receipt.depositAddress.slice(-8)}.json`;
 }
 
 export function downloadReceipt(receipt: Receipt): void {

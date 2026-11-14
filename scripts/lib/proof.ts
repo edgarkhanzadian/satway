@@ -11,7 +11,7 @@ import {
   oneClickQuoteResponseSchema,
   parseWith,
   z,
-} from '@stxonector/core';
+} from '@portage/core';
 
 import { repoRoot, required } from './env.js';
 

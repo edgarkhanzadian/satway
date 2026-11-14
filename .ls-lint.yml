@@ -14,7 +14,7 @@ ignore:
   - dist
   - apps/*/node_modules
   - apps/*/dist
-  - apps/web/stxonector-styles
+  - apps/web/portage-styles
   - apps/api/.wrangler
   - packages/*/node_modules
   - scripts/node_modules

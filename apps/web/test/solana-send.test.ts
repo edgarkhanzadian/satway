@@ -1,7 +1,7 @@
 import { base58, base64 } from '@scure/base';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { OneClickToken } from '@stxonector/core';
+import type { OneClickToken } from '@portage/core';
 
 import type { RawAccount, SimulationResult, SolanaRpc } from '../src/solana-rpc.js';
 import { sendSolanaDeposit, simulationReason, solanaPayOffer } from '../src/solana-send.js';

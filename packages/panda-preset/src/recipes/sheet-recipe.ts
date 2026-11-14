@@ -14,6 +14,6 @@ export const sheetRecipe = defineRecipe({
     boxShadow: 'sheet',
     paddingBlock: { base: 'space.10', md: 'space.12' },
     paddingInline: { base: 'space.08', md: 'space.14' },
-    '& > p:not(.stxonector-notice--tone_status), & > ul': { maxWidth: 'measure' },
+    '& > p:not(.portage-notice--tone_status), & > ul': { maxWidth: 'measure' },
   },
 });

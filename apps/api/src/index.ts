@@ -1,4 +1,4 @@
-import { type FetchLike, HttpError, MAINNET_CONFIG as config } from '@stxonector/core';
+import { type FetchLike, HttpError, MAINNET_CONFIG as config } from '@portage/core';
 
 import { registerDeposit, runNotifier } from './notifier.js';
 import { BadRequest, sanitizeQuoteRequest } from './proxy.js';

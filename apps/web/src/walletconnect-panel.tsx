@@ -1,8 +1,8 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 
-import { css, cx } from 'stxonector-styles/css';
-import { styled } from 'stxonector-styles/jsx';
-import { actions, button, link, notice } from 'stxonector-styles/recipes';
+import { css, cx } from 'portage-styles/css';
+import { styled } from 'portage-styles/jsx';
+import { actions, button, link, notice } from 'portage-styles/recipes';
 
 import type { SourceWallet } from './source-wallet.js';
 import { WalletName, WalletNote } from './wallet-option.js';

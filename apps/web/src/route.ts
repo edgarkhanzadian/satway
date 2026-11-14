@@ -1,4 +1,4 @@
-import type { Stage } from '@stxonector/core';
+import type { Stage } from '@portage/core';
 
 export const STOPS = ['Your chain', 'Swap to BTC', 'Bitcoin deposit', 'sBTC on Stacks'] as const;
 

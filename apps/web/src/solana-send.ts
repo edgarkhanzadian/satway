@@ -1,7 +1,7 @@
 import { base58, base64 } from '@scure/base';
 import { encode } from 'uqr';
 
-import { type OneClickToken, errorMessage } from '@stxonector/core';
+import { type OneClickToken, errorMessage } from '@portage/core';
 
 import { SOLANA_RPC_URL } from './config.js';
 import { solanaPayUrl } from './solana-pay.js';

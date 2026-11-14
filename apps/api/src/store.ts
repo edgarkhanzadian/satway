@@ -1,4 +1,4 @@
-import { parseWith, z } from '@stxonector/core';
+import { parseWith, z } from '@portage/core';
 
 export interface KV {
   get(key: string): Promise<string | null>;

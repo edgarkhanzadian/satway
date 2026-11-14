@@ -1,6 +1,6 @@
-import { css } from 'stxonector-styles/css';
-import { styled } from 'stxonector-styles/jsx';
-import { routeLeg, routeStop } from 'stxonector-styles/recipes';
+import { css } from 'portage-styles/css';
+import { styled } from 'portage-styles/jsx';
+import { routeLeg, routeStop } from 'portage-styles/recipes';
 
 import { type RouteState, STOPS, STOP_STATUS_TEXT, type StopStatus } from './route.js';
 

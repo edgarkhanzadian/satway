@@ -1,5 +1,5 @@
 {
-  "name": "@stxonector/tsconfig-config",
+  "name": "@portage/tsconfig-config",
   "description": "Shared tsconfig configuration",
   "version": "0.0.0",
   "scripts": {
@@ -7,10 +7,10 @@
     "format:check": "prettier . --check --ignore-path ../../.prettierignore"
   },
   "devDependencies": {
-    "@stxonector/prettier-config": "workspace:*",
+    "@portage/prettier-config": "workspace:*",
     "prettier": "3.5.1"
   },
   "main": "tsconfig.base.json",
-  "prettier": "@stxonector/prettier-config",
+  "prettier": "@portage/prettier-config",
   "private": true
 }

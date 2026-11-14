@@ -9,6 +9,7 @@ import {
   walletConnectMetadata,
 } from './config.js';
 import type { SourceWallet } from './source-wallet.js';
+import { migrateWalletConnectStorage } from './storage-migration.js';
 import {
   DISCONNECT_TIMEOUT_MS,
   PAIRING_TIMEOUT_MS,
@@ -53,8 +54,9 @@ function ignore(): undefined {
   return undefined;
 }
 
-async function client(): Promise<Client> {
-  shared ??= UniversalProvider.init({
+async function initClient(): Promise<Client> {
+  await migrateWalletConnectStorage();
+  return UniversalProvider.init({
     projectId: WALLETCONNECT_PROJECT_ID,
     relayUrl: WALLETCONNECT_RELAY_URL,
     metadata: walletConnectMetadata(window.location.origin),
@@ -62,6 +64,10 @@ async function client(): Promise<Client> {
     telemetryEnabled: false,
     logger: 'error',
   });
+}
+
+async function client(): Promise<Client> {
+  shared ??= initClient();
   const pending = shared;
   try {
     return await withTimeout(pending, RELAY_TIMEOUT_MS, 'Timed out reaching the relay');

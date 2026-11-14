@@ -1,6 +1,6 @@
 import { base58, base64 } from '@scure/base';
 
-import { errorMessage } from '@stxonector/core';
+import { errorMessage } from '@portage/core';
 
 import { SOLANA_MAINNET_CAIP2 } from './config.js';
 import {

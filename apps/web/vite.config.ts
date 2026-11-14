@@ -28,7 +28,7 @@ function contentSecurityPolicy(apiUrl: string): Plugin {
     "form-action 'none'",
   ].join('; ');
   return {
-    name: 'stxonector-csp',
+    name: 'portage-csp',
     apply: 'build',
     transformIndexHtml: () => [
       {
@@ -45,7 +45,7 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react(), contentSecurityPolicy(env.VITE_API_URL ?? 'http://localhost:8787')],
     resolve: {
-      alias: { 'stxonector-styles': fileURLToPath(new URL('stxonector-styles', import.meta.url)) },
+      alias: { 'portage-styles': fileURLToPath(new URL('portage-styles', import.meta.url)) },
     },
     build: { target: 'es2022', sourcemap: true },
     server: { port: 5173 },

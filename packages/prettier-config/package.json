@@ -1,5 +1,5 @@
 {
-  "name": "@stxonector/prettier-config",
+  "name": "@portage/prettier-config",
   "description": "Shared prettier configuration",
   "version": "0.0.0",
   "type": "module",

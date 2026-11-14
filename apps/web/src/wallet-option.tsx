@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-import { styled } from 'stxonector-styles/jsx';
+import { styled } from 'portage-styles/jsx';
 
 export function WalletName(props: { children: ReactNode }) {
   return <styled.span fontWeight="medium">{props.children}</styled.span>;

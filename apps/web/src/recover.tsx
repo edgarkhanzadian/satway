@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 
-import { css, cx } from 'stxonector-styles/css';
-import { styled } from 'stxonector-styles/jsx';
-import { actions, button, details, field, notice, sheet } from 'stxonector-styles/recipes';
+import { css, cx } from 'portage-styles/css';
+import { styled } from 'portage-styles/jsx';
+import { actions, button, details, field, notice, sheet } from 'portage-styles/recipes';
 
 import {
   type ReclaimOption,
@@ -18,7 +18,7 @@ import {
   planReclaim,
   reclaimAmountProblem,
   z,
-} from '@stxonector/core';
+} from '@portage/core';
 
 import { type Backend, type Snapshot, checkProgress } from './flow.js';
 import { PayoutDetails, PayoutNotices } from './payout-notes.js';

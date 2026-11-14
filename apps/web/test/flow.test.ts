@@ -7,17 +7,20 @@ import {
   type OneClickToken,
   MAINNET_CONFIG as config,
   planReclaim,
-} from '@stxonector/core';
+} from '@portage/core';
 
 import { createBackend } from '../src/backend.js';
 import { type Backend, checkProgress, prepareDeposit, toBaseUnits } from '../src/flow.js';
 import {
+  RECEIPTS_KEY,
   type Receipt,
   loadReceipts,
+  receiptFileName,
   receiptId,
   rememberReceipt,
   verifyReceipt,
 } from '../src/receipt.js';
+import { OLD_RECEIPTS_KEY, migrateBrowserStorage } from '../src/storage-migration.js';
 import { pickAccount } from '../src/wallet.js';
 
 const D = {
@@ -778,6 +781,49 @@ describe('rememberReceipt', () => {
     expect(stored).toHaveLength(2);
     expect(new Set(stored.map(receiptId)).size).toBe(2);
     expect(stored.every(r => r.depositAddress === D.address)).toBe(true);
+  });
+});
+
+describe('receipts saved under the old project name', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  async function oldStyleReceipt(): Promise<Receipt> {
+    const receipt = await receiptFor(world());
+    receipt.quoteResponse.quoteRequest.referral = 'stxonector';
+    return receipt;
+  }
+
+  it('still load and verify from an old-style receipt file', async () => {
+    const file: unknown = JSON.parse(JSON.stringify(await oldStyleReceipt(), null, 2));
+    const verified = verifyReceipt(file);
+    expect(verified.depositAddress).toBe(D.address);
+    expect(verified.quoteResponse.quoteRequest.referral).toBe('stxonector');
+  });
+
+  it('are found after the storage migration', async () => {
+    const data = new Map<string, string>([
+      [OLD_RECEIPTS_KEY, JSON.stringify([await oldStyleReceipt()])],
+    ]);
+    vi.stubGlobal('localStorage', {
+      get length() {
+        return data.size;
+      },
+      key: (i: number) => [...data.keys()][i] ?? null,
+      getItem: (k: string) => data.get(k) ?? null,
+      setItem: (k: string, v: string) => void data.set(k, v),
+      removeItem: (k: string) => void data.delete(k),
+    });
+    vi.stubGlobal('sessionStorage', undefined);
+    migrateBrowserStorage();
+    expect(data.has(OLD_RECEIPTS_KEY)).toBe(false);
+    expect(data.has(RECEIPTS_KEY)).toBe(true);
+    expect(loadReceipts().map(r => r.depositAddress)).toEqual([D.address]);
+  });
+
+  it('new receipt files use the new name', async () => {
+    expect(receiptFileName(await receiptFor(world()))).toMatch(/^portage-deposit-/);
   });
 });
 

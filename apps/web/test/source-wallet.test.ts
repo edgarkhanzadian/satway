@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { OneClickToken } from '@stxonector/core';
+import type { OneClickToken } from '@portage/core';
 
 import {
   type Eip1193Provider,

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { type OneClickQuoteRequest, ResponseShapeError } from '@stxonector/core';
+import { type OneClickQuoteRequest, ResponseShapeError } from '@portage/core';
 
 import { createBackend } from '../src/backend.js';
 
