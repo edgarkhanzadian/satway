@@ -1,5 +1,5 @@
 import { PROGRESS } from '../src/app/satway-app.js';
-import { SOLANA_MAINNET_CAIP2 } from '../src/config.js';
+import { APP_ORIGIN, SOLANA_MAINNET_CAIP2 } from '../src/config.js';
 import { expect, test } from '../src/fixtures.js';
 import { finishJourney } from '../src/scenario/journeys.js';
 import {
@@ -59,7 +59,7 @@ test.describe('W1. WalletConnect pairing against the fake relay', () => {
       expect(proposal.metadata).toEqual({
         name: 'Satway',
         description: 'Deposit to sBTC on Stacks from other chains in one flow',
-        url: 'http://127.0.0.1:4391',
+        url: APP_ORIGIN,
         icons: [],
       });
     });

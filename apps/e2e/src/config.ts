@@ -1,8 +1,18 @@
 import { fileURLToPath } from 'node:url';
 
-export const APP_PORT = 4391;
+function portFrom(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port < 1024 || port > 65_535) {
+    throw new Error(`${name} must be a port number between 1024 and 65535`);
+  }
+  return port;
+}
+
+export const APP_PORT = portFrom('E2E_APP_PORT', 4391);
 export const APP_ORIGIN = `http://127.0.0.1:${APP_PORT}`;
-export const API_ORIGIN = 'http://127.0.0.1:4392';
+export const API_ORIGIN = `http://127.0.0.1:${portFrom('E2E_API_PORT', 4392)}`;
 
 export const WEB_BUILD_DIR = fileURLToPath(new URL('../.web-build', import.meta.url));
 

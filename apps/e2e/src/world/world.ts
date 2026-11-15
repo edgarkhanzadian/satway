@@ -24,6 +24,7 @@ import { Rng } from './random.js';
 import { parseDepositScript } from './sbtc-scripts.js';
 import { type Credit, NATIVE_SOL_ASSET, SolanaChain } from './solana.js';
 import { FakeRelay } from './walletconnect-relay.js';
+import { WithdrawalWorld } from './withdrawals.js';
 
 export type Caller = 'page' | 'worker' | 'notifier' | 'wallet' | 'test';
 export type Service = 'hiro' | 'alex' | 'mempool' | 'emily' | 'oneclick' | 'solana';
@@ -149,6 +150,7 @@ export class World {
   readonly solana: SolanaChain;
   readonly evm: EvmChains;
   readonly relay: FakeRelay;
+  readonly withdrawals: WithdrawalWorld;
   readonly log: WorldLogEntry[] = [];
   readonly unexpected: string[] = [];
   readonly authorizations: {
@@ -189,6 +191,13 @@ export class World {
       TOKENS.usdcSol.decimals,
       this.rng.base58(32)
     );
+    this.withdrawals = new WithdrawalWorld({
+      rng: new Rng(`${seed}#withdrawals`),
+      now: () => this.now(),
+      bitcoin: this.bitcoin,
+      treasury: this.treasury,
+      oneClick: this.oneClick,
+    });
   }
 
   private baseNow(): number {
@@ -525,6 +534,8 @@ export class World {
         body: '',
       };
     }
+    const withdrawal = this.withdrawals.route(service, request.method, url, request.body);
+    if (withdrawal) return withdrawal;
     switch (service) {
       case 'hiro':
         return this.hiro.serve(request.method, url.pathname, request.body);

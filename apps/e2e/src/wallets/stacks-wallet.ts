@@ -5,6 +5,7 @@ import { field, numberField, stringField } from '../world/http.js';
 import { type BitcoinKey, bitcoinKey, p2trOf, p2wpkhOf, stacksAddressOf } from '../world/keys.js';
 import type { World } from '../world/world.js';
 import { Behaviour, WalletError } from './behaviour.js';
+import { type CapturedContractCall, approveContractCall } from './stacks-contract-call.js';
 
 export const STACKS_WALLET_ID = 'SatwayTestStacksWallet';
 export const STACKS_WALLET_NAME = 'Test Stacks Wallet';
@@ -22,8 +23,11 @@ export class StacksWallet {
   readonly behaviour = new Behaviour();
   readonly account: StacksAccount;
   readonly signedPsbts: { psbt: string; signInputs: unknown }[] = [];
+  readonly contractCalls: CapturedContractCall[] = [];
+  private readonly world: World;
 
   constructor(world: World) {
+    this.world = world;
     const stacksKey = bitcoinKey(world.rng);
     const paymentKey = bitcoinKey(world.rng);
     const taprootKey = bitcoinKey(world.rng);
@@ -120,6 +124,13 @@ export class StacksWallet {
         return { addresses: this.addresses() };
       case 'signPsbt':
         return this.signPsbt(params);
+      case 'stx_callContract':
+        return approveContractCall(
+          this.world,
+          this.account.stacksAddress,
+          params,
+          this.contractCalls
+        );
       default:
         throw new WalletError(-32601, `The wallet does not support ${method}`);
     }

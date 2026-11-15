@@ -6,7 +6,7 @@ import { APP_ORIGIN, BLACK_HOLE_PROXY } from './src/config.js';
 
 const ci = Boolean(process.env.CI);
 
-const VISUAL_SPEC = /q5-visual\.spec\.ts$/;
+const VISUAL_SPEC = /q5-visual(?:-withdraw)?\.spec\.ts$/;
 const BASELINES = fileURLToPath(new URL('./visual-baselines', import.meta.url));
 
 function haveBaselines(): boolean {

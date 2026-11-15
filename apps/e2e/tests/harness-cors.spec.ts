@@ -1,4 +1,5 @@
 import { NO_ALLOWANCES, collectViolations } from '../src/browser/violations.js';
+import { API_ORIGIN, APP_ORIGIN } from '../src/config.js';
 import { expect, test } from '../src/fixtures.js';
 
 test.describe('harness self-check: the Worker CORS rules are enforced like a browser would', () => {
@@ -16,7 +17,7 @@ test.describe('harness self-check: the Worker CORS rules are enforced like a bro
     const found = collectViolations(harness, world, [], NO_ALLOWANCES);
     expect(found.corsFailures.map(f => f.text)).toEqual([
       expect.stringMatching(
-        /^GET http:\/\/127\.0\.0\.1:4392\/tokens: response did not allow origin http:\/\/127\.0\.0\.1:4391/
+        new RegExp(`^GET ${API_ORIGIN}/tokens: response did not allow origin ${APP_ORIGIN}`)
       ),
     ]);
     harness.acknowledge();
