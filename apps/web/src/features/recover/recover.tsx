@@ -34,7 +34,13 @@ import {
   sendAmountText,
   verifyReceipt,
 } from '../../shared/index.js';
-import { PayoutDetails, PayoutNotices, RefundNote, type RouteUpdate } from '../../ui/index.js';
+import {
+  PayoutDetails,
+  PayoutNotices,
+  QuotedOutput,
+  RefundNote,
+  type RouteUpdate,
+} from '../../ui/index.js';
 
 const fields = field();
 
@@ -281,6 +287,7 @@ export function Recover(props: {
             <dd>
               <code>{receipt.depositAddress}</code>
             </dd>
+            <QuotedOutput quote={receipt.quoteResponse.quote} />
             <dt>Reclaim key belongs to</dt>
             <dd>
               <code>{receipt.reclaimKeyAddress}</code>

@@ -56,6 +56,7 @@ import {
   PayoutDetails,
   PayoutNotices,
   QrCode,
+  QuotedOutput,
   RefundNote,
   type RouteUpdate,
   SendRecordView,
@@ -67,7 +68,7 @@ import {
   keepRegistering,
   registeredThisSession,
 } from './background-registration.js';
-import { type Prepared, prepareDeposit } from './flow.js';
+import { type Prepared, liveQuoteWorse, prepareDeposit } from './flow.js';
 
 const POPULAR = ['USDC', 'USDT', 'ETH', 'SOL', 'BNB', 'TRX'];
 
@@ -125,6 +126,7 @@ export function Deposit(props: {
   const [amount, setAmount] = useState('');
   const [refundTo, setRefundTo] = useState('');
   const [preview, setPreview] = useState<Prepared | null>(null);
+  const [repriced, setRepriced] = useState<Prepared | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previews] = useState(latestRequests);
@@ -217,21 +219,47 @@ export function Deposit(props: {
         if (isLatest()) setPreview(prepared);
         return;
       }
-      const remembered = rememberReceipt(prepared.receipt);
-      downloadReceipt(prepared.receipt);
-      const swapAddress = prepared.receipt.quoteResponse.quote.depositAddress;
-      const { depositScript, reclaimScript } = prepared.receipt;
-      const first = swapAddress
-        ? await firstRegistration(() => backend.register(depositScript, reclaimScript, swapAddress))
-        : undefined;
-      setPreview(prepared);
-      onActive({
-        receipt: prepared.receipt,
-        receiptUnsaved: !remembered,
-        ...(first === undefined ? {} : { firstRegistration: first }),
-      });
+      if (preview && liveQuoteWorse(preview, prepared, config.slippageBps)) {
+        setRepriced(prepared);
+        return;
+      }
+      await activate(prepared);
     } catch (err) {
       if (!dry || isLatest()) setError(errorMessage(err) ?? null);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function activate(prepared: Prepared) {
+    const remembered = rememberReceipt(prepared.receipt);
+    downloadReceipt(prepared.receipt);
+    const swapAddress = prepared.receipt.quoteResponse.quote.depositAddress;
+    const { depositScript, reclaimScript } = prepared.receipt;
+    const first = swapAddress
+      ? await firstRegistration(() => backend.register(depositScript, reclaimScript, swapAddress))
+      : undefined;
+    setRepriced(null);
+    setPreview(prepared);
+    onActive({
+      receipt: prepared.receipt,
+      receiptUnsaved: !remembered,
+      ...(first === undefined ? {} : { firstRegistration: first }),
+    });
+  }
+
+  async function acceptRepriced(live: Prepared) {
+    if (quoteExpired(live.receipt.quoteResponse.quote.deadline, new Date())) {
+      setRepriced(null);
+      setError('That new quote has expired. Get a new quote to continue.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await activate(live);
+    } catch (err) {
+      setError(errorMessage(err) ?? null);
     } finally {
       setBusy(false);
     }
@@ -240,6 +268,7 @@ export function Deposit(props: {
   function inputsChanged() {
     previews.cancel();
     setPreview(null);
+    setRepriced(null);
   }
 
   if (active) {
@@ -372,34 +401,65 @@ export function Deposit(props: {
         </dl>
       )}
 
-      <div className={actions()}>
-        <button
-          className={button()}
-          disabled={!token || !amount || !refundTo}
-          aria-disabled={busy}
-          onClick={() => {
-            if (!busy) void run(true);
-          }}
-        >
-          {busy ? 'Working…' : 'Get quote'}
-        </button>
-        {preview && (
-          <button
-            className={button({ variant: 'primary' })}
-            aria-disabled={busy}
-            onClick={() => {
-              if (!busy) void run(false);
-            }}
-          >
-            Continue
-          </button>
-        )}
-      </div>
-      {preview && (
-        <p className={afterActions}>
-          Continuing downloads a receipt file. Keep it: it is what lets you recover your BTC if
-          anything goes wrong.
-        </p>
+      {repriced && preview ? (
+        <>
+          <p className={notice({ tone: 'warn' })} role="status">
+            The price moved since your quote. You would now receive about{' '}
+            {sats(repriced.expectedSats)} as sBTC, at least {sats(repriced.minimumSats)}, instead of
+            about {sats(preview.expectedSats)}, at least {sats(preview.minimumSats)}. Continue only
+            if the new amounts are acceptable.
+          </p>
+          <div className={actions()}>
+            <button
+              className={button({ variant: 'primary' })}
+              aria-disabled={busy}
+              onClick={() => {
+                if (!busy) void acceptRepriced(repriced);
+              }}
+            >
+              Continue with the new amounts
+            </button>
+            <button className={button()} disabled={busy} onClick={() => setRepriced(null)}>
+              Cancel
+            </button>
+          </div>
+          <p className={afterActions}>
+            Nothing has been saved or registered yet, and nothing is sent until you pay. If you
+            cancel, the new quote is not used and simply expires.
+          </p>
+        </>
+      ) : (
+        <>
+          <div className={actions()}>
+            <button
+              className={button()}
+              disabled={!token || !amount || !refundTo}
+              aria-disabled={busy}
+              onClick={() => {
+                if (!busy) void run(true);
+              }}
+            >
+              {busy ? 'Working…' : 'Get quote'}
+            </button>
+            {preview && (
+              <button
+                className={button({ variant: 'primary' })}
+                aria-disabled={busy}
+                onClick={() => {
+                  if (!busy) void run(false);
+                }}
+              >
+                Continue
+              </button>
+            )}
+          </div>
+          {preview && (
+            <p className={afterActions}>
+              Continuing downloads a receipt file. Keep it: it is what lets you recover your BTC if
+              anything goes wrong.
+            </p>
+          )}
+        </>
       )}
     </section>
   );
@@ -887,6 +947,7 @@ function Tracking(props: {
         <dd>
           <code>{receipt.depositAddress}</code>
         </dd>
+        <QuotedOutput quote={quote} />
         {snapshot && <PayoutDetails snapshot={snapshot} />}
         {progress?.blocksUntilReclaim != null && progress.stage !== 'done' && (
           <>

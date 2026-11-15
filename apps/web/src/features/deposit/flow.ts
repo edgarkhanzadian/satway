@@ -36,6 +36,14 @@ export interface Prepared {
   warnings: string[];
 }
 
+export function liveQuoteWorse(
+  preview: Pick<Prepared, 'minimumSats'>,
+  live: Pick<Prepared, 'minimumSats'>,
+  toleranceBps: number
+): boolean {
+  return live.minimumSats * 10_000 < preview.minimumSats * (10_000 - toleranceBps);
+}
+
 export function toBaseUnits(amount: string, decimals: number): string {
   const trimmed = amount.trim();
   if (!/^\d+(\.\d+)?$/.test(trimmed)) throw new Error('Enter an amount like 25 or 0.01');

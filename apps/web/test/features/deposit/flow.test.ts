@@ -10,7 +10,7 @@ import {
   planReclaim,
 } from '@satway/core';
 
-import { prepareDeposit, toBaseUnits } from '../../../src/features/deposit/flow.js';
+import { liveQuoteWorse, prepareDeposit, toBaseUnits } from '../../../src/features/deposit/flow.js';
 import { pickAccount } from '../../../src/features/stacks-wallet/wallet.js';
 import {
   type Backend,
@@ -407,6 +407,19 @@ async function receiptFor(w: ReturnType<typeof world>): Promise<Receipt> {
   w.arrive();
   return receipt;
 }
+
+describe('liveQuoteWorse', () => {
+  it('lets the live minimum fall by up to the slippage the preview already allowed', () => {
+    expect(liveQuoteWorse({ minimumSats: 100_000 }, { minimumSats: 100_000 }, 100)).toBe(false);
+    expect(liveQuoteWorse({ minimumSats: 100_000 }, { minimumSats: 99_000 }, 100)).toBe(false);
+    expect(liveQuoteWorse({ minimumSats: 100_000 }, { minimumSats: 120_000 }, 100)).toBe(false);
+  });
+
+  it('asks again when the live minimum falls by more than that', () => {
+    expect(liveQuoteWorse({ minimumSats: 100_000 }, { minimumSats: 98_999 }, 100)).toBe(true);
+    expect(liveQuoteWorse({ minimumSats: 100_000 }, { minimumSats: 95_000 }, 100)).toBe(true);
+  });
+});
 
 describe('toBaseUnits', () => {
   it.each([

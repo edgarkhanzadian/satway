@@ -86,6 +86,12 @@ describe('Deposit without a connected Stacks wallet', () => {
     expect(html).toContain(receipt.depositAddress);
   });
 
+  it('shows the amounts the live quote promised', () => {
+    expect(render(true)).toContain(
+      'about 35,617 sats as sBTC, at least 35,260 sats before the signers’ Bitcoin fee'
+    );
+  });
+
   it('shows no deposit form, since a new deposit needs the wallet', () => {
     expect(render(false)).toBe('');
   });
