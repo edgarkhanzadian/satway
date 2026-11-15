@@ -688,6 +688,30 @@ describe('checkProgress: which output is the payout', () => {
     expect(w.posts).toHaveLength(0);
   });
 
+  it.each(['PENDING_DEPOSIT', 'INCOMPLETE_DEPOSIT', 'PROCESSING'] as const)(
+    'while this swap is %s, another deposit’s payout to the same address is not adopted but is still registered',
+    async swap => {
+      const w = world({ swap, payoutVout: 0, mint: 'confirmed' });
+      const snap = await checkProgress(config, w.backend, await receiptFor(w), w.fetchFn);
+      expect(snap.payout).toBeNull();
+      expect(snap.basis).toBeNull();
+      expect(snap.progress.terminal).toBe(false);
+      expect(snap.progress.stage).toBe(swap === 'PROCESSING' ? 'swapping' : 'awaiting-funds');
+      expect(snap.otherOutputs).toMatchObject([{ txid: D.txid, amountSats: 35_500 }]);
+
+      const fresh = world({ swap, payoutVout: 0 });
+      const unregistered = await checkProgress(
+        config,
+        fresh.backend,
+        await receiptFor(fresh),
+        fresh.fetchFn
+      );
+      expect(unregistered.payout).toBeNull();
+      expect(postedOutpoints(fresh)).toEqual([REAL_OUT]);
+      expect(unregistered.mints.get(REAL_OUT)).toBe('pending');
+    }
+  );
+
   it('an old receipt without a snapshot still ignores a payout confirmed long before it', async () => {
     const old: Out = {
       txid: OLD_TXID,

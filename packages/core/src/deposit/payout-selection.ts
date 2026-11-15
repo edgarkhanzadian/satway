@@ -1,5 +1,5 @@
 import { type AddressOutput, outpointOf } from '../bitcoin/index.js';
-import { normalizeTxHash } from '../oneclick/index.js';
+import { type OneClickSwapStatus, normalizeTxHash } from '../oneclick/index.js';
 import { blocksUntilReclaimFor } from '../sbtc/index.js';
 import { P2TR_DUST_SATS } from '../shared/index.js';
 
@@ -62,6 +62,11 @@ export interface PayoutSelectionInput {
   reportedAmountOutSats: number | null;
   destinationTxHashes: readonly string[];
   perDepositMinimum: number | null;
+  swapStatus: OneClickSwapStatus | null;
+}
+
+export function amountMatchAllowed(swapStatus: OneClickSwapStatus | null): boolean {
+  return swapStatus === null || swapStatus === 'SUCCESS';
 }
 
 export interface PayoutSelection {
@@ -123,7 +128,7 @@ export function selectPayout(input: PayoutSelectionInput): PayoutSelection {
   let payout: AddressOutput | null = byHash;
   let basis: PayoutBasis | null = byHash ? 'hash' : null;
   let ambiguous = false;
-  if (!payout) {
+  if (!payout && amountMatchAllowed(input.swapStatus)) {
     const exact =
       input.reportedAmountOutSats === null
         ? []

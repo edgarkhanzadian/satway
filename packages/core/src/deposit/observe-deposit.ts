@@ -151,6 +151,7 @@ export async function observeDeposit(
     reportedAmountOutSats: reportedAmountOutOf(status),
     destinationTxHashes: hashes,
     perDepositMinimum,
+    swapStatus: status?.status ?? null,
   });
   const toRegister = outputsToRegister(fetched.outputs, {
     isPrior: o => o !== selection.payout && isPriorOutput(o, prior),

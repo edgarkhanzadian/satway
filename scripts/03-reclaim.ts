@@ -170,6 +170,7 @@ async function chooseOutput(record: Parameters<typeof contextOfProof>[0]): Promi
     reportedAmountOutSats: reportedAmountOutOf(status),
     destinationTxHashes: destinationTxHashesOf(status),
     perDepositMinimum: limits?.perDepositMinimum ?? null,
+    swapStatus: status?.status ?? null,
   });
   const plan = planReclaim({
     outputs: fetched.outputs,

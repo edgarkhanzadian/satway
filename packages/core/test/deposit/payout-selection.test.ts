@@ -50,6 +50,7 @@ function input(over: Partial<PayoutSelectionInput>): PayoutSelectionInput {
     reportedAmountOutSats: null,
     destinationTxHashes: [],
     perDepositMinimum: 10_000,
+    swapStatus: null,
     ...over,
   };
 }
@@ -136,6 +137,51 @@ describe('selectPayout', () => {
     expect(
       selectPayout(input({ outputs: [real], prior, destinationTxHashes: [REAL] })).payout
     ).toBe(real);
+  });
+
+  it.each([
+    'PENDING_DEPOSIT',
+    'INCOMPLETE_DEPOSIT',
+    'KNOWN_DEPOSIT_TX',
+    'PROCESSING',
+    'REFUNDED',
+    'FAILED',
+  ] as const)(
+    'does not adopt an output by amount while the swap is %s, because 1Click has not paid out',
+    swapStatus => {
+      const other = out(REAL, 35_500);
+      const s = selectPayout(input({ outputs: [other], swapStatus }));
+      expect(s.payout).toBeNull();
+      expect(s.basis).toBeNull();
+      expect(s.ambiguous).toBe(false);
+      expect(s.candidates).toEqual([]);
+      expect(s.others).toEqual([other]);
+    }
+  );
+
+  it('does not call two outputs ambiguous candidates while the swap is still waiting for funds', () => {
+    const a = out(ATTACKER, 36_000);
+    const b = out(REAL, 35_500);
+    const s = selectPayout(input({ outputs: [a, b], swapStatus: 'PENDING_DEPOSIT' }));
+    expect(s.ambiguous).toBe(false);
+    expect(s.candidates).toEqual([]);
+    expect(s.others).toEqual([a, b]);
+  });
+
+  it.each(['SUCCESS', null] as const)('still matches by amount once the swap is %s', swapStatus => {
+    const real = out(REAL, 35_500);
+    const s = selectPayout(input({ outputs: [real], swapStatus }));
+    expect(s.payout).toBe(real);
+    expect(s.basis).toBe('amount');
+  });
+
+  it('a hash match is used whatever the swap status says', () => {
+    const real = out(REAL, 35_500);
+    const s = selectPayout(
+      input({ outputs: [real], destinationTxHashes: [REAL], swapStatus: 'PENDING_DEPOSIT' })
+    );
+    expect(s.payout).toBe(real);
+    expect(s.basis).toBe('hash');
   });
 
   it('picks the biggest output of the hash transaction when it pays the address twice', () => {
