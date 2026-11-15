@@ -33,7 +33,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: install-browser
-        run: pnpm --filter @portage/e2e exec playwright install --with-deps chromium
+        run: pnpm --filter @satway/e2e exec playwright install --with-deps chromium
 
       - name: canary
         env:

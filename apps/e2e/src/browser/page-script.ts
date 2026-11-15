@@ -11,7 +11,7 @@ export interface PageScriptOptions {
   stacks: { id: string; name: string; icon: string } | null;
 }
 
-export function installPortagePage(options: PageScriptOptions): void {
+export function installSatwayPage(options: PageScriptOptions): void {
   function read(value: unknown, key: string): unknown {
     if (typeof value !== 'object' || value === null || !(key in value)) return undefined;
     const out: unknown = Reflect.get(value, key);
@@ -78,7 +78,7 @@ export function installPortagePage(options: PageScriptOptions): void {
   if (evm) {
     const listeners = new Map<string, Set<(value: unknown) => void>>();
     const provider = Object.freeze({
-      isPortageTestWallet: true,
+      isSatwayTestWallet: true,
       request(args: unknown) {
         return walletCall('evm', plain(args));
       },

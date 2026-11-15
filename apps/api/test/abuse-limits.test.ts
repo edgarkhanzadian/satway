@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildDepositAddress, MAINNET_CONFIG as config } from '@portage/core';
+import { buildDepositAddress, MAINNET_CONFIG as config } from '@satway/core';
 
 import {
   CAPACITY_RETRY_AFTER_SECONDS,

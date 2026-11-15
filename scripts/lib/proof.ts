@@ -11,7 +11,7 @@ import {
   oneClickQuoteResponseSchema,
   parseWith,
   z,
-} from '@portage/core';
+} from '@satway/core';
 
 import { repoRoot, required } from './env.js';
 

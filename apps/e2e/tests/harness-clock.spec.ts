@@ -1,5 +1,5 @@
-import { handle } from '@portage/api';
-import { buildDepositAddress } from '@portage/core';
+import { handle } from '@satway/api';
+import { buildDepositAddress } from '@satway/core';
 
 import { API_ORIGIN, APP_ORIGIN } from '../src/config.js';
 import { expect, test } from '../src/fixtures.js';

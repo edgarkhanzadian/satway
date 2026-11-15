@@ -1,4 +1,4 @@
-import { type FetchLike, withTimeout } from '@portage/core';
+import { type FetchLike, withTimeout } from '@satway/core';
 
 import type { KV } from '../store/index.js';
 

@@ -1,4 +1,4 @@
-import { PROGRESS } from '../src/app/portage-app.js';
+import { PROGRESS } from '../src/app/satway-app.js';
 import { expect, test } from '../src/fixtures.js';
 import { SEND_COPY, startAwaitingFunds } from '../src/scenario/journeys.js';
 import { USER_REJECTED, WALLET_REJECTED } from '../src/wallets/behaviour.js';

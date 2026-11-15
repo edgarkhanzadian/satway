@@ -1,5 +1,5 @@
 {
-  "name": "@portage/scripts",
+  "name": "@satway/scripts",
   "description": "Mainnet proof scripts and the bundle safety check",
   "version": "0.0.0",
   "type": "module",
@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@noble/curves": "1.9.7",
-    "@portage/core": "workspace:*",
+    "@satway/core": "workspace:*",
     "@scure/base": "1.2.6",
     "@scure/bip32": "1.7.0",
     "@scure/bip39": "1.6.0",
@@ -21,11 +21,11 @@
     "sbtc": "0.3.2"
   },
   "devDependencies": {
-    "@portage/prettier-config": "workspace:*",
-    "@portage/tsconfig-config": "workspace:*",
+    "@satway/prettier-config": "workspace:*",
+    "@satway/tsconfig-config": "workspace:*",
     "prettier": "3.5.1",
     "typescript": "5.9.3"
   },
-  "prettier": "@portage/prettier-config",
+  "prettier": "@satway/prettier-config",
   "private": true
 }

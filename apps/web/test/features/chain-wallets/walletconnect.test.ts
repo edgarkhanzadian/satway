@@ -9,8 +9,8 @@ import {
   buildEvmTransfer,
   sendFromEvm,
   walletAddressFor,
-} from '@portage/chains';
-import type { OneClickToken } from '@portage/core';
+} from '@satway/chains';
+import type { OneClickToken } from '@satway/core';
 
 import {
   INITIAL_PAIRING,

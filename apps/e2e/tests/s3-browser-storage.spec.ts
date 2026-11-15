@@ -1,4 +1,4 @@
-import { PROGRESS, type PortageApp } from '../src/app/portage-app.js';
+import { PROGRESS, type SatwayApp } from '../src/app/satway-app.js';
 import { expect, test } from '../src/fixtures.js';
 import { expectRegisteredWithEmily } from '../src/scenario/checks.js';
 import { expectNoSendOffered, finishJourney } from '../src/scenario/journeys.js';
@@ -12,7 +12,7 @@ const STORAGE_BLOCKED =
 const CANNOT_SAVE =
   'This browser could not save a record of the payment, so the wallet was not asked to send. Send it manually using the details above, or allow this site to store data and reload.';
 
-async function blockStorage(app: PortageApp, name: 'localStorage' | 'sessionStorage') {
+async function blockStorage(app: SatwayApp, name: 'localStorage' | 'sessionStorage') {
   await app.page.addInitScript(store => {
     Object.defineProperty(window, store, {
       configurable: true,
@@ -23,7 +23,7 @@ async function blockStorage(app: PortageApp, name: 'localStorage' | 'sessionStor
   }, name);
 }
 
-async function failEveryWrite(app: PortageApp): Promise<void> {
+async function failEveryWrite(app: SatwayApp): Promise<void> {
   await app.page.addInitScript(() => {
     const original = Storage.prototype.setItem;
     Reflect.set(window, '__e2eQuotaFull', false);
@@ -35,14 +35,14 @@ async function failEveryWrite(app: PortageApp): Promise<void> {
   });
 }
 
-async function quotaFull(app: PortageApp): Promise<void> {
+async function quotaFull(app: SatwayApp): Promise<void> {
   await app.page.evaluate(() => Reflect.set(window, '__e2eQuotaFull', true));
 }
 
 async function payManuallyToDone(
-  app: PortageApp,
+  app: SatwayApp,
   world: Parameters<typeof finishJourney>[1],
-  started: Awaited<ReturnType<PortageApp['continue']>>
+  started: Awaited<ReturnType<SatwayApp['continue']>>
 ) {
   world.reportDeposit();
   await app.waitForProgress(PROGRESS.swapping);

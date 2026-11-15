@@ -1,4 +1,4 @@
-import type { OneClickToken } from '@portage/core';
+import type { OneClickToken } from '@satway/core';
 
 export const LIVE_EVM_TOKENS: OneClickToken[] = [
   {

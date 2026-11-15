@@ -2,7 +2,7 @@
   "extends": "./packages/tsconfig-config/tsconfig.base.json",
   "compilerOptions": {
     "paths": {
-      "portage-styles/*": ["./apps/web/portage-styles/*"]
+      "satway-styles/*": ["./apps/web/satway-styles/*"]
     }
   },
   "files": []

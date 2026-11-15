@@ -1,6 +1,6 @@
 import { type BrowserContext, test as base, expect } from '@playwright/test';
 
-import { PortageApp } from './app/portage-app.js';
+import { SatwayApp } from './app/satway-app.js';
 import {
   Harness,
   type WalletConnectMode,
@@ -33,7 +33,7 @@ interface TestFixtures {
   api: ApiWorker;
   wallets: Wallets;
   harness: Harness;
-  app: PortageApp;
+  app: SatwayApp;
 }
 
 interface WorkerFixtures {
@@ -152,7 +152,7 @@ export const test = base.extend<TestOptions & TestFixtures, WorkerFixtures>({
   ],
 
   async app({ page, harness, world }, use) {
-    await use(new PortageApp(page, harness, world));
+    await use(new SatwayApp(page, harness, world));
   },
 });
 

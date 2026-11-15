@@ -8,7 +8,7 @@ import {
   MAINNET_CONFIG as config,
   largestPayoutSats,
   planReclaim,
-} from '@portage/core';
+} from '@satway/core';
 
 import { prepareDeposit, toBaseUnits } from '../../../src/features/deposit/flow.js';
 import { pickAccount } from '../../../src/features/stacks-wallet/wallet.js';
@@ -31,7 +31,10 @@ import {
   rememberReceipt,
   verifyReceipt,
 } from '../../../src/shared/receipt.js';
-import { OLD_RECEIPTS_KEY, migrateBrowserStorage } from '../../../src/shared/storage-migration.js';
+import {
+  STXONECTOR_RECEIPTS_KEY,
+  migrateBrowserStorage,
+} from '../../../src/shared/storage-migration.js';
 
 const D = {
   txid: '5ab7ae554358d3ffdab7cc48db49ff144c5ae4fdd617b4140eac1b1936109bf5',
@@ -1117,7 +1120,7 @@ describe('receipts saved under the old project name', () => {
 
   it('are found after the storage migration', async () => {
     const data = new Map<string, string>([
-      [OLD_RECEIPTS_KEY, JSON.stringify([await oldStyleReceipt()])],
+      [STXONECTOR_RECEIPTS_KEY, JSON.stringify([await oldStyleReceipt()])],
     ]);
     vi.stubGlobal('localStorage', {
       get length() {
@@ -1130,13 +1133,13 @@ describe('receipts saved under the old project name', () => {
     });
     vi.stubGlobal('sessionStorage', undefined);
     migrateBrowserStorage();
-    expect(data.has(OLD_RECEIPTS_KEY)).toBe(false);
+    expect(data.has(STXONECTOR_RECEIPTS_KEY)).toBe(false);
     expect(data.has(RECEIPTS_KEY)).toBe(true);
     expect(loadReceipts().map(r => r.depositAddress)).toEqual([D.address]);
   });
 
   it('new receipt files use the new name', async () => {
-    expect(receiptFileName(await receiptFor(world()))).toMatch(/^portage-deposit-/);
+    expect(receiptFileName(await receiptFor(world()))).toMatch(/^satway-deposit-/);
   });
 });
 

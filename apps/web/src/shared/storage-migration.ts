@@ -1,10 +1,23 @@
+import { SEND_RECORD_PREFIX } from '@satway/chains';
+
 import { WALLETCONNECT_STORAGE_PREFIX } from './config.js';
 import { RECEIPTS_KEY } from './receipt.js';
 
-export const OLD_RECEIPTS_KEY = 'stxonector.receipts.v1';
-export const OLD_SENT_TX_PREFIX = 'stxonector:sent-tx:';
-export const LEGACY_SENT_TX_PREFIX = 'portage:sent-tx:';
-export const OLD_WALLETCONNECT_STORAGE_PREFIX = 'stxonector-evm';
+export const STXONECTOR_RECEIPTS_KEY = 'stxonector.receipts.v1';
+export const PORTAGE_RECEIPTS_KEY = 'portage.receipts.v1';
+export const OLD_RECEIPTS_KEYS = [PORTAGE_RECEIPTS_KEY, STXONECTOR_RECEIPTS_KEY];
+
+export const STXONECTOR_SENT_TX_PREFIX = 'stxonector:sent-tx:';
+export const PORTAGE_SENT_TX_PREFIX = 'portage:sent-tx:';
+
+export const PORTAGE_SEND_RECORD_PREFIX = 'portage:send-record:v1:';
+
+export const STXONECTOR_WALLETCONNECT_PREFIX = 'stxonector-evm';
+export const PORTAGE_WALLETCONNECT_PREFIX = 'portage-evm';
+export const OLD_WALLETCONNECT_PREFIXES = [
+  PORTAGE_WALLETCONNECT_PREFIX,
+  STXONECTOR_WALLETCONNECT_PREFIX,
+];
 
 export const WALLETCONNECT_IDB_NAME = 'WALLET_CONNECT_V2_INDEXED_DB';
 export const WALLETCONNECT_IDB_STORE = 'keyvaluestorage';
@@ -22,16 +35,26 @@ export interface AsyncKeyStore {
 export type Rename = (key: string) => string | null;
 
 export function isLegacySentTxKey(key: string): boolean {
-  return key.startsWith(OLD_SENT_TX_PREFIX) || key.startsWith(LEGACY_SENT_TX_PREFIX);
+  return key.startsWith(STXONECTOR_SENT_TX_PREFIX) || key.startsWith(PORTAGE_SENT_TX_PREFIX);
 }
 
-export function renameWalletConnect(key: string): string | null {
-  if (!key.startsWith('wc@')) return null;
-  for (const separator of ['//', ':']) {
-    const marker = OLD_WALLETCONNECT_STORAGE_PREFIX + separator;
-    if (key.includes(marker)) return key.replace(marker, WALLETCONNECT_STORAGE_PREFIX + separator);
-  }
-  return null;
+export function walletConnectRename(oldPrefix: string): Rename {
+  return key => {
+    if (!key.startsWith('wc@')) return null;
+    for (const separator of ['//', ':']) {
+      const marker = oldPrefix + separator;
+      if (key.includes(marker))
+        return key.replace(marker, WALLETCONNECT_STORAGE_PREFIX + separator);
+    }
+    return null;
+  };
+}
+
+export const WALLETCONNECT_RENAMES: Rename[] = OLD_WALLETCONNECT_PREFIXES.map(walletConnectRename);
+
+export function renameSendRecord(key: string): string | null {
+  if (!key.startsWith(PORTAGE_SEND_RECORD_PREFIX)) return null;
+  return SEND_RECORD_PREFIX + key.slice(PORTAGE_SEND_RECORD_PREFIX.length);
 }
 
 function listKeys(store: KeyStore): string[] {
@@ -170,7 +193,8 @@ async function migrateWalletConnectDatabase(): Promise<void> {
     const db = await openExistingDatabase(indexedDB);
     if (!db) return;
     try {
-      await migrateAsyncKeys(idbKeyStore(db), renameWalletConnect);
+      const store = idbKeyStore(db);
+      for (const rename of WALLETCONNECT_RENAMES) await migrateAsyncKeys(store, rename);
     } finally {
       db.close();
     }
@@ -190,8 +214,9 @@ function browserStore(name: 'localStorage' | 'sessionStorage'): KeyStore | null 
 export function migrateBrowserStorage(): void {
   const local = browserStore('localStorage');
   if (local) {
-    moveKey(local, OLD_RECEIPTS_KEY, RECEIPTS_KEY);
-    migrateKeys(local, renameWalletConnect);
+    for (const key of OLD_RECEIPTS_KEYS) moveKey(local, key, RECEIPTS_KEY);
+    for (const rename of WALLETCONNECT_RENAMES) migrateKeys(local, rename);
+    migrateKeys(local, renameSendRecord);
   }
   const session = browserStore('sessionStorage');
   if (session) dropKeys(session, isLegacySentTxKey);

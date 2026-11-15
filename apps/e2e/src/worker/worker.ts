@@ -1,4 +1,4 @@
-import worker, { type Env, handle } from '@portage/api';
+import worker, { type Env, handle } from '@satway/api';
 
 import { APP_ORIGIN, TEST_ONECLICK_JWT } from '../config.js';
 import { RealDate } from '../world/clock.js';

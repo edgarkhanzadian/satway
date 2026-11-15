@@ -8,7 +8,7 @@ import {
   isSolanaAddress,
   signOnlyFailure,
   walletFailure,
-} from '@portage/chains';
+} from '@satway/chains';
 
 export const STANDARD_MAINNET = 'solana:mainnet';
 const CONNECT = 'standard:connect';

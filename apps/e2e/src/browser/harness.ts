@@ -23,9 +23,9 @@ import type { ApiWorker } from '../worker/worker.js';
 import { type Gate, gate } from '../world/clock.js';
 import { RELAY_ORIGIN, VERIFY_ORIGIN } from '../world/walletconnect-relay.js';
 import type { World } from '../world/world.js';
-import { type PageScriptOptions, installPortagePage } from './page-script.js';
+import { type PageScriptOptions, installSatwayPage } from './page-script.js';
 
-export const BINDING = '__portageE2E';
+export const BINDING = '__satwayE2E';
 
 export type WalletConnectMode = 'blocked' | 'fake-relay';
 
@@ -167,7 +167,7 @@ export class Harness {
     await this.context.exposeBinding(BINDING, (source, kind: unknown, payload: unknown) =>
       this.onBinding(source.page, kind, payload)
     );
-    await this.context.addInitScript(installPortagePage, this.pageOptions(setup));
+    await this.context.addInitScript(installSatwayPage, this.pageOptions(setup));
     await this.context.route('**/*', route => this.onRoute(route));
     await this.context.routeWebSocket(/.*/, ws => this.onWebSocket(ws));
   }
@@ -211,7 +211,7 @@ export class Harness {
         ? {
             name: EVM_WALLET_NAME,
             uuid: this.world.rng.uuid(),
-            rdns: 'test.portage.evm',
+            rdns: 'test.satway.evm',
             icon: ICON,
           }
         : null,

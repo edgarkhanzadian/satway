@@ -42,7 +42,7 @@ module.exports = {
       name: 'e2e-uses-only-the-worker-entry',
       severity: 'error',
       comment:
-        'apps/e2e runs the real Worker code in-process through its entry apps/api/src/index.ts (the @portage/api package entry) and nothing else in apps/api. It tests the built web app through a browser, so it never imports apps/web.',
+        'apps/e2e runs the real Worker code in-process through its entry apps/api/src/index.ts (the @satway/api package entry) and nothing else in apps/api. It tests the built web app through a browser, so it never imports apps/web.',
       from: { path: '^apps/e2e/' },
       to: { path: '^apps/(?!e2e/)', pathNot: '^apps/api/src/index[.]ts$' },
     },
@@ -50,7 +50,7 @@ module.exports = {
       name: 'e2e-uses-package-entries-only',
       severity: 'error',
       comment:
-        'apps/e2e may use @portage/core and @portage/chains through their package entries only, and no other workspace package.',
+        'apps/e2e may use @satway/core and @satway/chains through their package entries only, and no other workspace package.',
       from: { path: '^apps/e2e/' },
       to: {
         path: '^packages/',
@@ -71,7 +71,7 @@ module.exports = {
     {
       name: 'core-only-through-its-entry',
       severity: 'error',
-      comment: 'Outside packages/core, import @portage/core through its package entry only.',
+      comment: 'Outside packages/core, import @satway/core through its package entry only.',
       from: { path: '^(?:apps|scripts|packages/(?!core/))' },
       to: { path: '^packages/core/', pathNot: '^packages/core/src/index[.]ts$' },
     },
@@ -157,7 +157,7 @@ module.exports = {
       name: 'chains-is-ui-free',
       severity: 'error',
       comment:
-        'packages/chains is usable outside a browser UI (a CLI or agent): no React, no Stacks wallet UI, no WalletConnect, no apps, scripts or Panda output, and among workspace packages only the @portage/core entry.',
+        'packages/chains is usable outside a browser UI (a CLI or agent): no React, no Stacks wallet UI, no WalletConnect, no apps, scripts or Panda output, and among workspace packages only the @satway/core entry.',
       from: { path: '^packages/chains/' },
       to: {
         path: [
@@ -172,7 +172,7 @@ module.exports = {
           '^react(?:-dom)?(?:/|$)',
           '^@stacks/connect(?:/|$)',
           '^@(?:walletconnect|reown)/',
-          '(^|/)portage-styles(/|$)',
+          '(^|/)satway-styles(/|$)',
           '^(?:apps|scripts)/',
           '^packages/(?!chains/|core/src/index[.]ts$)',
         ],
@@ -182,7 +182,7 @@ module.exports = {
       name: 'chains-only-through-its-entries',
       severity: 'error',
       comment:
-        'Outside packages/chains, import @portage/chains through its entries only: the package entry, or @portage/chains/solana for the lazily loaded Solana send code.',
+        'Outside packages/chains, import @satway/chains through its entries only: the package entry, or @satway/chains/solana for the lazily loaded Solana send code.',
       from: { pathNot: '^packages/chains/' },
       to: {
         path: '^packages/chains/',
@@ -204,7 +204,7 @@ module.exports = {
       name: 'chains-solana-send-stays-lazy',
       severity: 'error',
       comment:
-        'The Solana send code (packages/chains/src/send/solana) is loaded lazily by the web app through @portage/chains/solana. The rest of the package may only import its types, or the main entry would pull it into the first chunk.',
+        'The Solana send code (packages/chains/src/send/solana) is loaded lazily by the web app through @satway/chains/solana. The rest of the package may only import its types, or the main entry would pull it into the first chunk.',
       from: { path: '^packages/chains/src/', pathNot: '^packages/chains/src/send/solana/' },
       to: { path: '^packages/chains/src/send/solana/', dependencyTypesNot: ['type-only'] },
     },
@@ -234,7 +234,7 @@ module.exports = {
       name: 'scripts-use-package-entries-only',
       severity: 'error',
       comment:
-        'scripts/ may use @portage/core and @portage/chains through their package entries only, and no other workspace package.',
+        'scripts/ may use @satway/core and @satway/chains through their package entries only, and no other workspace package.',
       from: { path: '^scripts/' },
       to: {
         path: '^packages/',
@@ -336,9 +336,9 @@ module.exports = {
       name: 'styled-system-only-in-web',
       severity: 'error',
       comment:
-        'The generated Panda styled-system (apps/web/portage-styles) is for apps/web only. Nothing else may import it.',
+        'The generated Panda styled-system (apps/web/satway-styles) is for apps/web only. Nothing else may import it.',
       from: { pathNot: '^apps/web/' },
-      to: { path: '(^|/)portage-styles(/|$)' },
+      to: { path: '(^|/)satway-styles(/|$)' },
     },
     {
       name: 'panda-preset-is-standalone',
@@ -352,7 +352,7 @@ module.exports = {
       name: 'panda-preset-only-through-panda-config',
       severity: 'error',
       comment:
-        'App code uses the generated portage-styles modules. The preset itself is loaded by panda.config.ts only.',
+        'App code uses the generated satway-styles modules. The preset itself is loaded by panda.config.ts only.',
       from: { path: '^apps/', pathNot: '^apps/web/panda[.]config[.]ts$' },
       to: { path: '^packages/panda-preset/' },
     },
@@ -530,7 +530,7 @@ module.exports = {
   ],
   options: {
     doNotFollow: {
-      path: ['node_modules', '[.]pnpm-store', '^apps/web/portage-styles/'],
+      path: ['node_modules', '[.]pnpm-store', '^apps/web/satway-styles/'],
     },
     exclude: {
       path: [

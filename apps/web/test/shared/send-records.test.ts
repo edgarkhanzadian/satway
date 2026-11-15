@@ -36,7 +36,7 @@ describe('webLocksClaim', () => {
     const fake = fakeLockManager();
     const tabA = webLocksClaim(fake);
     const tabB = webLocksClaim(fake);
-    const name = 'portage:send-record:v1:0xswap::lock';
+    const name = 'satway:send-record:v1:0xswap::lock';
     expect(await tabA.claim(name)).toBe(true);
     expect(fake.held.has(name)).toBe(true);
     expect(await tabA.claim(name)).toBe(true);

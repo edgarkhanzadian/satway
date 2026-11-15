@@ -1,4 +1,4 @@
-import { MAINNET_CONFIG as config } from '@portage/core';
+import { MAINNET_CONFIG as config } from '@satway/core';
 
 import { type Env, handle } from './http/index.js';
 import { CRON_PERIOD_MS, runNotifier } from './notifier/index.js';

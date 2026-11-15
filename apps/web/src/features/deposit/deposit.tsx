@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { css, cx } from 'portage-styles/css';
-import { styled } from 'portage-styles/jsx';
-import { actions, button, details, field, link, notice, sheet } from 'portage-styles/recipes';
+import { css, cx } from 'satway-styles/css';
+import { styled } from 'satway-styles/jsx';
+import { actions, button, details, field, link, notice, sheet } from 'satway-styles/recipes';
 
 import {
   type AttemptOutcome,
@@ -32,13 +32,13 @@ import {
   walletAddressFor,
   walletCovers,
   watchSendRecords,
-} from '@portage/chains';
+} from '@satway/chains';
 import {
   type OneClickToken,
   MAINNET_CONFIG as config,
   errorMessage,
   formatBaseUnits,
-} from '@portage/core';
+} from '@satway/core';
 
 import {
   type ActiveDeposit,
@@ -91,7 +91,7 @@ const sendFailure = cx(notice({ tone: 'error' }), sendLine);
 const sendActions = cx(actions(), css({ marginBlock: 'space.08' }));
 const refundNote = cx(
   notice(),
-  css({ marginBlock: 'space.02', '.portage-actions + &': { marginTop: 'space.08' } })
+  css({ marginBlock: 'space.02', '.satway-actions + &': { marginTop: 'space.08' } })
 );
 
 const solanaPay = css({ marginTop: 'space.08', '& svg': { maxWidth: 'qrCompact' } });
@@ -469,7 +469,7 @@ function Tracking(props: {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deps: ResolveDeps = {
       async checkSolana(sent) {
-        const { checkSolanaSend } = await import('@portage/chains/solana');
+        const { checkSolanaSend } = await import('@satway/chains/solana');
         return checkSolanaSend(sent);
       },
       evmState(hash) {
@@ -594,7 +594,7 @@ function Tracking(props: {
     const swapAddress = target.address;
     try {
       if (family === 'solana' && solanaAccount) {
-        const { sendSolanaDeposit } = await import('@portage/chains/solana');
+        const { sendSolanaDeposit } = await import('@satway/chains/solana');
         showOutcome(
           await attemptSend(
             sendRecords,
@@ -638,7 +638,7 @@ function Tracking(props: {
     setResending(true);
     setSendError(null);
     try {
-      const { resendSignedTransaction } = await import('@portage/chains/solana');
+      const { resendSignedTransaction } = await import('@satway/chains/solana');
       const outcome = await resendRecord(sendRecords, current, signed =>
         resendSignedTransaction(signed)
       );
@@ -847,7 +847,7 @@ function SolanaPayLink(props: { token: OneClickToken; recipient: string; amount:
     let live = true;
     async function load() {
       try {
-        const { solanaPayOffer } = await import('@portage/chains/solana');
+        const { solanaPayOffer } = await import('@satway/chains/solana');
         const next = await solanaPayOffer({ token, recipient, amount });
         if (live) setOffer(next);
       } catch (err) {

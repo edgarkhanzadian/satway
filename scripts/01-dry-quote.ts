@@ -12,7 +12,7 @@ import {
   fetchLimits,
   fetchVerifiedSigners,
   largestPayoutSats,
-} from '@portage/core';
+} from '@satway/core';
 
 import { loadEnv, optional } from './lib/env.js';
 

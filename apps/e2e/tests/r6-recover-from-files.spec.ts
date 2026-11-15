@@ -1,6 +1,6 @@
 import { writeFile } from 'node:fs/promises';
 
-import { PROGRESS, type PortageApp } from '../src/app/portage-app.js';
+import { PROGRESS, type SatwayApp } from '../src/app/satway-app.js';
 import { expect, test } from '../src/fixtures.js';
 import { savedLabel, startAwaitingFunds, startDeposit } from '../src/scenario/journeys.js';
 import { bitcoinKey, p2trOf } from '../src/world/keys.js';
@@ -33,7 +33,7 @@ function setQuoteRequest(r: Record<string, unknown>, key: string, value: unknown
   r.quoteResponse = response;
 }
 
-async function freshStorage(app: PortageApp): Promise<void> {
+async function freshStorage(app: SatwayApp): Promise<void> {
   await app.page.evaluate(() => localStorage.clear());
   await app.open();
   await app.connectStacksWallet();
@@ -58,7 +58,7 @@ test.describe('R6. recovering a deposit from a receipt file', () => {
     await app.followDeposit();
     await app.waitForProgress(PROGRESS.swapping);
     await expect(app.page.getByText(started.receipt.depositAddress, { exact: true })).toBeVisible();
-    expect(Object.keys(await app.storage()).filter(k => k.startsWith('portage.receipts'))).toEqual(
+    expect(Object.keys(await app.storage()).filter(k => k.startsWith('satway.receipts'))).toEqual(
       []
     );
 

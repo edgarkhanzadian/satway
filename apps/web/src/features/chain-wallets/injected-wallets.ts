@@ -1,4 +1,4 @@
-import type { Eip1193Provider, EvmWalletOption, SourceWallet } from '@portage/chains';
+import type { Eip1193Provider, EvmWalletOption, SourceWallet } from '@satway/chains';
 
 interface Eip6963Detail {
   info: { uuid: string; name: string };

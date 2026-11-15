@@ -147,7 +147,7 @@ test.describe('M6. a tampered live quote is refused before anything is saved or 
       await expect(app.sendButton).toHaveCount(0);
       expect(world.oneClick.quotes.map(q => q.dry)).toEqual([true, false]);
       expect(downloads).toEqual([]);
-      expect(Object.keys(await app.storage()).filter(k => k.startsWith('portage'))).toEqual([]);
+      expect(Object.keys(await app.storage()).filter(k => k.startsWith('satway'))).toEqual([]);
       expect(api.depositPosts()).toEqual([]);
       expect(api.watched()).toEqual([]);
       expect(wallets.evm.behaviour.calls('eth_sendTransaction')).toEqual([]);

@@ -1,4 +1,4 @@
-import { PROGRESS, type PortageApp, type StartedDeposit } from '../src/app/portage-app.js';
+import { PROGRESS, type SatwayApp, type StartedDeposit } from '../src/app/satway-app.js';
 import type { Wallets } from '../src/browser/harness.js';
 import { expect, test } from '../src/fixtures.js';
 import {
@@ -17,12 +17,12 @@ function sendCalls(wallets: Wallets): number {
   return wallets.evm.behaviour.calls('eth_sendTransaction').length;
 }
 
-async function waitUntilTheWalletIsAsked(app: PortageApp, wallets: Wallets): Promise<void> {
+async function waitUntilTheWalletIsAsked(app: SatwayApp, wallets: Wallets): Promise<void> {
   await expect(app.page.getByRole('button', { name: 'Confirm in your wallet…' })).toBeDisabled();
   await expect.poll(() => sendCalls(wallets)).toBe(1);
 }
 
-async function expectOneRecord(app: PortageApp, started: StartedDeposit, state: string) {
+async function expectOneRecord(app: SatwayApp, started: StartedDeposit, state: string) {
   const records = await app.sendRecords();
   expect(records).toHaveLength(1);
   expect(records[0]).toMatchObject({
@@ -34,7 +34,7 @@ async function expectOneRecord(app: PortageApp, started: StartedDeposit, state: 
   return records[0];
 }
 
-async function expectAttemptingView(app: PortageApp): Promise<void> {
+async function expectAttemptingView(app: SatwayApp): Promise<void> {
   await expect(app.page.getByText(SEND_COPY.attemptingHeadline, { exact: true })).toBeVisible();
   await expect(app.page.getByText(SEND_COPY.promptOpen, { exact: true })).toBeVisible();
   await expect(app.page.getByText(SEND_COPY.checkWallet, { exact: true })).toBeVisible();
@@ -43,7 +43,7 @@ async function expectAttemptingView(app: PortageApp): Promise<void> {
 }
 
 async function settlesWhenTheProviderSeesIt(
-  app: PortageApp,
+  app: SatwayApp,
   world: World,
   started: StartedDeposit
 ): Promise<void> {

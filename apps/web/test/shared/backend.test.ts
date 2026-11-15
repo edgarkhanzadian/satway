@@ -6,7 +6,7 @@ import {
   RequestTimeoutError,
   ResponseShapeError,
   SLOW_REQUEST_TIMEOUT_MS,
-} from '@portage/core';
+} from '@satway/core';
 
 import { createBackend } from '../../src/shared/backend.js';
 

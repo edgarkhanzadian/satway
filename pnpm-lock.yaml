@@ -14,13 +14,13 @@ importers:
       '@ls-lint/ls-lint':
         specifier: 2.2.3
         version: 2.2.3
-      '@portage/eslint-config':
+      '@satway/eslint-config':
         specifier: workspace:*
         version: link:packages/eslint-config
-      '@portage/prettier-config':
+      '@satway/prettier-config':
         specifier: workspace:*
         version: link:packages/prettier-config
-      '@portage/tsconfig-config':
+      '@satway/tsconfig-config':
         specifier: workspace:*
         version: link:packages/tsconfig-config
       '@trivago/prettier-plugin-sort-imports':
@@ -53,14 +53,14 @@ importers:
 
   apps/api:
     dependencies:
-      '@portage/core':
+      '@satway/core':
         specifier: workspace:*
         version: link:../../packages/core
     devDependencies:
-      '@portage/prettier-config':
+      '@satway/prettier-config':
         specifier: workspace:*
         version: link:../../packages/prettier-config
-      '@portage/tsconfig-config':
+      '@satway/tsconfig-config':
         specifier: workspace:*
         version: link:../../packages/tsconfig-config
       prettier:
@@ -84,10 +84,10 @@ importers:
       '@playwright/test':
         specifier: 1.64.1
         version: 1.64.1
-      '@portage/api':
+      '@satway/api':
         specifier: workspace:*
         version: link:../api
-      '@portage/core':
+      '@satway/core':
         specifier: workspace:*
         version: link:../../packages/core
       '@scure/base':
@@ -103,10 +103,10 @@ importers:
       '@axe-core/playwright':
         specifier: 4.14.0
         version: 4.14.0(playwright-core@1.64.1)
-      '@portage/prettier-config':
+      '@satway/prettier-config':
         specifier: workspace:*
         version: link:../../packages/prettier-config
-      '@portage/tsconfig-config':
+      '@satway/tsconfig-config':
         specifier: workspace:*
         version: link:../../packages/tsconfig-config
       '@types/node':
@@ -133,10 +133,10 @@ importers:
       '@fontsource/dm-mono':
         specifier: 5.3.0
         version: 5.3.0
-      '@portage/chains':
+      '@satway/chains':
         specifier: workspace:*
         version: link:../../packages/chains
-      '@portage/core':
+      '@satway/core':
         specifier: workspace:*
         version: link:../../packages/core
       '@scure/base':
@@ -161,13 +161,13 @@ importers:
       '@pandacss/dev':
         specifier: 1.7.1
         version: 1.7.1(typescript@5.9.3)
-      '@portage/panda-preset':
+      '@satway/panda-preset':
         specifier: workspace:*
         version: link:../../packages/panda-preset
-      '@portage/prettier-config':
+      '@satway/prettier-config':
         specifier: workspace:*
         version: link:../../packages/prettier-config
-      '@portage/tsconfig-config':
+      '@satway/tsconfig-config':
         specifier: workspace:*
         version: link:../../packages/tsconfig-config
       '@types/react':
@@ -194,7 +194,7 @@ importers:
 
   packages/chains:
     dependencies:
-      '@portage/core':
+      '@satway/core':
         specifier: workspace:*
         version: link:../core
       '@scure/base':
@@ -213,10 +213,10 @@ importers:
         specifier: 0.1.3
         version: 0.1.3
     devDependencies:
-      '@portage/prettier-config':
+      '@satway/prettier-config':
         specifier: workspace:*
         version: link:../prettier-config
-      '@portage/tsconfig-config':
+      '@satway/tsconfig-config':
         specifier: workspace:*
         version: link:../tsconfig-config
       prettier:
@@ -247,10 +247,10 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
-      '@portage/prettier-config':
+      '@satway/prettier-config':
         specifier: workspace:*
         version: link:../prettier-config
-      '@portage/tsconfig-config':
+      '@satway/tsconfig-config':
         specifier: workspace:*
         version: link:../tsconfig-config
       prettier:
@@ -281,7 +281,7 @@ importers:
         specifier: 8.47.0
         version: 8.47.0(eslint@9.34.0)(typescript@5.9.3)
     devDependencies:
-      '@portage/prettier-config':
+      '@satway/prettier-config':
         specifier: workspace:*
         version: link:../prettier-config
       eslint:
@@ -297,10 +297,10 @@ importers:
         specifier: 1.7.1
         version: 1.7.1(typescript@5.9.3)
     devDependencies:
-      '@portage/prettier-config':
+      '@satway/prettier-config':
         specifier: workspace:*
         version: link:../prettier-config
-      '@portage/tsconfig-config':
+      '@satway/tsconfig-config':
         specifier: workspace:*
         version: link:../tsconfig-config
       prettier:
@@ -321,7 +321,7 @@ importers:
 
   packages/tsconfig-config:
     devDependencies:
-      '@portage/prettier-config':
+      '@satway/prettier-config':
         specifier: workspace:*
         version: link:../prettier-config
       prettier:
@@ -333,7 +333,7 @@ importers:
       '@noble/curves':
         specifier: 1.9.7
         version: 1.9.7
-      '@portage/core':
+      '@satway/core':
         specifier: workspace:*
         version: link:../packages/core
       '@scure/base':
@@ -355,10 +355,10 @@ importers:
         specifier: 0.3.2
         version: 0.3.2
     devDependencies:
-      '@portage/prettier-config':
+      '@satway/prettier-config':
         specifier: workspace:*
         version: link:../packages/prettier-config
-      '@portage/tsconfig-config':
+      '@satway/tsconfig-config':
         specifier: workspace:*
         version: link:../packages/tsconfig-config
       prettier:

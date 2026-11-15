@@ -1,6 +1,6 @@
 import { copyFile } from 'node:fs/promises';
 
-import { PROGRESS, type PortageApp } from '../src/app/portage-app.js';
+import { PROGRESS, type SatwayApp } from '../src/app/satway-app.js';
 import { expect, test } from '../src/fixtures.js';
 import { THEMES, fontsReady } from '../src/quality/page-checks.js';
 import { SEND_COPY, payOut, startAwaitingFunds } from '../src/scenario/journeys.js';
@@ -12,7 +12,7 @@ const WIDTHS = [
   { name: '390', width: 390, height: 844 },
 ];
 
-async function shoot(app: PortageApp, state: string): Promise<void> {
+async function shoot(app: SatwayApp, state: string): Promise<void> {
   await app.harnessIdle();
   for (const size of WIDTHS) {
     await app.page.setViewportSize({ width: size.width, height: size.height });
@@ -76,7 +76,7 @@ test.describe('Q5. visual snapshots of the key states', () => {
   test('reclaimable, and Recover', async ({ app, world }) => {
     const { started } = await toReclaimable(app, world);
     await shoot(app, 'reclaimable');
-    const stable = test.info().outputPath('portage-deposit-receipt.json');
+    const stable = test.info().outputPath('satway-deposit-receipt.json');
     await copyFile(started.receiptPath, stable);
     await openReceiptInRecover(app, { ...started, receiptPath: stable });
     await shoot(app, 'recover');

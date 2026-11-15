@@ -1,5 +1,5 @@
 {
-  "name": "@portage/tsconfig-config",
+  "name": "@satway/tsconfig-config",
   "description": "Shared tsconfig configuration",
   "version": "0.0.0",
   "scripts": {
@@ -7,10 +7,10 @@
     "format:check": "prettier . --check --ignore-path ../../.prettierignore"
   },
   "devDependencies": {
-    "@portage/prettier-config": "workspace:*",
+    "@satway/prettier-config": "workspace:*",
     "prettier": "3.5.1"
   },
   "main": "tsconfig.base.json",
-  "prettier": "@portage/prettier-config",
+  "prettier": "@satway/prettier-config",
   "private": true
 }

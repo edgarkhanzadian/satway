@@ -11,7 +11,7 @@ import {
   parseWith,
   withTimeout,
   z,
-} from '@portage/core';
+} from '@satway/core';
 
 export const UNKNOWN_SWAP = 'unknown-swap';
 

@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 
-import { styled } from 'portage-styles/jsx';
-import { button, sheet } from 'portage-styles/recipes';
+import { styled } from 'satway-styles/jsx';
+import { button, sheet } from 'satway-styles/recipes';
 
-import type { SourceWallet } from '@portage/chains';
+import type { SourceWallet } from '@satway/chains';
 
 import { SourceWalletPanel } from '../features/chain-wallets/index.js';
 import { Deposit } from '../features/deposit/index.js';
@@ -52,7 +52,7 @@ export function App() {
           color="band.ink"
         >
           <styled.h1 textStyle="wordmark" margin="space.00" marginRight="auto">
-            portage
+            satway
           </styled.h1>
           <styled.nav aria-label="Page" display="flex" gap="space.02">
             <button
@@ -186,10 +186,10 @@ export function App() {
           borderTopColor="hairline"
         >
           <styled.span fontSize="lg" fontWeight="medium" letterSpacing="wordmark">
-            portage
+            satway
           </styled.span>
           <styled.p margin="space.00" fontSize="sm" color="muted">
-            Portage is an independent project, not affiliated with or endorsed by Stacks or the sBTC
+            Satway is an independent project, not affiliated with or endorsed by Stacks or the sBTC
             signers.
           </styled.p>
         </styled.footer>

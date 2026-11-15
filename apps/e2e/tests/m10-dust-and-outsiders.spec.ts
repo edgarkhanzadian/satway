@@ -1,4 +1,4 @@
-import { PROGRESS, type PortageApp } from '../src/app/portage-app.js';
+import { PROGRESS, type SatwayApp } from '../src/app/satway-app.js';
 import { expect, test } from '../src/fixtures.js';
 import { expectRegisteredWithEmily, notifierRun } from '../src/scenario/checks.js';
 import { FAILED_TO_LOAD, payOut, startAwaitingFunds } from '../src/scenario/journeys.js';
@@ -28,13 +28,13 @@ function emilyPostsFor(world: World): string[] {
     );
 }
 
-async function expectPayoutShown(app: PortageApp, amount: number, o: Outpoint, byAmount = false) {
+async function expectPayoutShown(app: SatwayApp, amount: number, o: Outpoint, byAmount = false) {
   await expect(app.definition('Bitcoin payout')).toHaveText(
     `${sats(amount)} ${where(o)}${byAmount ? `. ${BY_AMOUNT}` : ''}`
   );
 }
 
-async function expectTooSmall(app: PortageApp, o: Outpoint) {
+async function expectTooSmall(app: SatwayApp, o: Outpoint) {
   await expect(
     app.page.locator('dt:text-is("Too small to mint") ~ dd').filter({ hasText: o.txid })
   ).toHaveText(`${sats(DUST)} ${where(o)}. ${BELOW}`);

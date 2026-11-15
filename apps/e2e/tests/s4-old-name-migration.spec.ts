@@ -1,23 +1,30 @@
 import type { Page } from '@playwright/test';
 
-import { PROGRESS, type PortageApp } from '../src/app/portage-app.js';
+import { PROGRESS, type SatwayApp } from '../src/app/satway-app.js';
 import { APP_ORIGIN } from '../src/config.js';
 import { expect, test } from '../src/fixtures.js';
 import { expectRegisteredWithEmily } from '../src/scenario/checks.js';
 import { finishJourney, savedLabel, startAwaitingFunds } from '../src/scenario/journeys.js';
 
-const NEW_RECEIPTS = 'portage.receipts.v1';
+const NEW_RECEIPTS = 'satway.receipts.v1';
+const PORTAGE_RECEIPTS = 'portage.receipts.v1';
 const OLD_RECEIPTS = 'stxonector.receipts.v1';
 const IDB_NAME = 'WALLET_CONNECT_V2_INDEXED_DB';
 const IDB_STORE = 'keyvaluestorage';
 function OLD_WC(name: string): string {
   return `wc@2:core:0.3:stxonector-evm:${name}`;
 }
-function NEW_WC(name: string): string {
+function PORTAGE_WC(name: string): string {
   return `wc@2:core:0.3:portage-evm:${name}`;
 }
+function NEW_WC(name: string): string {
+  return `wc@2:core:0.3:satway-evm:${name}`;
+}
 const OLD_WC_SLASHES = 'wc@2:client:0.3//stxonector-evm:session';
-const NEW_WC_SLASHES = 'wc@2:client:0.3//portage-evm:session';
+const PORTAGE_WC_SLASHES = 'wc@2:client:0.3//portage-evm:session';
+const NEW_WC_SLASHES = 'wc@2:client:0.3//satway-evm:session';
+const PORTAGE_SEND_RECORD = 'portage:send-record:v1:0xelsewhere:';
+const NEW_SEND_RECORD = 'satway:send-record:v1:0xelsewhere:';
 
 interface StorageSnapshot {
   local: Record<string, string>;
@@ -97,7 +104,7 @@ async function seed(page: Page, data: StorageSnapshot): Promise<void> {
   );
 }
 
-async function blankPageOnOrigin(app: PortageApp): Promise<PortageApp> {
+async function blankPageOnOrigin(app: SatwayApp): Promise<SatwayApp> {
   await app.page.close();
   const fresh = await app.newTab();
   await fresh.page.goto(`${APP_ORIGIN}/__e2e/health`);
@@ -106,12 +113,16 @@ async function blankPageOnOrigin(app: PortageApp): Promise<PortageApp> {
 
 async function migrated(page: Page): Promise<StorageSnapshot> {
   await expect
-    .poll(async () => Object.keys((await snapshot(page)).idb).some(k => k.includes('stxonector')))
+    .poll(async () =>
+      Object.keys((await snapshot(page)).idb).some(
+        k => k.includes('stxonector') || k.includes('portage')
+      )
+    )
     .toBe(false);
   return snapshot(page);
 }
 
-test.describe('S4. data saved under the old "stxonector" names', () => {
+test.describe('S4. data saved under the old "stxonector" and "portage" names', () => {
   test('is moved to the new names on first load, is trackable, and a second load changes nothing', async ({
     app,
     world,
@@ -124,7 +135,8 @@ test.describe('S4. data saved under the old "stxonector" names', () => {
     await seed(fresh.page, {
       local: {
         [OLD_RECEIPTS]: receipts,
-        [OLD_WC('keychain')]: '{"old":"keychain"}',
+        [PORTAGE_WC('keychain')]: '{"old":"keychain"}',
+        [PORTAGE_SEND_RECORD]: '{"old":"send record"}',
         unrelated: 'stays',
       },
       session: {
@@ -134,7 +146,7 @@ test.describe('S4. data saved under the old "stxonector" names', () => {
       },
       idb: {
         [OLD_WC('pairing')]: [{ topic: 'old-pairing' }],
-        [OLD_WC_SLASHES]: [{ topic: 'old-session' }],
+        [PORTAGE_WC_SLASHES]: [{ topic: 'old-session' }],
         'wc@2:core:0.3:someone-else:pairing': 'not ours',
       },
     });
@@ -144,6 +156,7 @@ test.describe('S4. data saved under the old "stxonector" names', () => {
     expect(after.local).toEqual({
       [NEW_RECEIPTS]: receipts,
       [NEW_WC('keychain')]: '{"old":"keychain"}',
+      [NEW_SEND_RECORD]: '{"old":"send record"}',
       unrelated: 'stays',
     });
     expect(after.session).toEqual({ 'unrelated-session': 'stays' });
@@ -176,12 +189,23 @@ test.describe('S4. data saved under the old "stxonector" names', () => {
     const seeded: StorageSnapshot = {
       local: {
         [OLD_RECEIPTS]: '[{"version":1,"note":"an older list"}]',
+        [PORTAGE_RECEIPTS]: '[{"version":1,"note":"an old list"}]',
         [NEW_RECEIPTS]: receipts,
         [OLD_WC('keychain')]: 'old keychain',
+        [PORTAGE_WC('keychain')]: 'portage keychain',
         [NEW_WC('keychain')]: 'new keychain',
+        [PORTAGE_SEND_RECORD]: 'portage send record',
+        [NEW_SEND_RECORD]: 'new send record',
       },
       session: {},
-      idb: { [OLD_WC('pairing')]: 'old pairing', [NEW_WC('pairing')]: 'new pairing' },
+      idb: {
+        [OLD_WC('pairing')]: 'old pairing',
+        [PORTAGE_WC('pairing')]: 'portage pairing',
+        [NEW_WC('pairing')]: 'new pairing',
+        [OLD_WC_SLASHES]: 'old session',
+        [PORTAGE_WC_SLASHES]: 'portage session',
+        [NEW_WC_SLASHES]: 'new session',
+      },
     };
     await seed(fresh.page, seeded);
     await fresh.open();

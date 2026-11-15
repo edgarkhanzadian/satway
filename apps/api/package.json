@@ -1,5 +1,5 @@
 {
-  "name": "@portage/api",
+  "name": "@satway/api",
   "description": "Cloudflare Worker: 1Click proxy and sBTC signer notifier",
   "version": "0.0.0",
   "type": "module",
@@ -17,18 +17,18 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@portage/core": "workspace:*"
+    "@satway/core": "workspace:*"
   },
   "devDependencies": {
-    "@portage/prettier-config": "workspace:*",
-    "@portage/tsconfig-config": "workspace:*",
+    "@satway/prettier-config": "workspace:*",
+    "@satway/tsconfig-config": "workspace:*",
     "prettier": "3.5.1",
     "typescript": "5.9.3",
     "vitest": "3.2.7",
     "wrangler": "3.114.17"
   },
   "main": "./src/index.ts",
-  "prettier": "@portage/prettier-config",
+  "prettier": "@satway/prettier-config",
   "private": true,
   "types": "./src/index.ts"
 }

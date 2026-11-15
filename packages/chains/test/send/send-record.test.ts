@@ -1,7 +1,7 @@
 import { base58, base64 } from '@scure/base';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { OneClickToken } from '@portage/core';
+import type { OneClickToken } from '@satway/core';
 
 import {
   type Eip1193Provider,
@@ -176,7 +176,7 @@ function browserLocks(log: string[] = []) {
 
 describe('send record keys', () => {
   it('keys a record by the swap deposit address and memo, never by the Bitcoin address', () => {
-    expect(sendRecordKey(ONE)).toBe(`portage:send-record:v1:${SWAP_ONE}:`);
+    expect(sendRecordKey(ONE)).toBe(`satway:send-record:v1:${SWAP_ONE}:`);
     expect(sendRecordKey({ address: SWAP_ONE, memo: '17' })).not.toBe(sendRecordKey(ONE));
     expect(swapTargetOf(SWAP_ONE, '')).toEqual(ONE);
     expect(swapTargetOf(undefined, '1')).toBeNull();

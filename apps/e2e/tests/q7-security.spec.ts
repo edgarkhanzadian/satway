@@ -1,6 +1,6 @@
 import type { Request } from '@playwright/test';
 
-import { PROGRESS } from '../src/app/portage-app.js';
+import { PROGRESS } from '../src/app/satway-app.js';
 import { codeEvalCounts, installCodeEvalProbe } from '../src/browser/probes.js';
 import { API_ORIGIN, APP_ORIGIN, TEST_ONECLICK_JWT, UPSTREAM } from '../src/config.js';
 import { expect, test } from '../src/fixtures.js';

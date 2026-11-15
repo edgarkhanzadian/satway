@@ -8,7 +8,7 @@ import {
 } from '@solana/kit';
 import { describe, expect, it } from 'vitest';
 
-import type { OneClickToken } from '@portage/core';
+import type { OneClickToken } from '@satway/core';
 
 import type { RawAccount } from '../../../src/send/solana/solana-rpc.js';
 import {

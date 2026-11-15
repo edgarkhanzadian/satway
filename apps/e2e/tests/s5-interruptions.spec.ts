@@ -1,4 +1,4 @@
-import { PROGRESS, type PortageApp, type StartedDeposit } from '../src/app/portage-app.js';
+import { PROGRESS, type SatwayApp, type StartedDeposit } from '../src/app/satway-app.js';
 import type { Wallets } from '../src/browser/harness.js';
 import { expect, test } from '../src/fixtures.js';
 import { expectRegisteredWithEmily } from '../src/scenario/checks.js';
@@ -13,13 +13,13 @@ import {
 } from '../src/scenario/journeys.js';
 import type { PayoutResult, World } from '../src/world/world.js';
 
-const RECEIPTS = 'portage.receipts.v1';
+const RECEIPTS = 'satway.receipts.v1';
 
 function sends(wallets: Wallets): number {
   return wallets.evm.behaviour.calls('eth_sendTransaction').length;
 }
 
-async function toDone(app: PortageApp, world: World, payout: PayoutResult | null) {
+async function toDone(app: SatwayApp, world: World, payout: PayoutResult | null) {
   const paid = payout ?? (await payOut(app, world));
   if (world.bitcoin.transaction(paid.outpoint.txid)?.height == null) {
     await app.waitForProgress(PROGRESS.payoutUnconfirmed);
@@ -35,7 +35,7 @@ async function toDone(app: PortageApp, world: World, payout: PayoutResult | null
 interface ReloadPoint {
   name: string;
   run(input: {
-    app: PortageApp;
+    app: SatwayApp;
     world: World;
     wallets: Wallets;
   }): Promise<{ started: StartedDeposit; payout: PayoutResult | null }>;

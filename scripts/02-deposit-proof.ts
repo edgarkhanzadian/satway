@@ -13,7 +13,7 @@ import {
   providerFeesOf,
   registerOutputs,
   snapshotOutpoints,
-} from '@portage/core';
+} from '@satway/core';
 
 import { loadEnv, optional, required } from './lib/env.js';
 import {

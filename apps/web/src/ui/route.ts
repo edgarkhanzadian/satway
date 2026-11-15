@@ -1,4 +1,4 @@
-import type { Stage } from '@portage/core';
+import type { Stage } from '@satway/core';
 
 export const STOPS = ['Your chain', 'Swap to BTC', 'Bitcoin deposit', 'sBTC on Stacks'] as const;
 

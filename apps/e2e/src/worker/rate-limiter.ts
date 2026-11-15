@@ -1,4 +1,4 @@
-import type { Env } from '@portage/api';
+import type { Env } from '@satway/api';
 
 type RateLimiter = NonNullable<Env['DEPOSIT_RATE_LIMITER']>;
 

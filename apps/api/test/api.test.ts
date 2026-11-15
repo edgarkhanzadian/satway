@@ -4,7 +4,7 @@ import {
   DEFAULT_REQUEST_TIMEOUT_MS,
   buildQuoteRequest,
   MAINNET_CONFIG as config,
-} from '@portage/core';
+} from '@satway/core';
 
 import {
   AlreadyRegistered,

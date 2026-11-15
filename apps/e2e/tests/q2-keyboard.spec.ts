@@ -1,4 +1,4 @@
-import { PROGRESS, type PortageApp } from '../src/app/portage-app.js';
+import { PROGRESS, type SatwayApp } from '../src/app/satway-app.js';
 import { expect, test } from '../src/fixtures.js';
 import { activeFocus, startFocusAtTop, tabWalk } from '../src/quality/page-checks.js';
 import { RECLAIM_COPY } from '../src/scenario/reclaim.js';
@@ -8,7 +8,7 @@ import { STACKS_WALLET_NAME } from '../src/wallets/stacks-wallet.js';
 import type { World } from '../src/world/world.js';
 
 async function tabTo(
-  app: PortageApp,
+  app: SatwayApp,
   name: RegExp,
   options: { max?: number } = {}
 ): Promise<string[]> {
@@ -22,11 +22,11 @@ async function tabTo(
   throw new Error(`Tab never reached ${String(name)}; it went through: ${seen.join(' | ')}`);
 }
 
-async function press(app: PortageApp, key: string): Promise<void> {
+async function press(app: SatwayApp, key: string): Promise<void> {
   await app.page.keyboard.press(key);
 }
 
-async function connectStacksByKeyboard(app: PortageApp): Promise<void> {
+async function connectStacksByKeyboard(app: SatwayApp): Promise<void> {
   await startFocusAtTop(app.page);
   await tabTo(app, /^Connect Stacks wallet$/);
   await press(app, 'Enter');
@@ -46,7 +46,7 @@ async function connectStacksByKeyboard(app: PortageApp): Promise<void> {
   await expect(modal).toHaveCount(0);
 }
 
-async function toDoneFromWorld(app: PortageApp, world: World): Promise<void> {
+async function toDoneFromWorld(app: SatwayApp, world: World): Promise<void> {
   await app.waitForProgress(PROGRESS.swapping);
   const payout = world.completeSwap();
   await app.waitForProgress(PROGRESS.payoutUnconfirmed);

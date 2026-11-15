@@ -111,7 +111,7 @@ test.describe('M7. the signer key cannot be verified, so no deposit address is b
       expect(world.oneClick.quotes).toEqual([]);
       expect(api.depositPosts()).toEqual([]);
       expect(world.requestsTo('mempool', { path: /\/address\// })).toEqual([]);
-      expect(Object.keys(await app.storage()).filter(k => k.startsWith('portage'))).toEqual([]);
+      expect(Object.keys(await app.storage()).filter(k => k.startsWith('satway'))).toEqual([]);
     });
   }
 

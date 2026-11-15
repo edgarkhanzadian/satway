@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 
-import { PROGRESS, type PortageApp } from '../src/app/portage-app.js';
+import { PROGRESS, type SatwayApp } from '../src/app/satway-app.js';
 import { expect, test } from '../src/fixtures.js';
 import {
   THEMES,
@@ -36,7 +36,7 @@ interface Finding {
   targets: string[];
 }
 
-async function axeFindings(app: PortageApp, state: string): Promise<Finding[]> {
+async function axeFindings(app: SatwayApp, state: string): Promise<Finding[]> {
   const blocking: Finding[] = [];
   const incomplete: Finding[] = [];
   for (const theme of THEMES) {
@@ -70,7 +70,7 @@ async function axeFindings(app: PortageApp, state: string): Promise<Finding[]> {
 }
 
 async function audit(
-  app: PortageApp,
+  app: SatwayApp,
   state: string,
   options: { tracking: boolean; focus?: boolean }
 ): Promise<void> {

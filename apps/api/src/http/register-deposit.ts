@@ -5,7 +5,7 @@ import {
   fetchSignersPublicKey,
   signerKeyOfDepositScript,
   snapshotOutpoints,
-} from '@portage/core';
+} from '@satway/core';
 
 import {
   type KV,

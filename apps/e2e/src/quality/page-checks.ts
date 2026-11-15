@@ -18,7 +18,7 @@ export async function useTheme(page: Page, theme: Theme): Promise<void> {
 
 export async function expectPageStructure(page: Page): Promise<void> {
   await expect(page.locator('h1')).toHaveCount(1);
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('portage');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('satway');
   await expect(page.getByRole('banner')).toHaveCount(1);
   await expect(page.getByRole('navigation', { name: 'Page' })).toHaveCount(1);
   await expect(page.getByRole('main')).toHaveCount(1);

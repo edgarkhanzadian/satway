@@ -1,4 +1,4 @@
-import { z } from '@portage/core';
+import { z } from '@satway/core';
 
 export const receiptFileSchema = z.looseObject({
   version: z.literal(1),

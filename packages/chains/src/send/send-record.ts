@@ -1,6 +1,6 @@
 import { base58, base64 } from '@scure/base';
 
-import { z } from '@portage/core';
+import { z } from '@satway/core';
 
 import { isSolanaSignature } from '../metadata/index.js';
 import { isSentTxFor } from './source-wallet.js';
@@ -53,8 +53,8 @@ export interface UncertainRecord {
 
 export type SendRecord = AttemptingRecord | SentRecord | UncertainRecord;
 
-export const SEND_RECORD_PREFIX = 'portage:send-record:v1:';
-const PROBE_KEY = 'portage:send-record:probe';
+export const SEND_RECORD_PREFIX = 'satway:send-record:v1:';
+const PROBE_KEY = 'satway:send-record:probe';
 export const UNREADABLE_RECORD_MESSAGE =
   'A saved record of an earlier send from your wallet could not be read.';
 

@@ -1,4 +1,4 @@
-import { PROGRESS, type PortageApp } from '../src/app/portage-app.js';
+import { PROGRESS, type SatwayApp } from '../src/app/satway-app.js';
 import { expect, test } from '../src/fixtures.js';
 import { expectRegisteredWithEmily, notifierRun } from '../src/scenario/checks.js';
 import {
@@ -10,11 +10,11 @@ import {
 } from '../src/scenario/journeys.js';
 import { TOKENS } from '../src/world/oneclick.js';
 
-const RECEIPTS = 'portage.receipts.v1';
+const RECEIPTS = 'satway.receipts.v1';
 const QUOTE = /^\/quote$/;
 const FAILED_TO_FETCH = 'Failed to fetch';
 
-async function readyToQuote(app: PortageApp): Promise<void> {
+async function readyToQuote(app: SatwayApp): Promise<void> {
   await app.open();
   await app.connectStacksWallet();
   await app.connectEvmWallet();

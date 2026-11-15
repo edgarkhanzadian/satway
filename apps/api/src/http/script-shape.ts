@@ -1,4 +1,4 @@
-import type { NetworkConfig } from '@portage/core';
+import type { NetworkConfig } from '@satway/core';
 
 import { BadRequest } from './errors.js';
 

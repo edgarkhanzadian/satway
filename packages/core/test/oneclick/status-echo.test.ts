@@ -197,8 +197,8 @@ describe('refundOf', () => {
 });
 
 describe('quote attribution shared by both flows', () => {
-  it('uses the portage referral and the configured app fee', () => {
-    expect(QUOTE_REFERRAL).toBe('portage');
+  it('uses the satway referral and the configured app fee', () => {
+    expect(QUOTE_REFERRAL).toBe('satway');
     expect(appFeesFor({ appFeeBps: 0, appFeeRecipient: null })).toBeUndefined();
     expect(appFeesFor({ appFeeBps: 20, appFeeRecipient: 'abc' })).toEqual([
       { recipient: 'abc', fee: 20 },

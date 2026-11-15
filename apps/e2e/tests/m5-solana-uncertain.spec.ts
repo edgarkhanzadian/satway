@@ -1,6 +1,6 @@
 import { base58, base64 } from '@scure/base';
 
-import { PROGRESS, type PortageApp, type StartedDeposit } from '../src/app/portage-app.js';
+import { PROGRESS, type SatwayApp, type StartedDeposit } from '../src/app/satway-app.js';
 import { expect, test } from '../src/fixtures.js';
 import { SEND_COPY, expectNoSendOffered } from '../src/scenario/journeys.js';
 import { decodeTransaction } from '../src/world/solana.js';
@@ -15,7 +15,7 @@ function signatureOf(wire: string | undefined): string {
   return base58.encode(base64.decode(wire).subarray(1, 65));
 }
 
-async function startSolana(app: PortageApp): Promise<StartedDeposit> {
+async function startSolana(app: SatwayApp): Promise<StartedDeposit> {
   await app.open();
   await app.connectStacksWallet();
   await app.connectSolanaWallet();
@@ -27,12 +27,12 @@ async function startSolana(app: PortageApp): Promise<StartedDeposit> {
   return started;
 }
 
-async function clickAndWaitForUncertain(app: PortageApp): Promise<void> {
+async function clickAndWaitForUncertain(app: SatwayApp): Promise<void> {
   await app.clickSend();
   await expect(app.page.getByText(SEND_COPY.uncertainHeadline, { exact: true })).toBeVisible();
 }
 
-async function expectUncertain(app: PortageApp, signature: string, what: string): Promise<void> {
+async function expectUncertain(app: SatwayApp, signature: string, what: string): Promise<void> {
   await expect(app.page.getByText(SEND_COPY.uncertainHeadline, { exact: true })).toBeVisible();
   await expect(app.page.getByText(`What happened: ${what}`, { exact: true })).toBeVisible();
   await expect(app.page.getByText(`Signature ${signature}`, { exact: true })).toBeVisible();

@@ -1,5 +1,5 @@
 {
-  "name": "@portage/eslint-config",
+  "name": "@satway/eslint-config",
   "description": "Shared eslint configuration",
   "version": "0.0.0",
   "type": "module",
@@ -21,13 +21,13 @@
     "typescript-eslint": "8.47.0"
   },
   "devDependencies": {
-    "@portage/prettier-config": "workspace:*",
+    "@satway/prettier-config": "workspace:*",
     "eslint": "9.34.0",
     "prettier": "3.5.1"
   },
   "peerDependencies": {
     "eslint": ">=9.16.0"
   },
-  "prettier": "@portage/prettier-config",
+  "prettier": "@satway/prettier-config",
   "private": true
 }

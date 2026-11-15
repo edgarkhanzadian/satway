@@ -34,7 +34,7 @@ export const detailsRecipe = defineRecipe({
           borderBottomWidth: 'hairline',
           minWidth: 'zero',
         },
-        '& dd.portage-notice': {
+        '& dd.satway-notice': {
           marginBlock: 'space.04',
           borderBottomWidth: 'none',
         },

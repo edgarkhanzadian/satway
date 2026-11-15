@@ -1,4 +1,4 @@
-import { css, cva } from 'portage-styles/css';
+import { css, cva } from 'satway-styles/css';
 
 export const end = cva({
   base: { maxWidth: 'end', overflowWrap: 'anywhere', minWidth: 'zero' },

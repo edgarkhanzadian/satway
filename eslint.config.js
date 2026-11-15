@@ -3,34 +3,34 @@ import { defineConfig } from 'eslint/config';
 import baseConfig, {
   sharedRestrictedImportPaths,
   sharedRestrictedSyntax,
-} from '@portage/eslint-config';
-import reactConfig from '@portage/eslint-config/react';
+} from '@satway/eslint-config';
+import reactConfig from '@satway/eslint-config/react';
 
 const coreDeepImport = {
-  group: ['@portage/core/*'],
-  message: 'Import from the package entry @portage/core, not from its internal files.',
+  group: ['@satway/core/*'],
+  message: 'Import from the package entry @satway/core, not from its internal files.',
 };
 
 const chainsDeepImport = {
-  group: ['@portage/chains/*', '!@portage/chains/solana'],
+  group: ['@satway/chains/*', '!@satway/chains/solana'],
   message:
-    'Import from the package entry @portage/chains, or @portage/chains/solana for the lazily loaded Solana send code, not from its internal files.',
+    'Import from the package entry @satway/chains, or @satway/chains/solana for the lazily loaded Solana send code, not from its internal files.',
 };
 
 const zodThroughCore = {
   group: ['zod', 'zod/*'],
   message:
-    "Import z from @portage/core (../shared/index.js inside core). It turns on zod's jitless mode before any schema exists, so no eval runs under the page's script-src 'self'.",
+    "Import z from @satway/core (../shared/index.js inside core). It turns on zod's jitless mode before any schema exists, so no eval runs under the page's script-src 'self'.",
 };
 
 const apiDeepImport = {
-  group: ['@portage/api/*', '**/api/src/**'],
+  group: ['@satway/api/*', '**/api/src/**'],
   message:
-    'apps/e2e runs the Worker through its entry only: import @portage/api, not files inside apps/api.',
+    'apps/e2e runs the Worker through its entry only: import @satway/api, not files inside apps/api.',
 };
 
 const webSourceInE2e = {
-  group: ['@portage/web', '@portage/web/*', '**/web/src/**'],
+  group: ['@satway/web', '@satway/web/*', '**/web/src/**'],
   message:
     'apps/e2e tests the built web app through the browser. It must not import apps/web source.',
 };
@@ -94,26 +94,26 @@ const coreNetworkExports = [
 ];
 
 const stylesOnlyInWeb = {
-  group: ['portage-styles', 'portage-styles/*'],
+  group: ['satway-styles', 'satway-styles/*'],
   message: 'The generated Panda styled-system belongs to apps/web. Nothing else may import it.',
 };
 
 const rawCssInWeb = {
   group: ['*.css', '!./app.css', '!@fontsource/*/*.css', '!@fontsource-variable/*/*.css'],
   message:
-    'Style through Panda (css(), styled props or a recipe from @portage/panda-preset). The only CSS imports are ./app.css (the Panda entry) and Fontsource font files.',
+    'Style through Panda (css(), styled props or a recipe from @satway/panda-preset). The only CSS imports are ./app.css (the Panda entry) and Fontsource font files.',
 };
 
 const presetOnlyThroughPanda = {
-  group: ['@portage/panda-preset', '@portage/panda-preset/*'],
+  group: ['@satway/panda-preset', '@satway/panda-preset/*'],
   message:
-    'The preset is consumed by panda.config.ts only. Use the generated portage-styles modules in app code.',
+    'The preset is consumed by panda.config.ts only. Use the generated satway-styles modules in app code.',
 };
 
 const pandaEscapeHatch = {
   selector: 'Literal[value=/^\\[.+\\]$/]',
   message:
-    "Panda's [value] escape hatch bypasses the tokens. Add or reuse a token in @portage/panda-preset instead.",
+    "Panda's [value] escape hatch bypasses the tokens. Add or reuse a token in @satway/panda-preset instead.",
 };
 
 const webRestrictedPatterns = [
@@ -133,12 +133,12 @@ const webRestrictedSyntax = [
   },
   {
     selector: "JSXAttribute[name.name='className'][value.type='Literal']",
-    message: 'No literal class names. Use css(), cx() or a recipe from portage-styles.',
+    message: 'No literal class names. Use css(), cx() or a recipe from satway-styles.',
   },
   {
     selector:
       "JSXAttribute[name.name='className'] > JSXExpressionContainer > :matches(Literal, TemplateLiteral)",
-    message: 'No literal class names. Use css(), cx() or a recipe from portage-styles.',
+    message: 'No literal class names. Use css(), cx() or a recipe from satway-styles.',
   },
 ];
 
@@ -161,8 +161,8 @@ const chainsRestrictedImports = {
     },
     stylesOnlyInWeb,
     {
-      group: ['@portage/*', '!@portage/core'],
-      message: 'packages/chains may import @portage/core only among workspace packages.',
+      group: ['@satway/*', '!@satway/core'],
+      message: 'packages/chains may import @satway/core only among workspace packages.',
     },
     coreDeepImport,
     zodThroughCore,
@@ -183,7 +183,7 @@ const coreRestrictedImports = {
     { group: ['react/*', 'react-dom/*'], message: 'packages/core is UI-free.' },
     stylesOnlyInWeb,
     {
-      group: ['@portage/*'],
+      group: ['@satway/*'],
       message: 'packages/core must not import other workspace packages.',
     },
   ],
@@ -194,7 +194,7 @@ export default defineConfig([
     files: ['{packages,apps,scripts}/**/*.{ts,tsx}'],
     extends: [baseConfig],
     rules: {
-      'portage/no-same-package-barrel-import': 'error',
+      'satway/no-same-package-barrel-import': 'error',
     },
   },
   {
@@ -207,7 +207,7 @@ export default defineConfig([
     ignores: [
       '**/*.{js,cjs,mjs}',
       '**/node_modules/',
-      '**/portage-styles/',
+      '**/satway-styles/',
       '**/panda.config*.ts',
       '**/dist/',
       '**/.wrangler/',
@@ -299,7 +299,7 @@ export default defineConfig([
           paths: [
             ...sharedRestrictedImportPaths,
             {
-              name: '@portage/core',
+              name: '@satway/core',
               importNames: coreNetworkExports,
               message:
                 'apps/web/src/ui is presentational. Read from the network in a feature or in shared, and pass the result down.',
@@ -308,7 +308,7 @@ export default defineConfig([
           patterns: [
             ...webRestrictedPatterns,
             {
-              group: ['@portage/chains/solana'],
+              group: ['@satway/chains/solana'],
               message:
                 'apps/web/src/ui is presentational. The Solana send code reads the Solana RPC; call it from a feature.',
             },
@@ -328,7 +328,7 @@ export default defineConfig([
           patterns: [
             stylesOnlyInWeb,
             {
-              group: ['@portage/*'],
+              group: ['@satway/*'],
               message:
                 'The preset holds design values only. It must not import app code or other workspace packages.',
             },

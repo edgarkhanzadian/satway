@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { OneClickToken } from '@portage/core';
+import type { OneClickToken } from '@satway/core';
 
 import {
   EVM_CHAIN_IDS,

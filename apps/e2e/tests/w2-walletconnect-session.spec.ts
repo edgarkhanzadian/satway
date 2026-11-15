@@ -1,4 +1,4 @@
-import { PROGRESS, type PortageApp } from '../src/app/portage-app.js';
+import { PROGRESS, type SatwayApp } from '../src/app/satway-app.js';
 import { expect, test } from '../src/fixtures.js';
 import { erc20TransferData } from '../src/scenario/checks.js';
 import { SEND_COPY, expectNoSendOffered, finishJourney } from '../src/scenario/journeys.js';
@@ -14,7 +14,7 @@ const CONNECTED = `${WALLETCONNECT_WALLET_NAME} (WalletConnect) connected`;
 const SEND_LABEL = `Send from ${WALLETCONNECT_WALLET_NAME} (WalletConnect)`;
 
 async function pairAndQuote(
-  app: PortageApp,
+  app: SatwayApp,
   world: World,
   solanaAddress: string,
   evmChainIds: number[]

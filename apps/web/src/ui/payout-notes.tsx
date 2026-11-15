@@ -1,6 +1,6 @@
-import { notice } from 'portage-styles/recipes';
+import { notice } from 'satway-styles/recipes';
 
-import { type AddressOutput, type EmilyDepositStatus, outpointOf } from '@portage/core';
+import { type AddressOutput, type EmilyDepositStatus, outpointOf } from '@satway/core';
 
 import type { RegistrationErrorNote, Snapshot } from '../shared/index.js';
 

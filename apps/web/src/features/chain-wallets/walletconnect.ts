@@ -13,8 +13,8 @@ import {
   notSent,
   signOnlyFailure,
   walletFailure,
-} from '@portage/chains';
-import { errorMessage } from '@portage/core';
+} from '@satway/chains';
+import { errorMessage } from '@satway/core';
 
 export const WALLETCONNECT_METHODS: readonly string[] = Object.freeze([
   'eth_sendTransaction',

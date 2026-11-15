@@ -25,7 +25,7 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
 } from '@solana/kit';
 
-import type { OneClickToken } from '@portage/core';
+import type { OneClickToken } from '@satway/core';
 
 import { isSolanaAddress } from '../../metadata/index.js';
 import { formatUnits } from './solana-pay.js';

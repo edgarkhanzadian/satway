@@ -1,4 +1,4 @@
-import { PROGRESS, type PortageApp } from '../src/app/portage-app.js';
+import { PROGRESS, type SatwayApp } from '../src/app/satway-app.js';
 import type { Wallets } from '../src/browser/harness.js';
 import { expect, test } from '../src/fixtures.js';
 import { expectReceiptMatchesWorld, expectRegisteredWithEmily } from '../src/scenario/checks.js';
@@ -8,7 +8,7 @@ import { SYSTEM_PROGRAM, associatedTokenAddress, effectsOf } from '../src/world/
 import type { World } from '../src/world/world.js';
 
 async function finishJourney(
-  app: PortageApp,
+  app: SatwayApp,
   world: World,
   receipt: Parameters<typeof expectRegisteredWithEmily>[1]
 ) {
@@ -23,7 +23,7 @@ async function finishJourney(
   await app.expectComplete();
 }
 
-async function sendNativeSol(app: PortageApp, world: World, wallets: Wallets) {
+async function sendNativeSol(app: SatwayApp, world: World, wallets: Wallets) {
   await app.open();
   await app.connectStacksWallet();
   await app.connectSolanaWallet();

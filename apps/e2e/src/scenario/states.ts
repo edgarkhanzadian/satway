@@ -1,6 +1,6 @@
 import { expect } from '@playwright/test';
 
-import { PROGRESS, type PortageApp, type StartedDeposit } from '../app/portage-app.js';
+import { PROGRESS, type SatwayApp, type StartedDeposit } from '../app/satway-app.js';
 import type { Wallets } from '../browser/harness.js';
 import type { PayoutResult, World } from '../world/world.js';
 import { type EvmStart, startAwaitingFunds, toPayoutConfirmed } from './journeys.js';
@@ -14,7 +14,7 @@ export interface ReclaimableDeposit {
 }
 
 export async function toReclaimable(
-  app: PortageApp,
+  app: SatwayApp,
   world: World,
   options: EvmStart = {}
 ): Promise<ReclaimableDeposit> {
@@ -27,10 +27,7 @@ export async function toReclaimable(
   return { started, payout };
 }
 
-export async function openReceiptInRecover(
-  app: PortageApp,
-  started: StartedDeposit
-): Promise<void> {
+export async function openReceiptInRecover(app: SatwayApp, started: StartedDeposit): Promise<void> {
   await app.openRecover();
   await app.uploadReceipt(started.receiptPath);
   await expect(
@@ -40,7 +37,7 @@ export async function openReceiptInRecover(
 }
 
 export async function toMinting(
-  app: PortageApp,
+  app: SatwayApp,
   world: World,
   options: EvmStart = {}
 ): Promise<ReclaimableDeposit> {

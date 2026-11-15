@@ -1,5 +1,5 @@
 {
-  "name": "@portage/core",
+  "name": "@satway/core",
   "description": "sBTC deposit, signer, quote and reclaim logic. No UI, no keys.",
   "version": "0.0.0",
   "type": "module",
@@ -22,14 +22,14 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "@portage/prettier-config": "workspace:*",
-    "@portage/tsconfig-config": "workspace:*",
+    "@satway/prettier-config": "workspace:*",
+    "@satway/tsconfig-config": "workspace:*",
     "prettier": "3.5.1",
     "typescript": "5.9.3",
     "vitest": "3.2.7"
   },
   "main": "./src/index.ts",
-  "prettier": "@portage/prettier-config",
+  "prettier": "@satway/prettier-config",
   "private": true,
   "sideEffects": [
     "./src/shared/schema.ts"

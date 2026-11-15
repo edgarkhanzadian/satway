@@ -6,7 +6,7 @@ import {
   type OneClickStatusResponse,
   parseWith,
   z,
-} from '@portage/core';
+} from '@satway/core';
 
 import { BadRequest, Unavailable, UnknownSwap } from './errors.js';
 import { DEADLINE_MARGIN_MINUTES } from './proxy.js';

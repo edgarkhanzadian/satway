@@ -1,6 +1,6 @@
 import { base64 } from '@scure/base';
 
-import { DEFAULT_REQUEST_TIMEOUT_MS, errorMessage, withTimeout } from '@portage/core';
+import { DEFAULT_REQUEST_TIMEOUT_MS, errorMessage, withTimeout } from '@satway/core';
 
 export interface RpcResponse {
   ok: boolean;

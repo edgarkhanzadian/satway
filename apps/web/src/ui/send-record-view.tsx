@@ -1,5 +1,5 @@
-import { css, cx } from 'portage-styles/css';
-import { actions, button, notice } from 'portage-styles/recipes';
+import { css, cx } from 'satway-styles/css';
+import { actions, button, notice } from 'satway-styles/recipes';
 
 import {
   type SendRecord,
@@ -8,7 +8,7 @@ import {
   needsConfirmation,
   promptWaitMs,
   recordTx,
-} from '@portage/chains';
+} from '@satway/chains';
 
 const sendStatus = cx(notice({ tone: 'status' }), css({ marginBlock: 'space.06' }));
 const uncertainBox = cx(notice({ tone: 'warn' }), css({ marginBlock: 'space.06' }));

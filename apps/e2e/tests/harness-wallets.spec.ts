@@ -1,6 +1,6 @@
 import { base64, hex } from '@scure/base';
 
-import { buildDepositAddress, buildReclaimPsbt, finalizeSignedReclaim } from '@portage/core';
+import { buildDepositAddress, buildReclaimPsbt, finalizeSignedReclaim } from '@satway/core';
 
 import { expect, test } from '../src/fixtures.js';
 import { field, stringField } from '../src/world/http.js';

@@ -1,4 +1,4 @@
-import { css } from 'portage-styles/css';
+import { css } from 'satway-styles/css';
 
 const QUIET_ZONE = 4;
 

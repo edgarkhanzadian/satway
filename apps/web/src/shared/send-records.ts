@@ -3,7 +3,7 @@ import {
   type SendLock,
   type SendRecords,
   createSendRecords,
-} from '@portage/chains';
+} from '@satway/chains';
 
 function browserStorage(): KeyValueStore | null {
   try {

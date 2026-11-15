@@ -1,8 +1,8 @@
-import type { PortageApp } from '../src/app/portage-app.js';
+import type { SatwayApp } from '../src/app/satway-app.js';
 import { expect, test } from '../src/fixtures.js';
 import { SEND_COPY, resumeIn, startAwaitingFunds } from '../src/scenario/journeys.js';
 
-async function clickSendInPage(app: PortageApp): Promise<boolean> {
+async function clickSendInPage(app: SatwayApp): Promise<boolean> {
   return app.page.evaluate(() => {
     const buttons: HTMLButtonElement[] = Array.from(document.querySelectorAll('button'));
     const button = buttons.find(b => b.textContent.startsWith('Send from '));

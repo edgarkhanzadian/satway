@@ -1,4 +1,4 @@
-import { MAINNET_CONFIG as config } from '@portage/core';
+import { MAINNET_CONFIG as config } from '@satway/core';
 
 import {
   DEPOSIT_RATE,

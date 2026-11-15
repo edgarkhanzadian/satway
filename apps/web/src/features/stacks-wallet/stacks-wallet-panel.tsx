@@ -1,9 +1,9 @@
 import { useState } from 'react';
 
-import { css, cx } from 'portage-styles/css';
-import { actions, button, details, notice } from 'portage-styles/recipes';
+import { css, cx } from 'satway-styles/css';
+import { actions, button, details, notice } from 'satway-styles/recipes';
 
-import { errorMessage } from '@portage/core';
+import { errorMessage } from '@satway/core';
 
 import { type WalletAccount, localStorageWorks } from '../../shared/index.js';
 import { connected, end, endLede, endTitle, short } from '../../ui/index.js';

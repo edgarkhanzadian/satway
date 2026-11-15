@@ -14,7 +14,7 @@ import {
   outpointOf,
   outputsToRegister,
   priorOutputsOf,
-} from '@portage/core';
+} from '@satway/core';
 
 import {
   CRON_PERIOD_MINUTES,

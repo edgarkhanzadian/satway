@@ -1,4 +1,4 @@
-import { PROGRESS } from '../src/app/portage-app.js';
+import { PROGRESS } from '../src/app/satway-app.js';
 import { expect, test } from '../src/fixtures.js';
 import { finishJourney, startAwaitingFunds } from '../src/scenario/journeys.js';
 

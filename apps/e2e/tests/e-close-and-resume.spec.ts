@@ -1,11 +1,11 @@
-import { PROGRESS, type PortageApp } from '../src/app/portage-app.js';
 import type { ReceiptFile } from '../src/app/receipt.js';
+import { PROGRESS, type SatwayApp } from '../src/app/satway-app.js';
 import { expect, test } from '../src/fixtures.js';
 import { expectRegisteredWithEmily } from '../src/scenario/checks.js';
 import type { World } from '../src/world/world.js';
 
 async function startAndCloseMidSwap(
-  app: PortageApp
+  app: SatwayApp
 ): Promise<{ receipt: ReceiptFile; receiptPath: string }> {
   await app.open();
   await app.connectStacksWallet();
@@ -19,7 +19,7 @@ async function startAndCloseMidSwap(
   return started;
 }
 
-async function resumeToDone(later: PortageApp, world: World, receipt: ReceiptFile): Promise<void> {
+async function resumeToDone(later: SatwayApp, world: World, receipt: ReceiptFile): Promise<void> {
   await expect(later.progress(PROGRESS.swapping)).toBeVisible();
   await later.followDeposit();
   await expect(later.page.getByRole('heading', { name: 'Deposit in progress' })).toBeVisible();

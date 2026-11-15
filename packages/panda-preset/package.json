@@ -1,5 +1,5 @@
 {
-  "name": "@portage/panda-preset",
+  "name": "@satway/panda-preset",
   "description": "Design tokens, recipes and global styles for the web app, as a Panda preset",
   "version": "0.0.0",
   "type": "module",
@@ -17,11 +17,11 @@
     "@pandacss/dev": "1.7.1"
   },
   "devDependencies": {
-    "@portage/prettier-config": "workspace:*",
-    "@portage/tsconfig-config": "workspace:*",
+    "@satway/prettier-config": "workspace:*",
+    "@satway/tsconfig-config": "workspace:*",
     "prettier": "3.5.1",
     "typescript": "5.9.3"
   },
-  "prettier": "@portage/prettier-config",
+  "prettier": "@satway/prettier-config",
   "private": true
 }

@@ -1,4 +1,4 @@
-import { type OneClickSwapStatus, errorMessage } from '@portage/core';
+import { type OneClickSwapStatus, errorMessage } from '@satway/core';
 
 import {
   type AttemptingRecord,

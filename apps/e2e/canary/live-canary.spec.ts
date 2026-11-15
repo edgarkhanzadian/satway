@@ -5,7 +5,7 @@ import {
   fetchVerifiedSigners,
   parseWith,
   z,
-} from '@portage/core';
+} from '@satway/core';
 
 import { expect, test } from '../src/canary/canary-fixtures.js';
 import { SOLANA_MAINNET_CAIP2, UPSTREAM } from '../src/config.js';

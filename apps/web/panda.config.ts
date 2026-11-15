@@ -6,10 +6,10 @@ export default defineConfig({
   include: ['./src/**/*.{ts,tsx}'],
   exclude: [],
 
-  presets: ['@portage/panda-preset/config'],
+  presets: ['@satway/panda-preset/config'],
 
   jsxFramework: 'react',
-  prefix: 'portage',
+  prefix: 'satway',
 
   strictTokens: true,
   strictPropertyValues: true,
@@ -21,5 +21,5 @@ export default defineConfig({
     },
   },
 
-  outdir: 'portage-styles',
+  outdir: 'satway-styles',
 });

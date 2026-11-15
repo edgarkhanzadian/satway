@@ -16,7 +16,7 @@ import {
   refundOf,
   registerOutputs,
   remainingDepositOf,
-} from '@portage/core';
+} from '@satway/core';
 
 import type { Backend } from './backend.js';
 import type { Receipt } from './receipt.js';

@@ -1,4 +1,4 @@
-import { PROGRESS, type PortageApp } from '../src/app/portage-app.js';
+import { PROGRESS, type SatwayApp } from '../src/app/satway-app.js';
 import type { Harness } from '../src/browser/harness.js';
 import { installTimerProbe, timerCounts } from '../src/browser/probes.js';
 import { expect, test } from '../src/fixtures.js';
@@ -11,7 +11,7 @@ function pageRequests(harness: Harness): number {
   return harness.network.filter(e => e.handledBy !== 'app').length;
 }
 
-async function pollOnce(app: PortageApp, harness: Harness, ms: number): Promise<number> {
+async function pollOnce(app: SatwayApp, harness: Harness, ms: number): Promise<number> {
   const before = pageRequests(harness);
   await app.fastForward(ms);
   return pageRequests(harness) - before;

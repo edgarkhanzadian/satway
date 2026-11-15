@@ -1,7 +1,7 @@
 import { UniversalProvider } from '@walletconnect/universal-provider';
 import { encode } from 'uqr';
 
-import { SOLANA_MAINNET_CAIP2, type SourceWallet, WALLETCONNECT_PROJECT_ID } from '@portage/chains';
+import { SOLANA_MAINNET_CAIP2, type SourceWallet, WALLETCONNECT_PROJECT_ID } from '@satway/chains';
 
 import {
   WALLETCONNECT_RELAY_URL,

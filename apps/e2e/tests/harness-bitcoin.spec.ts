@@ -1,7 +1,7 @@
 import { base64, hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
-import { buildDepositAddress, buildReclaimPsbt, finalizeSignedReclaim } from '@portage/core';
+import { buildDepositAddress, buildReclaimPsbt, finalizeSignedReclaim } from '@satway/core';
 
 import type { Wallets } from '../src/browser/harness.js';
 import { expect, test } from '../src/fixtures.js';

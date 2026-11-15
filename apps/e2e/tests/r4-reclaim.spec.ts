@@ -1,4 +1,4 @@
-import { PROGRESS, type PortageApp, type StartedDeposit } from '../src/app/portage-app.js';
+import { PROGRESS, type SatwayApp, type StartedDeposit } from '../src/app/satway-app.js';
 import { expect, test } from '../src/fixtures.js';
 import {
   FAILED_TO_LOAD,
@@ -21,7 +21,7 @@ import type { PayoutResult, World } from '../src/world/world.js';
 const FEE_SATS = Math.ceil(126 * 4);
 
 async function toReclaimable(
-  app: PortageApp,
+  app: SatwayApp,
   world: World
 ): Promise<{ started: StartedDeposit; payout: PayoutResult }> {
   const started = await startAwaitingFunds(app);
@@ -49,7 +49,7 @@ async function toReclaimable(
   return { started, payout };
 }
 
-async function openInRecover(app: PortageApp, started: StartedDeposit): Promise<void> {
+async function openInRecover(app: SatwayApp, started: StartedDeposit): Promise<void> {
   await app.openRecover();
   await app.uploadReceipt(started.receiptPath);
   await expect(

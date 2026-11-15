@@ -1,7 +1,7 @@
 import { base58 } from '@scure/base';
 import { describe, expect, it, vi } from 'vitest';
 
-import { SendError } from '@portage/chains';
+import { SendError } from '@satway/chains';
 
 import {
   collectSolanaWallets,

@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { css } from 'portage-styles/css';
-import { actions, button, details, notice } from 'portage-styles/recipes';
+import { css } from 'satway-styles/css';
+import { actions, button, details, notice } from 'satway-styles/recipes';
 
-import { type EvmWalletOption, type SourceWallet, connectEvm } from '@portage/chains';
-import { errorMessage } from '@portage/core';
+import { type EvmWalletOption, type SourceWallet, connectEvm } from '@satway/chains';
+import { errorMessage } from '@satway/core';
 
 import {
   WalletName,

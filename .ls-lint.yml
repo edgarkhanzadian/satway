@@ -15,7 +15,7 @@ ignore:
   - dist
   - apps/*/node_modules
   - apps/*/dist
-  - apps/web/portage-styles
+  - apps/web/satway-styles
   - apps/api/.wrangler
   - apps/e2e/.web-build
   - apps/e2e/test-results

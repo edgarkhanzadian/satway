@@ -17,7 +17,7 @@ import { tokens } from './tokens.js';
 import { textStyles } from './typography.js';
 
 export default definePreset({
-  name: 'portage',
+  name: 'satway',
   globalCss,
   theme: {
     extend: {

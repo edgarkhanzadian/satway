@@ -1,10 +1,10 @@
 {
-  "extends": "@portage/tsconfig-config/tsconfig.base.json",
+  "extends": "@satway/tsconfig-config/tsconfig.base.json",
   "compilerOptions": {
     "jsx": "react-jsx",
     "types": ["vite/client"],
     "paths": {
-      "portage-styles/*": ["./portage-styles/*"]
+      "satway-styles/*": ["./satway-styles/*"]
     }
   },
   "include": ["src", "test", "vite.config.ts", "panda.config.ts"]

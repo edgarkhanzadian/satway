@@ -1,6 +1,6 @@
 import { expect } from '@playwright/test';
 
-import { PROGRESS, type PortageApp, type StartedDeposit } from '../app/portage-app.js';
+import { PROGRESS, type SatwayApp, type StartedDeposit } from '../app/satway-app.js';
 import type { Outpoint } from '../world/bitcoin.js';
 import type { PayoutResult, World } from '../world/world.js';
 
@@ -36,7 +36,7 @@ export interface EvmStart {
 }
 
 export async function startDeposit(
-  app: PortageApp,
+  app: SatwayApp,
   options: EvmStart = {}
 ): Promise<StartedDeposit> {
   await app.open();
@@ -52,7 +52,7 @@ export async function startDeposit(
 }
 
 export async function startAwaitingFunds(
-  app: PortageApp,
+  app: SatwayApp,
   options: EvmStart = {}
 ): Promise<StartedDeposit> {
   const started = await startDeposit(app, options);
@@ -61,7 +61,7 @@ export async function startAwaitingFunds(
 }
 
 export async function payOut(
-  app: PortageApp,
+  app: SatwayApp,
   world: World,
   options: { reportHash?: boolean; amountSats?: number } = {}
 ): Promise<PayoutResult> {
@@ -70,7 +70,7 @@ export async function payOut(
   return world.completeSwap(options);
 }
 
-export async function toPayoutConfirmed(app: PortageApp, world: World): Promise<PayoutResult> {
+export async function toPayoutConfirmed(app: SatwayApp, world: World): Promise<PayoutResult> {
   const payout = await payOut(app, world);
   await app.waitForProgress(PROGRESS.payoutUnconfirmed);
   world.mine(1);
@@ -83,7 +83,7 @@ export function savedLabel(started: StartedDeposit): string {
 }
 
 export async function resumeIn(
-  app: PortageApp,
+  app: SatwayApp,
   started: StartedDeposit,
   options: { reload?: boolean; evm?: boolean; solana?: boolean } = {}
 ): Promise<void> {
@@ -95,7 +95,7 @@ export async function resumeIn(
   await app.resumeSaved(savedLabel(started));
 }
 
-export async function finishJourney(app: PortageApp, world: World): Promise<PayoutResult> {
+export async function finishJourney(app: SatwayApp, world: World): Promise<PayoutResult> {
   const payout = await toPayoutConfirmed(app, world);
   world.signers.mint(payout.outpoint);
   await app.waitForProgress(PROGRESS.done);
@@ -103,7 +103,7 @@ export async function finishJourney(app: PortageApp, world: World): Promise<Payo
   return payout;
 }
 
-export async function expectNoSendOffered(app: PortageApp): Promise<void> {
+export async function expectNoSendOffered(app: SatwayApp): Promise<void> {
   await expect(app.sendButton).toHaveCount(0);
 }
 

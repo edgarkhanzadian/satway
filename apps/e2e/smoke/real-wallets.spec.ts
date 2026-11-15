@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { PortageApp } from '../src/app/portage-app.js';
+import { SatwayApp } from '../src/app/satway-app.js';
 import { type CanaryLog, routeThroughLocalWorker } from '../src/canary/canary-fixtures.js';
 import { APP_ORIGIN } from '../src/config.js';
 import { SMOKE_ENV, smokeEnvProblem } from '../src/smoke/smoke-env.js';
@@ -20,7 +20,7 @@ interface SmokeFixtures {
   wallets: BrowserContext;
   log: CanaryLog;
   page: Page;
-  app: PortageApp;
+  app: SatwayApp;
 }
 
 const test = base.extend<SmokeFixtures>({
@@ -33,7 +33,7 @@ const test = base.extend<SmokeFixtures>({
     if (problem !== null) throw new Error(problem);
     const extensions = [process.env[SMOKE_ENV.metamask], process.env[SMOKE_ENV.leather]].join(',');
     const profile =
-      process.env[SMOKE_ENV.profile] ?? mkdtempSync(join(tmpdir(), 'portage-smoke-profile-'));
+      process.env[SMOKE_ENV.profile] ?? mkdtempSync(join(tmpdir(), 'satway-smoke-profile-'));
     const context = await chromium.launchPersistentContext(profile, {
       headless: false,
       args: [`--disable-extensions-except=${extensions}`, `--load-extension=${extensions}`],
@@ -48,7 +48,7 @@ const test = base.extend<SmokeFixtures>({
   },
   async app({ page }, use) {
     await use(
-      new PortageApp(
+      new SatwayApp(
         page,
         {
           async idle() {
@@ -58,7 +58,7 @@ const test = base.extend<SmokeFixtures>({
             return undefined;
           },
         },
-        new World('portage smoke page object')
+        new World('satway smoke page object')
       )
     );
   },
@@ -69,7 +69,7 @@ test('real wallets: discovery, connect, a dry quote, and a send prompt the human
   page,
 }) => {
   await page.goto(`${APP_ORIGIN}/`);
-  await expect(page.getByRole('heading', { name: 'portage', level: 1 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'satway', level: 1 })).toBeVisible();
 
   await expect(app.from.getByRole('button', { name: /MetaMask/ })).toBeVisible();
   await app.to.getByRole('button', { name: 'Connect Stacks wallet' }).click();

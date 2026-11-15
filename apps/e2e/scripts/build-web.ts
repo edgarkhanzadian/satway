@@ -14,7 +14,7 @@ function fail(message: string): never {
   process.exit(1);
 }
 
-const codegen = spawnSync('pnpm', ['--filter', '@portage/web', 'codegen'], { stdio: 'inherit' });
+const codegen = spawnSync('pnpm', ['--filter', '@satway/web', 'codegen'], { stdio: 'inherit' });
 if (codegen.status !== 0) fail('panda codegen failed');
 
 const readByWebConfig = ['.env', '.env.local', '.env.production', '.env.production.local'];
@@ -24,7 +24,7 @@ if (present.length > 0)
     `apps/web has ${present.join(', ')}; apps/web/vite.config.ts would read it. Move it away before building for e2e.`
   );
 
-const envDir = mkdtempSync(join(tmpdir(), 'portage-e2e-env-'));
+const envDir = mkdtempSync(join(tmpdir(), 'satway-e2e-env-'));
 const startDir = process.cwd();
 process.env.VITE_API_URL = API_ORIGIN;
 process.chdir(webRoot);

@@ -1,11 +1,11 @@
 import { type BrowserContext, type Route, test as base, expect } from '@playwright/test';
 import { base64 } from '@scure/base';
 
-import { type Env, handle } from '@portage/api';
+import { type Env, handle } from '@satway/api';
 
-import { type AppHarness, PortageApp } from '../app/portage-app.js';
+import { type AppHarness, SatwayApp } from '../app/satway-app.js';
 import { BINDING } from '../browser/harness.js';
-import { type PageScriptOptions, installPortagePage } from '../browser/page-script.js';
+import { type PageScriptOptions, installSatwayPage } from '../browser/page-script.js';
 import { API_ORIGIN, APP_ORIGIN, UPSTREAM } from '../config.js';
 import { EVM_WALLET_NAME, EvmWallet } from '../wallets/evm-wallet.js';
 import { SOLANA_WALLET_NAME, SolanaWallet } from '../wallets/solana-wallet.js';
@@ -130,7 +130,7 @@ async function install(context: BrowserContext, wallets: CanaryWallets, log: Can
     evm: {
       name: EVM_WALLET_NAME,
       uuid: '00000000-0000-4000-a000-000000000000',
-      rdns: 'test.portage.evm',
+      rdns: 'test.satway.evm',
       icon: ICON,
     },
     solana: {
@@ -142,7 +142,7 @@ async function install(context: BrowserContext, wallets: CanaryWallets, log: Can
     },
     stacks: { id: STACKS_WALLET_ID, name: STACKS_WALLET_NAME, icon: ICON },
   };
-  await context.addInitScript(installPortagePage, pageOptions);
+  await context.addInitScript(installSatwayPage, pageOptions);
   await context.addInitScript(
     ({ binding, pattern }) => {
       const guarded = new RegExp(pattern);
@@ -231,7 +231,7 @@ async function onRoute(route: Route, env: Env, log: CanaryLog, rules: NetworkRul
 interface CanaryFixtures {
   canaryLog: CanaryLog;
   wallets: CanaryWallets;
-  app: PortageApp;
+  app: SatwayApp;
 }
 
 export const test = base.extend<CanaryFixtures>({
@@ -239,7 +239,7 @@ export const test = base.extend<CanaryFixtures>({
     await use({ violations: [], realRequests: [], workerCalls: [] });
   },
   async wallets({}, use) {
-    const keys = new World('portage canary placeholder keys');
+    const keys = new World('satway canary placeholder keys');
     await use({
       evm: new EvmWallet(keys, { chainId: 8453 }),
       solana: new SolanaWallet(keys),
@@ -264,7 +264,7 @@ export const test = base.extend<CanaryFixtures>({
         return undefined;
       },
     };
-    await use(new PortageApp(page, harness, new World('portage canary page object')));
+    await use(new SatwayApp(page, harness, new World('satway canary page object')));
   },
 });
 

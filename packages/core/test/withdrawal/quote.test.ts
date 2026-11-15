@@ -45,7 +45,7 @@ describe('buildWithdrawalQuoteRequest', () => {
       recipient: PLACEHOLDER_EVM_RECIPIENT,
       recipientType: 'DESTINATION_CHAIN',
       deadline: '2026-11-17T12:00:00.000Z',
-      referral: 'portage',
+      referral: 'satway',
     });
   });
 

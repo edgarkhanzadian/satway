@@ -1,4 +1,4 @@
-import { PROGRESS, type PortageApp } from '../src/app/portage-app.js';
+import { PROGRESS, type SatwayApp } from '../src/app/satway-app.js';
 import { expect, test } from '../src/fixtures.js';
 import { expectRegisteredWithEmily, notifierRun } from '../src/scenario/checks.js';
 import {
@@ -24,7 +24,7 @@ function emilyPosts(world: World) {
   return world.requestsTo('emily', { method: 'POST', path: '/deposit' });
 }
 
-function registrationNotice(app: PortageApp) {
+function registrationNotice(app: SatwayApp) {
   return app.page.locator('p').filter({ hasText: 'The sBTC signers have not been told' });
 }
 

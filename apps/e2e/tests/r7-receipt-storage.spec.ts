@@ -1,26 +1,26 @@
-import { PROGRESS, type PortageApp } from '../src/app/portage-app.js';
+import { PROGRESS, type SatwayApp } from '../src/app/satway-app.js';
 import { expect, test } from '../src/fixtures.js';
 import { savedLabel } from '../src/scenario/journeys.js';
 import { parseJson } from '../src/world/http.js';
 
-const RECEIPTS = 'portage.receipts.v1';
+const RECEIPTS = 'satway.receipts.v1';
 const UNREADABLE = `${RECEIPTS}.unreadable.`;
 const ONLY_COPY =
   'This browser could not keep a copy of the receipt, so the file that was just downloaded is the only copy. Keep it: it is what lets you recover your BTC if anything goes wrong.';
 
-async function openReady(app: PortageApp): Promise<void> {
+async function openReady(app: SatwayApp): Promise<void> {
   await app.open();
   await app.connectStacksWallet();
   await app.connectEvmWallet();
 }
 
-async function deposit(app: PortageApp, amount: string) {
+async function deposit(app: SatwayApp, amount: string) {
   await app.fillDeposit({ amount });
   await app.getQuote();
   return app.continue();
 }
 
-async function storedList(app: PortageApp): Promise<unknown[]> {
+async function storedList(app: SatwayApp): Promise<unknown[]> {
   const raw = (await app.storage())[RECEIPTS];
   if (raw === undefined) throw new Error('No receipts are stored');
   const list = parseJson(raw);

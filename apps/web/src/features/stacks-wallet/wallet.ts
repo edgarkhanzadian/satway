@@ -1,7 +1,7 @@
 import { base64, hex } from '@scure/base';
 import { connect, disconnect, request } from '@stacks/connect';
 
-import { assertMainnetStandardAddress, toXOnly } from '@portage/core';
+import { assertMainnetStandardAddress, toXOnly } from '@satway/core';
 
 import type { WalletAccount } from '../../shared/index.js';
 

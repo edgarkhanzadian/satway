@@ -1,4 +1,4 @@
-# Portage
+# Satway
 
 Deposit to sBTC on Stacks from other chains in one flow.
 
@@ -37,7 +37,7 @@ packages/chains/src/
   metadata/    chain families, EVM chain ids, native assets, Solana address checks, RPC config
   send/        wallet types, EVM transfers and sends, send records, send attempts
   send/solana/ Solana transfer building, RPC client, Solana Pay, send (loaded lazily)
-  index.ts     the package entry; @portage/chains/solana is the second, lazy entry
+  index.ts     the package entry; @satway/chains/solana is the second, lazy entry
 apps/web/src/
   app/         main.tsx, app.tsx, app.css: composes the page
   features/    deposit, recover, chain-wallets (From panel), stacks-wallet (To panel)
@@ -62,22 +62,22 @@ The rules, in plain words:
 - `packages/core` and `packages/chains` run outside a browser: no React, no wallet UI, no
   `window`, `document`, `localStorage`, `sessionStorage` or `navigator`. Storage and fetch
   are passed in.
-- `packages/chains` imports only the `@portage/core` entry among workspace packages, and no
+- `packages/chains` imports only the `@satway/core` entry among workspace packages, and no
   React, `@stacks/connect`, WalletConnect, apps, scripts or Panda output. `metadata` never
   imports `send`. Outside `send/solana`, the package imports Solana send code for its types
-  only, so the web app can load it lazily through `@portage/chains/solana`.
+  only, so the web app can load it lazily through `@satway/chains/solana`.
 - `apps/web`: `app` may import anything and nothing imports it. A feature may import `ui`,
-  `shared`, `@portage/core` and `@portage/chains`, never another feature (any directory under
+  `shared`, `@satway/core` and `@satway/chains`, never another feature (any directory under
   `features/`, including future ones); `app` passes values and callbacks between them. `ui`
   imports types only from `shared`, never a feature or `app`, never the Solana send code,
-  and never a network-reading export of `@portage/core`. `shared` never imports a feature,
+  and never a network-reading export of `@satway/core`. `shared` never imports a feature,
   `ui` or `app`.
 - `apps/api`: `http` and `notifier` never import each other; both use `store`, and only
   `index.ts` wires them. Nothing imports `index.ts`.
 - The two apps never import each other, nothing imports `scripts/`, and `scripts/` uses only
-  the `@portage/core` and `@portage/chains` entries.
-- `apps/e2e` imports `@portage/core` and `@portage/chains` through their entries and
-  `apps/api` only through its entry (`@portage/api`, `apps/api/src/index.ts`). It never imports
+  the `@satway/core` and `@satway/chains` entries.
+- `apps/e2e` imports `@satway/core` and `@satway/chains` through their entries and
+  `apps/api` only through its entry (`@satway/api`, `apps/api/src/index.ts`). It never imports
   `apps/web` (it tests the built app in a browser), and nothing imports `apps/e2e`.
 
 ## Rules the code is built around
@@ -130,8 +130,8 @@ Styling uses [PandaCSS](https://panda-css.com), structured like leather-io/mono.
 (colour, type, spacing, radii, keyframes), recipes and global styles live in
 `packages/panda-preset`; `apps/web/panda.config.ts` loads it with `strictTokens` and
 `strictPropertyValues` on. `pnpm install` runs `panda codegen` (the web app's `prepare` script),
-which writes the git-ignored `apps/web/portage-styles`; `lint`, `typecheck`, `build` and `dev`
-run it again first. App code imports from `portage-styles/*` only: no `.css` files besides
+which writes the git-ignored `apps/web/satway-styles`; `lint`, `typecheck`, `build` and `dev`
+run it again first. App code imports from `satway-styles/*` only: no `.css` files besides
 `src/app/app.css` and Fontsource, no inline styles, no literal class names and no `[value]` escape
 hatches (ESLint and dependency-cruiser enforce this).
 
@@ -139,8 +139,8 @@ Local development:
 
 ```sh
 cp .env.example .env.local
-pnpm --filter @portage/api dev      # http://localhost:8787
-pnpm --filter @portage/web dev      # http://localhost:5173
+pnpm --filter @satway/api dev      # http://localhost:8787
+pnpm --filter @satway/web dev      # http://localhost:5173
 ```
 
 ## End-to-end tests
@@ -150,10 +150,10 @@ Worker code, with every outside service replaced by a simulated "world". Nothing
 real network, wallet or signer.
 
 ```sh
-pnpm --filter @portage/e2e exec playwright install chromium webkit   # once
+pnpm --filter @satway/e2e exec playwright install chromium webkit   # once
 pnpm test:e2e                                  # builds the app for e2e, then runs the suite
 pnpm test:e2e:ui                               # the same in Playwright's UI mode
-pnpm --filter @portage/e2e exec playwright test tests/d-manual-send.spec.ts   # one file, reusing the last build
+pnpm --filter @satway/e2e exec playwright test tests/d-manual-send.spec.ts   # one file, reusing the last build
 ```
 
 Failures keep a trace, a screenshot and `world-log.json` (every request the world, the
@@ -169,7 +169,7 @@ Worker and the wallets saw) in `apps/e2e/test-results`; the HTML report is in
   `.env*` file is ever loaded. `apps/web/dist` and `check:bundle` are untouched. A tiny static
   server (`scripts/serve-web.ts`, Playwright's `webServer`) serves it on `127.0.0.1:4391`.
 - **The Worker**: `src/worker/worker.ts` calls the exported
-  `handle(request, env, fetchFn, options)` from `@portage/api` with an in-memory KV
+  `handle(request, env, fetchFn, options)` from `@satway/api` with an in-memory KV
   (`src/worker/kv.ts`: key metadata on `put` and in `list`, 1,000 keys per `list` page like
   Cloudflare), fake rate-limit bindings on the world clock with the `wrangler.toml` limits
   (`src/worker/rate-limiter.ts`, `api.limiters`; `deny = true` refuses), a signer-key cache and
@@ -323,7 +323,7 @@ allowed per test with `harness.allowConsoleErrors(pattern)`.
   Solana blockhash expiry, commitments and send faults, held requests).
 - `s1-…` to `s6-…` (phase 3, resilience): our backend down at each step, each upstream down,
   hanging or malformed while a deposit is tracked, browser storage blocked or full, the
-  `stxonector` to `portage` storage migration, reloads, history and tab switches mid-flow, and
+  `stxonector` and `portage` to `satway` storage migration, reloads, history and tab switches mid-flow, and
   a deposit left open for hours (requests and timers per poll stay constant; terminal states
   stop polling).
 - `q1-…` to `q7-…` (phase 3, quality gates): axe (`@axe-core/playwright`, serious and critical
@@ -481,6 +481,6 @@ What `POST /deposits` accepts, and what it costs:
 - Responses from 1Click, Hiro, Emily, mempool.space and the wallet are checked
   with zod schemas before use. The schemas keep unknown fields, so a stored quote
   response keeps every field the provider sent. zod runs in `jitless` mode (set in
-  `packages/core/src/shared/schema.ts`; import `z` from `@portage/core`), so it never
+  `packages/core/src/shared/schema.ts`; import `z` from `@satway/core`), so it never
   needs `eval` under the page's CSP.
 - `@stacks/connect` bundles WalletConnect, which is most of the bundle size.

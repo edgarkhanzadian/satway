@@ -1,5 +1,5 @@
 {
-  "extends": "@portage/tsconfig-config/tsconfig.base.json",
+  "extends": "@satway/tsconfig-config/tsconfig.base.json",
   "compilerOptions": {
     "types": ["node"]
   },

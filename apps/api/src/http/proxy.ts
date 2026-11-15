@@ -3,7 +3,7 @@ import {
   type OneClickAppFee,
   type OneClickQuoteRequest,
   isMainnetTaproot,
-} from '@portage/core';
+} from '@satway/core';
 
 import { BadRequest } from './errors.js';
 
@@ -85,7 +85,7 @@ export function sanitizeQuoteRequest(
     recipient,
     recipientType: 'DESTINATION_CHAIN',
     deadline,
-    referral: 'portage',
+    referral: 'satway',
   };
 
   const expected: OneClickAppFee[] =

@@ -1,4 +1,4 @@
-import { PROGRESS, type PortageApp } from '../src/app/portage-app.js';
+import { PROGRESS, type SatwayApp } from '../src/app/satway-app.js';
 import { expect, test } from '../src/fixtures.js';
 import {
   FAILED_TO_LOAD,
@@ -30,21 +30,21 @@ const FAILURES: Failure[] = [
   { name: 'malformed JSON', outcome: json({ unexpected: MARKER, items: [MARKER] }) },
 ];
 
-function problem(app: PortageApp) {
+function problem(app: SatwayApp) {
   return app.page.getByText(COULD_NOT_REFRESH);
 }
 
-async function expectNoPayload(app: PortageApp): Promise<void> {
+async function expectNoPayload(app: SatwayApp): Promise<void> {
   expect(await app.page.locator('body').innerText()).not.toContain(MARKER);
 }
 
-async function expectNotTerminal(app: PortageApp): Promise<void> {
+async function expectNotTerminal(app: SatwayApp): Promise<void> {
   await expect(app.page.getByRole('heading', { name: 'Deposit complete' })).toHaveCount(0);
   await expect(app.page.getByRole('button', { name: 'Start another' })).toHaveCount(0);
   await expect(app.page.getByRole('button', { name: 'Hide' })).toBeEnabled();
 }
 
-async function expectStillUsable(app: PortageApp): Promise<void> {
+async function expectStillUsable(app: SatwayApp): Promise<void> {
   await expect(app.page.getByRole('button', { name: 'Download receipt again' })).toBeEnabled();
   await expect(app.page.getByRole('button', { name: 'Recover' })).toBeEnabled();
 }
@@ -205,7 +205,7 @@ test.describe('S2. an upstream is down while a deposit is tracked', () => {
   test.describe('a Solana deposit', () => {
     test.use({ walletSetup: { evm: false, stacks: true, solana: { features: ['signAndSend'] } } });
 
-    async function startSol(app: PortageApp): Promise<void> {
+    async function startSol(app: SatwayApp): Promise<void> {
       await app.open();
       await app.connectStacksWallet();
       await app.connectSolanaWallet();

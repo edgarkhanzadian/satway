@@ -6,7 +6,7 @@ import {
   SLOW_REQUEST_TIMEOUT_MS,
   MAINNET_CONFIG as config,
   withTimeout,
-} from '@portage/core';
+} from '@satway/core';
 
 import type { KV } from '../store/index.js';
 import { ApiError, BadRequest } from './errors.js';

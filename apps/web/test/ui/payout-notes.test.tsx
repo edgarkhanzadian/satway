@@ -2,8 +2,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 import { describe, expect, it } from 'vitest';
 
-import { type SendRecord, WALLET_PROMPT_WINDOW_MS } from '@portage/chains';
-import type { AddressOutput } from '@portage/core';
+import { type SendRecord, WALLET_PROMPT_WINDOW_MS } from '@satway/chains';
+import type { AddressOutput } from '@satway/core';
 
 import type { RegistrationErrorNote, Snapshot } from '../../src/shared/progress.js';
 import { RegistrationNotices, registrationNoticeGroups } from '../../src/ui/payout-notes.js';

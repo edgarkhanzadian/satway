@@ -1,7 +1,7 @@
 import { type Locator, type Page, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 
-import { parseWith } from '@portage/core';
+import { parseWith } from '@satway/core';
 
 import type { Harness } from '../browser/harness.js';
 import { APP_ORIGIN, POLL_INTERVAL_MS } from '../config.js';
@@ -52,7 +52,7 @@ function satsIn(text: string): number {
 
 export type AppHarness = Pick<Harness, 'idle' | 'touch'>;
 
-export class PortageApp {
+export class SatwayApp {
   readonly page: Page;
   private readonly harness: AppHarness;
   private readonly world: World;
@@ -105,7 +105,7 @@ export class PortageApp {
 
   async open(): Promise<void> {
     await this.page.goto(`${APP_ORIGIN}/`);
-    await expect(this.page.getByRole('heading', { name: 'portage', level: 1 })).toBeVisible();
+    await expect(this.page.getByRole('heading', { name: 'satway', level: 1 })).toBeVisible();
   }
 
   async connectStacksWallet(): Promise<void> {
@@ -220,9 +220,9 @@ export class PortageApp {
     ).toBeVisible();
   }
 
-  async newTab(): Promise<PortageApp> {
+  async newTab(): Promise<SatwayApp> {
     const page = await this.page.context().newPage();
-    return new PortageApp(page, this.harness, this.world);
+    return new SatwayApp(page, this.harness, this.world);
   }
 
   async tick(): Promise<void> {
@@ -273,7 +273,7 @@ export class PortageApp {
   async sendRecords(): Promise<unknown[]> {
     const all = await this.storage();
     return Object.entries(all)
-      .filter(([key]) => key.startsWith('portage:send-record:v1:'))
+      .filter(([key]) => key.startsWith('satway:send-record:v1:'))
       .map(([, value]) => {
         const parsed: unknown = JSON.parse(value);
         return parsed;

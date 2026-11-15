@@ -4,7 +4,7 @@ import {
   buildDepositAddress,
   oneClickQuoteResponseSchema,
   z,
-} from '@portage/core';
+} from '@satway/core';
 
 export interface Receipt {
   version: 1;
@@ -102,7 +102,7 @@ export function verifyReceipt(value: unknown): Receipt {
   return r;
 }
 
-export const RECEIPTS_KEY = 'portage.receipts.v1';
+export const RECEIPTS_KEY = 'satway.receipts.v1';
 
 export function loadReceipts(): Receipt[] {
   try {
@@ -181,7 +181,7 @@ export function rememberReceipt(receipt: Receipt): boolean {
 }
 
 export function receiptFileName(receipt: Receipt): string {
-  return `portage-deposit-${receipt.createdAt.slice(0, 10)}-${receipt.depositAddress.slice(-8)}.json`;
+  return `satway-deposit-${receipt.createdAt.slice(0, 10)}-${receipt.depositAddress.slice(-8)}.json`;
 }
 
 export const REVOKE_DOWNLOAD_URL_AFTER_MS = 60_000;

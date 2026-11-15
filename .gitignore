@@ -1,6 +1,6 @@
 node_modules
 dist
-portage-styles
+satway-styles
 .env
 .env.local
 .env.*.local

@@ -14,7 +14,7 @@ import {
   largestPayoutSats,
   providerFeesOf,
   snapshotOutpoints,
-} from '@portage/core';
+} from '@satway/core';
 
 import type { Backend, Receipt } from '../../shared/index.js';
 

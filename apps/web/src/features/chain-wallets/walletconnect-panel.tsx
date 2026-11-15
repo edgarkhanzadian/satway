@@ -1,10 +1,10 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 
-import { css, cx } from 'portage-styles/css';
-import { styled } from 'portage-styles/jsx';
-import { actions, button, link, notice } from 'portage-styles/recipes';
+import { css, cx } from 'satway-styles/css';
+import { styled } from 'satway-styles/jsx';
+import { actions, button, link, notice } from 'satway-styles/recipes';
 
-import type { SourceWallet } from '@portage/chains';
+import type { SourceWallet } from '@satway/chains';
 
 import { QrCode, WalletName, WalletNote } from '../../ui/index.js';
 import { INITIAL_PAIRING, pairingReducer, walletConnectErrorMessage } from './walletconnect.js';

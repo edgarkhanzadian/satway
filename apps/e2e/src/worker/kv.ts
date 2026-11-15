@@ -1,4 +1,4 @@
-import type { Env } from '@portage/api';
+import type { Env } from '@satway/api';
 
 type Kv = Env['DEPOSITS'];
 type PutOptions = NonNullable<Parameters<Kv['put']>[2]>;

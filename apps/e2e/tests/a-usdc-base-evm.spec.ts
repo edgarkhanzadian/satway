@@ -1,4 +1,4 @@
-import { PROGRESS } from '../src/app/portage-app.js';
+import { PROGRESS } from '../src/app/satway-app.js';
 import { expect, test } from '../src/fixtures.js';
 import {
   erc20TransferData,
@@ -37,7 +37,7 @@ test.describe('A. USDC on Base from the injected EVM wallet', () => {
 
     const { receipt, fileName } = await app.continue();
     expect(fileName).toBe(
-      `portage-deposit-${receipt.createdAt.slice(0, 10)}-${receipt.depositAddress.slice(-8)}.json`
+      `satway-deposit-${receipt.createdAt.slice(0, 10)}-${receipt.depositAddress.slice(-8)}.json`
     );
     expect(preview.paysOutTo).toBe(receipt.depositAddress);
     expectReceiptMatchesWorld(receipt, {

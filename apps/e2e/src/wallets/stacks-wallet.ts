@@ -6,7 +6,7 @@ import { type BitcoinKey, bitcoinKey, p2trOf, p2wpkhOf, stacksAddressOf } from '
 import type { World } from '../world/world.js';
 import { Behaviour, WalletError } from './behaviour.js';
 
-export const STACKS_WALLET_ID = 'PortageTestStacksWallet';
+export const STACKS_WALLET_ID = 'SatwayTestStacksWallet';
 export const STACKS_WALLET_NAME = 'Test Stacks Wallet';
 
 export interface StacksAccount {

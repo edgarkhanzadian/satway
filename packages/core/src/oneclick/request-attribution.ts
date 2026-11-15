@@ -1,7 +1,7 @@
 import type { NetworkConfig } from '../shared/index.js';
 import type { OneClickAppFee } from './oneclick.js';
 
-export const QUOTE_REFERRAL = 'portage';
+export const QUOTE_REFERRAL = 'satway';
 
 export type AppFeeConfig = Pick<NetworkConfig, 'appFeeBps' | 'appFeeRecipient'>;
 

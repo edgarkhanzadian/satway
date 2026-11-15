@@ -1,6 +1,6 @@
-import { css } from 'portage-styles/css';
-import { styled } from 'portage-styles/jsx';
-import { routeLeg, routeStop } from 'portage-styles/recipes';
+import { css } from 'satway-styles/css';
+import { styled } from 'satway-styles/jsx';
+import { routeLeg, routeStop } from 'satway-styles/recipes';
 
 import { type RouteState, STOPS, STOP_STATUS_TEXT, type StopStatus } from './route.js';
 

@@ -1,5 +1,5 @@
 {
-  "name": "@portage/prettier-config",
+  "name": "@satway/prettier-config",
   "description": "Shared prettier configuration",
   "version": "0.0.0",
   "type": "module",

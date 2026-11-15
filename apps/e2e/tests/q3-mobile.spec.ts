@@ -1,6 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 
-import { PROGRESS, type PortageApp } from '../src/app/portage-app.js';
+import { PROGRESS, type SatwayApp } from '../src/app/satway-app.js';
 import { expect, test } from '../src/fixtures.js';
 import { expectNoHorizontalScroll } from '../src/quality/page-checks.js';
 import { RECLAIM_COPY, reclaimControls } from '../src/scenario/reclaim.js';
@@ -36,7 +36,7 @@ async function expectAddressesWrap(page: Page): Promise<void> {
   }
 }
 
-async function expectVerticalRoute(app: PortageApp): Promise<void> {
+async function expectVerticalRoute(app: SatwayApp): Promise<void> {
   const items = await app.route.getByRole('listitem').all();
   expect(items).toHaveLength(4);
   let lastBottom = Number.NEGATIVE_INFINITY;
@@ -53,7 +53,7 @@ async function expectVerticalRoute(app: PortageApp): Promise<void> {
   }
 }
 
-async function step(app: PortageApp, name: string): Promise<void> {
+async function step(app: SatwayApp, name: string): Promise<void> {
   await app.harnessIdle();
   await expectNoHorizontalScroll(app.page, name);
   await expectAddressesWrap(app.page);

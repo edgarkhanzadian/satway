@@ -1,4 +1,4 @@
-import { PROGRESS, type PortageApp, type StartedDeposit } from '../src/app/portage-app.js';
+import { PROGRESS, type SatwayApp, type StartedDeposit } from '../src/app/satway-app.js';
 import type { Wallets } from '../src/browser/harness.js';
 import { expect, test } from '../src/fixtures.js';
 import {
@@ -12,7 +12,7 @@ import type { FaultOutcome, World } from '../src/world/world.js';
 
 const STATUS = /^\/v0\/status$/;
 
-async function expectManualDetails(app: PortageApp, started: StartedDeposit): Promise<void> {
+async function expectManualDetails(app: SatwayApp, started: StartedDeposit): Promise<void> {
   const quote = started.receipt.quoteResponse.quote;
   await expect(app.page.getByText('Send exactly this:', { exact: true })).toBeVisible();
   await expect(

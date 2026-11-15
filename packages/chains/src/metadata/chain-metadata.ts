@@ -1,6 +1,6 @@
 import { base58 } from '@scure/base';
 
-import type { OneClickToken } from '@portage/core';
+import type { OneClickToken } from '@satway/core';
 
 export const EVM_CHAIN_IDS: Readonly<Record<string, number>> = Object.freeze({
   eth: 1,

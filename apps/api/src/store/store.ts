@@ -1,4 +1,4 @@
-import { parseWith, z } from '@portage/core';
+import { parseWith, z } from '@satway/core';
 
 export interface KV {
   get(key: string): Promise<string | null>;

@@ -1,5 +1,5 @@
 {
-  "name": "portage",
+  "name": "satway",
   "description": "Deposit to sBTC on Stacks from other chains in one flow",
   "type": "module",
   "scripts": {
@@ -19,18 +19,18 @@
     "syncpack:format": "syncpack format",
     "syncpack:lint": "syncpack lint",
     "test": "pnpm -r test",
-    "test:e2e": "pnpm --filter @portage/e2e test:e2e",
-    "test:e2e:canary": "pnpm --filter @portage/e2e test:e2e:canary",
-    "test:e2e:smoke": "pnpm --filter @portage/e2e test:e2e:smoke",
-    "test:e2e:ui": "pnpm --filter @portage/e2e test:e2e:ui",
-    "test:e2e:visual:update": "pnpm --filter @portage/e2e test:e2e:visual:update",
+    "test:e2e": "pnpm --filter @satway/e2e test:e2e",
+    "test:e2e:canary": "pnpm --filter @satway/e2e test:e2e:canary",
+    "test:e2e:smoke": "pnpm --filter @satway/e2e test:e2e:smoke",
+    "test:e2e:ui": "pnpm --filter @satway/e2e test:e2e:ui",
+    "test:e2e:visual:update": "pnpm --filter @satway/e2e test:e2e:visual:update",
     "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {
     "@ls-lint/ls-lint": "2.2.3",
-    "@portage/eslint-config": "workspace:*",
-    "@portage/prettier-config": "workspace:*",
-    "@portage/tsconfig-config": "workspace:*",
+    "@satway/eslint-config": "workspace:*",
+    "@satway/prettier-config": "workspace:*",
+    "@satway/tsconfig-config": "workspace:*",
     "@trivago/prettier-plugin-sort-imports": "5.2.2",
     "@types/node": "26.6.6",
     "dependency-cruiser": "16.10.4",

@@ -1,4 +1,4 @@
-import { type OneClickToken, errorMessage, parseWith, z } from '@portage/core';
+import { type OneClickToken, errorMessage, parseWith, z } from '@satway/core';
 
 import {
   EVM_CHAIN_IDS,

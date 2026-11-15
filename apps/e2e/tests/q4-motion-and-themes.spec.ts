@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 
-import { PROGRESS, type PortageApp } from '../src/app/portage-app.js';
+import { PROGRESS, type SatwayApp } from '../src/app/satway-app.js';
 import { expect, test } from '../src/fixtures.js';
 import { startAwaitingFunds } from '../src/scenario/journeys.js';
 
@@ -39,7 +39,7 @@ async function legs(page: Page): Promise<LegStyle[]> {
   );
 }
 
-async function toSwapping(app: PortageApp): Promise<void> {
+async function toSwapping(app: SatwayApp): Promise<void> {
   await startAwaitingFunds(app);
   await app.sendFromWallet();
   await app.waitForProgress(PROGRESS.swapping);

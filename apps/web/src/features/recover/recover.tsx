@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 
-import { css, cx } from 'portage-styles/css';
-import { styled } from 'portage-styles/jsx';
-import { actions, button, details, field, notice, sheet } from 'portage-styles/recipes';
+import { css, cx } from 'satway-styles/css';
+import { styled } from 'satway-styles/jsx';
+import { actions, button, details, field, notice, sheet } from 'satway-styles/recipes';
 
 import {
   type ReclaimOption,
@@ -18,7 +18,7 @@ import {
   outpointOf,
   planReclaim,
   reclaimAmountProblem,
-} from '@portage/core';
+} from '@satway/core';
 
 import {
   type Backend,

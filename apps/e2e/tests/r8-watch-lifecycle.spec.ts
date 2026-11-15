@@ -1,6 +1,6 @@
-import { buildDepositAddress } from '@portage/core';
+import { buildDepositAddress } from '@satway/core';
 
-import { PROGRESS } from '../src/app/portage-app.js';
+import { PROGRESS } from '../src/app/satway-app.js';
 import { API_ORIGIN, APP_ORIGIN } from '../src/config.js';
 import { expect, test } from '../src/fixtures.js';
 import { expectRegisteredWithEmily, notifierRun } from '../src/scenario/checks.js';

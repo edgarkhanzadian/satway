@@ -1,4 +1,4 @@
-import { buildDepositAddress } from '@portage/core';
+import { buildDepositAddress } from '@satway/core';
 
 import { SOLANA_MAINNET_CAIP2, UPSTREAM } from '../config.js';
 import { AlexStacksNode } from './alex.js';

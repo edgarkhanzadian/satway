@@ -1,6 +1,6 @@
-import { notice } from 'portage-styles/recipes';
+import { notice } from 'satway-styles/recipes';
 
-import type { SwapRefund } from '@portage/core';
+import type { SwapRefund } from '@satway/core';
 
 export function RefundNote(props: {
   refund: SwapRefund | null;

@@ -265,7 +265,7 @@ describe('assertQuoteMatchesRequest', () => {
       recipient: echoed.recipient,
       recipientType: 'DESTINATION_CHAIN',
       deadline: requestedDeadline,
-      referral: 'portage',
+      referral: 'satway',
     };
     expect(() => assertQuoteMatchesRequest(ours, real)).not.toThrow();
     expect(() => assertQuoteMatchesRequest({ ...ours, dry: !ours.dry }, real)).toThrow(/dry/);

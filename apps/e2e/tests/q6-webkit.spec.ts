@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 
-import { PROGRESS } from '../src/app/portage-app.js';
 import { receiptFileSchema } from '../src/app/receipt.js';
+import { PROGRESS } from '../src/app/satway-app.js';
 import { expect, test } from '../src/fixtures.js';
 import { expectReceiptMatchesWorld } from '../src/scenario/checks.js';
 import { startAwaitingFunds } from '../src/scenario/journeys.js';
@@ -26,7 +26,7 @@ test.describe('Q6. WebKit', () => {
       refundTo: wallets.evm.address,
       assetId: TOKENS.usdcBase.assetId,
     });
-    const stored: unknown = JSON.parse((await app.storage())['portage.receipts.v1'] ?? '[]');
+    const stored: unknown = JSON.parse((await app.storage())['satway.receipts.v1'] ?? '[]');
     expect(stored).toEqual([JSON.parse(first)]);
 
     await app.fastForward(REVOKE_AFTER_MS + 1_000);

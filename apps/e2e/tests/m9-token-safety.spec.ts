@@ -1,4 +1,4 @@
-import { PROGRESS, type PortageApp } from '../src/app/portage-app.js';
+import { PROGRESS, type SatwayApp } from '../src/app/satway-app.js';
 import { expect, test } from '../src/fixtures.js';
 import { SEND_COPY, startDeposit } from '../src/scenario/journeys.js';
 import type { WorldToken } from '../src/world/oneclick.js';
@@ -7,7 +7,7 @@ import { encodeMint } from '../src/world/solana.js';
 const TOKEN_2022 = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
 
 async function expectManualSendStillWorks(
-  app: PortageApp,
+  app: SatwayApp,
   started: Awaited<ReturnType<typeof startDeposit>>,
   label: string
 ): Promise<void> {

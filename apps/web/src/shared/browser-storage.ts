@@ -1,4 +1,4 @@
-const PROBE_KEY = 'portage:storage-probe';
+const PROBE_KEY = 'satway:storage-probe';
 
 export function localStorageWorks(): boolean {
   try {

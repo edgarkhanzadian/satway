@@ -22,7 +22,7 @@ import {
   selectPayout,
   signReclaimPsbt,
   z,
-} from '@portage/core';
+} from '@satway/core';
 
 import { loadEnv, optional } from './lib/env.js';
 import { contextOfProof, loadProof, reclaimKeyFromEnv } from './lib/proof.js';

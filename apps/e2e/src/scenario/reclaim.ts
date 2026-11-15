@@ -2,7 +2,7 @@ import { expect } from '@playwright/test';
 import { base64, hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
-import type { PortageApp } from '../app/portage-app.js';
+import type { SatwayApp } from '../app/satway-app.js';
 import type { StacksWallet } from '../wallets/stacks-wallet.js';
 import { type Outpoint, outpointKey, scriptOfAddress } from '../world/bitcoin.js';
 import { field, stringField } from '../world/http.js';
@@ -16,7 +16,7 @@ export const RECLAIM_COPY = {
   alreadySpent: 'That output has already been spent. Choose another one, if any is listed.',
 } as const;
 
-export function reclaimControls(app: PortageApp) {
+export function reclaimControls(app: SatwayApp) {
   return {
     output: app.page.getByLabel('Output to reclaim'),
     to: app.page.getByLabel('Send the reclaimed BTC to'),
@@ -24,14 +24,14 @@ export function reclaimControls(app: PortageApp) {
   };
 }
 
-export async function expectNoReclaimOffered(app: PortageApp): Promise<void> {
+export async function expectNoReclaimOffered(app: SatwayApp): Promise<void> {
   const c = reclaimControls(app);
   await expect(c.output).toHaveCount(0);
   await expect(c.button).toHaveCount(0);
 }
 
 export async function reclaimFromRecover(
-  app: PortageApp,
+  app: SatwayApp,
   to: string,
   options: { choose?: Outpoint } = {}
 ): Promise<void> {
