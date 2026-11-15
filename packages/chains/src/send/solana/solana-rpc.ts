@@ -1,6 +1,6 @@
 import { base64 } from '@scure/base';
 
-import { errorMessage } from '@portage/core';
+import { DEFAULT_REQUEST_TIMEOUT_MS, errorMessage, withTimeout } from '@portage/core';
 
 export interface RpcResponse {
   ok: boolean;
@@ -96,22 +96,34 @@ export function readAccount(value: unknown): RawAccount | null {
   };
 }
 
-export function createSolanaRpc(url: string, fetchFn: RpcFetch = fetch): SolanaRpc {
+export const SOLANA_RPC_TIMEOUT_MS = DEFAULT_REQUEST_TIMEOUT_MS;
+
+export function createSolanaRpc(
+  url: string,
+  fetchFn: RpcFetch = fetch,
+  options: { timeoutMs?: number } = {}
+): SolanaRpc {
   let id = 0;
+  const timeoutMs = options.timeoutMs ?? SOLANA_RPC_TIMEOUT_MS;
   async function call(method: string, params: unknown[]): Promise<unknown> {
     id += 1;
-    let response: RpcResponse;
+    let answer: { response: RpcResponse; body: unknown };
+    const request = {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id, method, params }),
+      timeoutMs,
+    };
     try {
-      response = await fetchFn(url, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', id, method, params }),
+      answer = await withTimeout(url, request, async signalled => {
+        const response = await fetchFn(url, signalled);
+        return { response, body: response.ok ? await response.json() : null };
       });
     } catch (err) {
       throw new Error(`Could not reach the Solana RPC: ${errorMessage(err) ?? 'network error'}`);
     }
+    const { response, body } = answer;
     if (!response.ok) throw new Error(`The Solana RPC answered ${response.status}`);
-    const body = await response.json();
     const error = field(body, 'error');
     if (error !== undefined) {
       const message = field(error, 'message');

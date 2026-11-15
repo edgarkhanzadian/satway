@@ -3,6 +3,7 @@ import {
   type FetchLike,
   HttpError,
   type NetworkConfig,
+  SLOW_REQUEST_TIMEOUT_MS,
   defaultFetch,
   nullOrAbsent,
   requestJson,
@@ -92,6 +93,7 @@ export async function notifyDeposit(
         reclaimScript: input.reclaimScript,
         transactionHex,
       }),
+      timeoutMs: SLOW_REQUEST_TIMEOUT_MS,
     });
   } catch (err) {
     if (err instanceof HttpError && err.status === 409) {

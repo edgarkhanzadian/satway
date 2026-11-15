@@ -4,8 +4,13 @@ export * from './oneclick/index.js';
 export * from './sbtc/index.js';
 export * from './withdrawal/index.js';
 export {
+  DEFAULT_REQUEST_TIMEOUT_MS,
   type FetchLike,
   HttpError,
+  RequestTimeoutError,
+  type RequestOptions,
+  SLOW_REQUEST_TIMEOUT_MS,
+  withTimeout,
   MAINNET_CONFIG,
   MAINNET_WITHDRAWAL_CONFIG,
   MAINNET_WITHDRAWAL_FLOW_CONFIG,

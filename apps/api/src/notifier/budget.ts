@@ -1,12 +1,27 @@
-import type { FetchLike } from '@portage/core';
+import { type FetchLike, withTimeout } from '@portage/core';
 
 import type { KV } from '../store/index.js';
 
+export const WORKER_REQUEST_TIMEOUT_MS = 10_000;
+export const RUN_TIME_BUDGET_MS = 75_000;
+
 export class BudgetExhausted extends Error {
-  constructor() {
-    super('The per-run request budget is spent; the rest waits for the next run');
+  constructor(message = 'The per-run request budget is spent; the rest waits for the next run') {
+    super(message);
     this.name = 'BudgetExhausted';
   }
+}
+
+export interface RunClock {
+  now(): number;
+  deadline: number;
+}
+
+export function runClock(
+  timeBudgetMs = RUN_TIME_BUDGET_MS,
+  now: () => number = Date.now
+): RunClock {
+  return { now, deadline: now() + timeBudgetMs };
 }
 
 export class Budget {
@@ -32,11 +47,22 @@ function globalFetch(input: string, init?: RequestInit): Promise<Response> {
   return fetch(input, init);
 }
 
-export function countedFetch(fetchFn: FetchLike | undefined, budget: Budget): FetchLike {
+export function countedFetch(
+  fetchFn: FetchLike | undefined,
+  budget: Budget,
+  clock: RunClock = runClock()
+): FetchLike {
   const base = fetchFn ?? globalFetch;
   return (input, init) => {
+    const left = clock.deadline - clock.now();
+    if (left <= 0) {
+      return Promise.reject(
+        new BudgetExhausted('The run is out of time; the rest waits for the next run')
+      );
+    }
     budget.take();
-    return base(input, init);
+    const timeoutMs = Math.min(WORKER_REQUEST_TIMEOUT_MS, left);
+    return withTimeout(input, { ...init, timeoutMs }, signalled => base(input, signalled));
   };
 }
 

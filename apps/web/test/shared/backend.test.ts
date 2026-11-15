@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { type OneClickQuoteRequest, ResponseShapeError } from '@portage/core';
+import {
+  DEFAULT_REQUEST_TIMEOUT_MS,
+  type OneClickQuoteRequest,
+  RequestTimeoutError,
+  ResponseShapeError,
+  SLOW_REQUEST_TIMEOUT_MS,
+} from '@portage/core';
 
 import { createBackend } from '../../src/shared/backend.js';
 
@@ -90,6 +96,23 @@ describe('createBackend', () => {
     expect(status.status).toBe('PENDING_DEPOSIT');
     expect(status.swapDetails.amountOut).toBeUndefined();
     expect(status.swapDetails.refundReason).toBeUndefined();
+  });
+
+  it('gives up on a status read the backend never answers, so the page can say so', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal('fetch', () => new Promise(() => undefined));
+      const pending = createBackend(BASE).status('0xabc');
+      const outcome = expect(pending).rejects.toBeInstanceOf(RequestTimeoutError);
+      await vi.advanceTimersByTimeAsync(DEFAULT_REQUEST_TIMEOUT_MS);
+      await outcome;
+      vi.stubGlobal('fetch', () => new Promise(() => undefined));
+      const registration = createBackend(BASE).register('aa', 'bb', 'cc');
+      await vi.advanceTimersByTimeAsync(SLOW_REQUEST_TIMEOUT_MS);
+      expect(await registration).toMatchObject({ kind: 'unavailable', status: null });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('rejects a 200 answer that is not JSON instead of returning null', async () => {

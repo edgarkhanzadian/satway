@@ -3,10 +3,13 @@ import {
   type OneClickQuoteResponse,
   type OneClickStatusResponse,
   type OneClickToken,
+  type RequestOptions,
+  SLOW_REQUEST_TIMEOUT_MS,
   oneClickQuoteResponseSchema,
   oneClickStatusResponseSchema,
   oneClickTokensSchema,
   parseWith,
+  withTimeout,
   z,
 } from '@portage/core';
 
@@ -41,9 +44,11 @@ function messageOf(body: unknown): string | undefined {
   return typeof message === 'string' ? message : undefined;
 }
 
-async function send(url: string, init?: RequestInit): Promise<{ res: Response; body: unknown }> {
-  const res = await fetch(url, init);
-  const text = await res.text();
+async function send(url: string, init?: RequestOptions): Promise<{ res: Response; body: unknown }> {
+  const { res, text } = await withTimeout(url, init, async signalled => {
+    const answer = await fetch(url, signalled);
+    return { res: answer, text: await answer.text() };
+  });
   let body: unknown;
   try {
     body = JSON.parse(text);
@@ -53,7 +58,7 @@ async function send(url: string, init?: RequestInit): Promise<{ res: Response; b
   return { res, body };
 }
 
-async function call<T>(url: string, schema: z.ZodType<T>, init?: RequestInit): Promise<T> {
+async function call<T>(url: string, schema: z.ZodType<T>, init?: RequestOptions): Promise<T> {
   const { res, body } = await send(url, init);
   if (!res.ok) throw new Error(messageOf(body) ?? `Request failed (${res.status})`);
   return parseWith(schema, body, `the backend at ${endpointOf(url)}`);
@@ -79,11 +84,12 @@ function registrationFrom(url: string, res: Response, body: unknown): Background
 
 export function createBackend(baseUrl: string): Backend {
   const base = baseUrl.replace(/\/$/, '');
-  function jsonPost(body: unknown): RequestInit {
+  function jsonPost(body: unknown): RequestOptions {
     return {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
+      timeoutMs: SLOW_REQUEST_TIMEOUT_MS,
     };
   }
   return {

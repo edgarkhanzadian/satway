@@ -1,4 +1,11 @@
-import { type FetchLike, defaultFetch, nullOrAbsent, requestJson, z } from '../shared/index.js';
+import {
+  type FetchLike,
+  SLOW_REQUEST_TIMEOUT_MS,
+  defaultFetch,
+  nullOrAbsent,
+  requestJson,
+  z,
+} from '../shared/index.js';
 
 export interface OneClickToken {
   assetId: string;
@@ -318,7 +325,12 @@ export class OneClickClient {
       this.fetchFn,
       `${this.baseUrl}/v0/quote`,
       oneClickQuoteResponseSchema,
-      { method: 'POST', headers: this.headers(true), body: JSON.stringify(request) }
+      {
+        method: 'POST',
+        headers: this.headers(true),
+        body: JSON.stringify(request),
+        timeoutMs: SLOW_REQUEST_TIMEOUT_MS,
+      }
     );
     assertQuoteMatchesRequest(request, response);
     return response;

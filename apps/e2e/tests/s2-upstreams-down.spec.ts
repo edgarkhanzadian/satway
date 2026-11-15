@@ -146,7 +146,7 @@ test.describe('S2. an upstream is down while a deposit is tracked', () => {
     });
   }
 
-  test('a held (hanging) mempool.space read: the page stays usable and unchanged, and recovers when it answers', async ({
+  test('a held (hanging) mempool.space read: the page stays usable, gives up on it, and recovers on the next poll', async ({
     app,
     world,
   }) => {
@@ -155,14 +155,16 @@ test.describe('S2. an upstream is down while a deposit is tracked', () => {
     await app.tick();
     expect(world.parked).toBe(1);
     world.reportDeposit();
-    await app.tick();
-    await app.tick();
+    await app.fastForward(15_000);
+    await expect(problem(app)).toBeVisible();
     await expect(app.progress(PROGRESS.awaitingFunds)).toBeVisible();
+    await expectNoSendOffered(app);
     await expectNotTerminal(app);
     await expectStillUsable(app);
-    held.release();
     await app.waitForProgress(PROGRESS.swapping);
+    await expect(problem(app)).toHaveCount(0);
     await expectNoSendOffered(app);
+    held.release();
   });
 
   test('a held (hanging) Emily lookup while minting: never Done early, recovers when it answers', async ({
@@ -180,16 +182,25 @@ test.describe('S2. an upstream is down while a deposit is tracked', () => {
     await app.waitForProgress(PROGRESS.done);
   });
 
-  test.fail(
-    'APP ISSUE: a hanging upstream request freezes tracking with no retry notice and keeps offering the send on the last known status (correct: the request times out, the page says it could not refresh, and no send is offered)',
-    async ({ app, world }) => {
-      await startAwaitingFunds(app);
-      hold(world, 'mempool', ADDRESS);
-      for (let i = 0; i < 6; i++) await app.tick();
-      await expect(problem(app)).toBeVisible({ timeout: 1_000 });
-      await expectNoSendOffered(app);
-    }
-  );
+  test('a hanging upstream request times out: the page says it could not refresh and offers no send on the last known status', async ({
+    app,
+    world,
+  }) => {
+    await startAwaitingFunds(app);
+    await expect(app.sendButton).toBeVisible();
+    const held = world.hold({ service: 'mempool', path: ADDRESS, callers: ['page'], times: 1_000 });
+    for (let i = 0; i < 6; i++) await app.tick();
+    await expect(problem(app)).toBeVisible({ timeout: 1_000 });
+    await expect(problem(app)).toHaveText(/No answer from .+ within 15 seconds/);
+    await expectNoSendOffered(app);
+    await expectStillUsable(app);
+    world.clearFaults();
+    await app.tick();
+    await app.tick();
+    await expect(problem(app)).toHaveCount(0);
+    await expect(app.sendButton).toBeVisible();
+    held.release();
+  });
 
   test.describe('a Solana deposit', () => {
     test.use({ walletSetup: { evm: false, stacks: true, solana: { features: ['signAndSend'] } } });
@@ -228,7 +239,7 @@ test.describe('S2. an upstream is down while a deposit is tracked', () => {
       });
     }
 
-    test('a held Solana RPC call at send: no second send is offered while it hangs, and it completes when it answers', async ({
+    test('a held Solana RPC call at send: no second send is offered while it hangs, it times out before the wallet is asked, and a retry works', async ({
       app,
       world,
       wallets,
@@ -239,11 +250,16 @@ test.describe('S2. an upstream is down while a deposit is tracked', () => {
       await expect(
         app.page.getByRole('button', { name: 'Confirm in your wallet…' })
       ).toBeDisabled();
-      await app.tick();
+      await app.fastForward(14_000);
       await expectNoSendOffered(app);
       expect(wallets.solana.signRequests).toEqual([]);
+      await app.fastForward(1_000);
+      await expect(app.sendError).toHaveText(/within 15 seconds/);
+      expect(wallets.solana.signRequests).toEqual([]);
+      expect(world.solana.submissions).toEqual([]);
+      expect(await app.sendRecords()).toEqual([]);
       held.release();
-      await expect(app.progress('Sent from your wallet.')).toBeVisible();
+      await app.sendFromWallet();
       expect(world.solana.submissions).toHaveLength(1);
     });
   });

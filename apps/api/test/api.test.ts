@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { buildQuoteRequest, MAINNET_CONFIG as config } from '@portage/core';
+import {
+  DEFAULT_REQUEST_TIMEOUT_MS,
+  buildQuoteRequest,
+  MAINNET_CONFIG as config,
+} from '@portage/core';
 
 import {
   AlreadyRegistered,
@@ -10,7 +14,12 @@ import {
   sanitizeQuoteRequest,
 } from '../src/http/index.js';
 import { handle } from '../src/index.js';
-import { runNotifier } from '../src/notifier/index.js';
+import {
+  CRON_PERIOD_MS,
+  RUN_TIME_BUDGET_MS,
+  WORKER_REQUEST_TIMEOUT_MS,
+  runNotifier,
+} from '../src/notifier/index.js';
 import { listWatched } from '../src/store/index.js';
 import {
   CHAIN,
@@ -174,6 +183,24 @@ describe('HTTP handler', () => {
     const text = await res.text();
     expect(text).not.toContain('secret');
     expect(res.headers.get('authorization')).toBeNull();
+  });
+
+  it('answers 504 when 1Click does not answer a status read in time', async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = handle(
+        new Request('https://api.example/status?depositAddress=0xswap', {
+          headers: { origin: 'https://app.example' },
+        }),
+        env(),
+        () => new Promise<Response>(() => undefined)
+      );
+      await vi.advanceTimersByTimeAsync(DEFAULT_REQUEST_TIMEOUT_MS);
+      const res = await pending;
+      expect(res.status).toBe(504);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('refuses a tampered quote without calling upstream', async () => {
@@ -483,6 +510,42 @@ describe('runNotifier', () => {
     expect(report.notified).toHaveLength(1);
     expect(report.finished).toEqual([]);
     expect(watchKeys(kv).length).toBe(1);
+  });
+
+  it('times a hanging request out well inside the cron period and keeps the watch', async () => {
+    vi.useFakeTimers();
+    try {
+      const w = world({ txs: [payoutTx(0)] });
+      const kv = await watching(w);
+      w.arrive();
+      function hangingUtxo(url: string, init?: RequestInit): Promise<Response> {
+        if (url.endsWith('/utxo')) return new Promise(() => undefined);
+        return w.fetchFn(url, init);
+      }
+      const pending = runNotifier(kv, endpoints, hangingUtxo, run);
+      await vi.advanceTimersByTimeAsync(WORKER_REQUEST_TIMEOUT_MS);
+      const report = await pending;
+      expect(report.errors).toMatchObject([{ address: D.address }]);
+      expect(report.errors[0]?.message).toMatch(/within 10 seconds/);
+      expect(watchKeys(kv).length).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops making requests once the run is out of time', async () => {
+    const w = world({ txs: [payoutTx(0)] });
+    const kv = await watching(w);
+    w.arrive();
+    const before = w.calls.length;
+    const report = await runNotifier(kv, endpoints, w.fetchFn, {
+      ...run,
+      clock: { now: () => 1_000, deadline: 1_000 },
+    });
+    expect(w.calls.length).toBe(before);
+    expect(report.errors[0]?.message).toMatch(/out of time/);
+    expect(watchKeys(kv).length).toBe(1);
+    expect(RUN_TIME_BUDGET_MS + WORKER_REQUEST_TIMEOUT_MS).toBeLessThan(CRON_PERIOD_MS);
   });
 
   it('registers nothing and keeps watching when the sBTC minimum cannot be read', async () => {

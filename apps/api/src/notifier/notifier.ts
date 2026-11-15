@@ -34,7 +34,14 @@ import {
   putWatched,
   registrationsOf,
 } from '../store/index.js';
-import { Budget, BudgetExhausted, countedFetch, countedKv } from './budget.js';
+import {
+  Budget,
+  BudgetExhausted,
+  type RunClock,
+  countedFetch,
+  countedKv,
+  runClock,
+} from './budget.js';
 
 type Endpoints = Pick<NetworkConfig, 'btcApiUrl' | 'sbtcApiUrl' | 'reclaimLockBlocks'>;
 
@@ -60,6 +67,7 @@ export interface NotifierOptions {
   runIndex?: number;
   budget?: number;
   maxAddresses?: number;
+  clock?: RunClock;
 }
 
 interface Shared {
@@ -255,7 +263,7 @@ export async function runNotifier(
     Math.min(options.budget ?? RUN_SUBREQUEST_BUDGET, RUN_SUBREQUEST_BUDGET)
   );
   const kv = countedKv(rawKv, budget);
-  const fetching = countedFetch(fetchFn, budget);
+  const fetching = countedFetch(fetchFn, budget, options.clock ?? runClock());
   const report: NotifierReport = {
     watched: 0,
     runIndex,

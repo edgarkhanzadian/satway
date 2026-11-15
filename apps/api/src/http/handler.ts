@@ -1,4 +1,12 @@
-import { type FetchLike, HttpError, MAINNET_CONFIG as config } from '@portage/core';
+import {
+  type FetchLike,
+  HttpError,
+  type RequestOptions,
+  RequestTimeoutError,
+  SLOW_REQUEST_TIMEOUT_MS,
+  MAINNET_CONFIG as config,
+  withTimeout,
+} from '@portage/core';
 
 import type { KV } from '../store/index.js';
 import { ApiError, BadRequest } from './errors.js';
@@ -107,9 +115,18 @@ function upstreamHeaders(env: Env, withBody: boolean): Record<string, string> {
   return headers;
 }
 
-async function relay(upstream: Response, cors: Record<string, string>): Promise<Response> {
-  return new Response(await upstream.text(), {
-    status: upstream.status,
+async function relay(
+  fetchFn: FetchLike,
+  url: string,
+  init: RequestOptions,
+  cors: Record<string, string>
+): Promise<Response> {
+  const { status, text } = await withTimeout(url, init, async signalled => {
+    const upstream = await fetchFn(url, signalled);
+    return { status: upstream.status, text: await upstream.text() };
+  });
+  return new Response(text, {
+    status,
     headers: { 'content-type': 'application/json', ...cors },
   });
 }
@@ -137,10 +154,10 @@ export async function handle(
 
     if (request.method === 'GET' && url.pathname === '/tokens') {
       await limit(PROXY_RATE, env.PROXY_RATE_LIMITER);
-      return relay(
-        await fetchFn(`${config.oneClickBaseUrl}/v0/tokens`, {
-          headers: upstreamHeaders(env, false),
-        }),
+      return await relay(
+        fetchFn,
+        `${config.oneClickBaseUrl}/v0/tokens`,
+        { headers: upstreamHeaders(env, false) },
         cors
       );
     }
@@ -148,12 +165,15 @@ export async function handle(
     if (request.method === 'POST' && url.pathname === '/quote') {
       const clean = sanitizeQuoteRequest(await readJson(request), config);
       await limit(PROXY_RATE, env.PROXY_RATE_LIMITER);
-      return relay(
-        await fetchFn(`${config.oneClickBaseUrl}/v0/quote`, {
+      return await relay(
+        fetchFn,
+        `${config.oneClickBaseUrl}/v0/quote`,
+        {
           method: 'POST',
           headers: upstreamHeaders(env, true),
           body: JSON.stringify(clean),
-        }),
+          timeoutMs: SLOW_REQUEST_TIMEOUT_MS,
+        },
         cors
       );
     }
@@ -166,10 +186,10 @@ export async function handle(
       const params = new URLSearchParams({ depositAddress });
       const memo = url.searchParams.get('depositMemo');
       if (memo) params.set('depositMemo', memo.slice(0, 200));
-      return relay(
-        await fetchFn(`${config.oneClickBaseUrl}/v0/status?${params.toString()}`, {
-          headers: upstreamHeaders(env, false),
-        }),
+      return await relay(
+        fetchFn,
+        `${config.oneClickBaseUrl}/v0/status?${params.toString()}`,
+        { headers: upstreamHeaders(env, false) },
         cors
       );
     }
@@ -193,6 +213,9 @@ export async function handle(
       return json({ message: err.message, ...err.extra }, err.status, { ...cors, ...err.headers });
     }
     if (err instanceof HttpError) return json({ message: 'Upstream error' }, 502, cors);
+    if (err instanceof RequestTimeoutError) {
+      return json({ message: 'The swap provider did not answer in time' }, 504, cors);
+    }
     return json({ message: 'Internal error' }, 500, cors);
   }
 }

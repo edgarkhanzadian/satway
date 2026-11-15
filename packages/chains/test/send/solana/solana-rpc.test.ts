@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   type RpcFetch,
+  SOLANA_RPC_TIMEOUT_MS,
   createSolanaRpc,
   readAccount,
 } from '../../../src/send/solana/solana-rpc.js';
@@ -98,6 +99,30 @@ describe('createSolanaRpc', () => {
     await expect(createSolanaRpc(URL, offline).send('AAAA')).rejects.toThrow(
       'Could not reach the Solana RPC: Failed to fetch'
     );
+  });
+
+  it('gives up on a call that never answers, by default after 15 seconds', async () => {
+    vi.useFakeTimers();
+    try {
+      const signals: (AbortSignal | null | undefined)[] = [];
+      function hanging(_url: string, init: RequestInit): ReturnType<RpcFetch> {
+        signals.push(init.signal);
+        return new Promise(() => undefined);
+      }
+      const pending = createSolanaRpc(URL, hanging).blockHeight();
+      const outcome = expect(pending).rejects.toThrow(
+        'Could not reach the Solana RPC: No answer from https://rpc.example/solana within 15 seconds'
+      );
+      await vi.advanceTimersByTimeAsync(SOLANA_RPC_TIMEOUT_MS);
+      await outcome;
+      expect(signals[0]?.aborted).toBe(true);
+      const quick = createSolanaRpc(URL, hanging, { timeoutMs: 2_000 }).blockHeight();
+      const quickOutcome = expect(quick).rejects.toThrow(/within 2 seconds/);
+      await vi.advanceTimersByTimeAsync(2_000);
+      await quickOutcome;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('sends a base64 transaction with preflight on', async () => {
