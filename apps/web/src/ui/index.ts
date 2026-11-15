@@ -1,5 +1,6 @@
 export * from './payout-notes.js';
 export * from './qr-code.js';
+export * from './refund-note.js';
 export * from './route-map.js';
 export * from './route.js';
 export * from './send-record-view.js';

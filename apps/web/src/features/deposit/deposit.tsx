@@ -56,6 +56,7 @@ import {
   PayoutDetails,
   PayoutNotices,
   QrCode,
+  RefundNote,
   type RouteUpdate,
   SendRecordView,
 } from '../../ui/index.js';
@@ -772,6 +773,14 @@ function Tracking(props: {
         {progress?.message ?? 'Checking…'}
       </p>
       {problem && <p className={notice()}>{problem}</p>}
+      {snapshot?.swap === 'REFUNDED' && (
+        <RefundNote
+          refund={snapshot.refund}
+          refundTo={receipt.refundTo}
+          symbol={receipt.origin.symbol}
+          chain={receipt.origin.chain}
+        />
+      )}
       {snapshot && <PayoutNotices snapshot={snapshot} />}
 
       <dl className={details()}>

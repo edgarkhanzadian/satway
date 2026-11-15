@@ -8,10 +8,12 @@ import {
   type PayoutBasis,
   type Progress,
   type RegistrationFailureKind,
+  type SwapRefund,
   type WatchedDepositContext,
   applyRegistrations,
   observeDeposit,
   outpointOf,
+  refundOf,
   registerOutputs,
   remainingDepositOf,
 } from '@portage/core';
@@ -35,6 +37,7 @@ export interface Snapshot {
   registrationError: string | null;
   registrationErrors: RegistrationErrorNote[];
   remaining: bigint | null;
+  refund: SwapRefund | null;
 }
 
 export interface RegistrationErrorNote {
@@ -109,5 +112,6 @@ export async function checkProgress(
     registrationError: registrationErrors.map(e => e.message).join(' ') || null,
     registrationErrors,
     remaining: remainingDepositOf(status, receipt.quoteResponse.quote.amountIn),
+    refund: refundOf(status),
   };
 }

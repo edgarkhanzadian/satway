@@ -144,6 +144,7 @@ describe('refundOf', () => {
     expect(refundOf(statusWith(() => undefined))).toEqual({
       refunded: false,
       refundedAmount: '0',
+      refundedAmountFormatted: '0',
       refundReason: null,
       refundFee: '1900',
     });
@@ -154,14 +155,30 @@ describe('refundOf', () => {
       raw.status = 'REFUNDED';
       const details = raw.swapDetails;
       if (typeof details !== 'object' || details === null) throw new Error('no details');
-      raw.swapDetails = { ...details, refundedAmount: '8100', refundReason: 'Price moved' };
+      raw.swapDetails = {
+        ...details,
+        refundedAmount: '8100',
+        refundedAmountFormatted: '0.000081',
+        refundReason: 'Price moved',
+      };
     });
     expect(refundOf(status)).toEqual({
       refunded: true,
       refundedAmount: '8100',
+      refundedAmountFormatted: '0.000081',
       refundReason: 'Price moved',
       refundFee: '1900',
     });
+  });
+
+  it('drops a formatted refund amount that does not match the base units', () => {
+    const status = statusWith(raw => {
+      raw.status = 'REFUNDED';
+      const details = raw.swapDetails;
+      if (typeof details !== 'object' || details === null) throw new Error('no details');
+      raw.swapDetails = { ...details, refundedAmount: '8100', refundedAmountFormatted: '0' };
+    });
+    expect(refundOf(status)?.refundedAmountFormatted).toBeNull();
   });
 
   it('is null without a status and ignores amounts that are not whole numbers', () => {

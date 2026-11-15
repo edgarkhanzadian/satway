@@ -120,6 +120,7 @@ describe('observeWithdrawal on the real accepted withdrawal 5131', () => {
     expect(result.facts.refund).toEqual({
       refunded: true,
       refundedAmount: '1852485',
+      refundedAmountFormatted: null,
       refundReason: 'Slippage exceeded',
       refundFee: '1900',
     });

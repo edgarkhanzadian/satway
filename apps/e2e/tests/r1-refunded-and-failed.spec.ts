@@ -46,6 +46,14 @@ test.describe('R1. the swap stops at 1Click', () => {
       await expect(app.page.getByRole('button', { name: 'Start another' })).toBeVisible();
       await expect(app.definition('Reclaim available')).toHaveCount(0);
       await expect(app.sendButton).toHaveCount(0);
+      const refundNote = app.page.getByText(/was refunded to /);
+      if (stop.name.includes('refunded')) {
+        await expect(refundNote).toHaveText(
+          `100.0 USDC was refunded to ${receipt.refundTo} on base. Reason given by the swap provider: Price moved beyond the slippage.`
+        );
+      } else {
+        await expect(refundNote).toHaveCount(0);
+      }
 
       const calls = api.requests.filter(r => r.path === '/status').length;
       const mempoolReads = world.requestsTo('mempool', { caller: 'page' }).length;

@@ -138,6 +138,7 @@ export function assertStatusMatchesQuote(
 export interface SwapRefund {
   refunded: boolean;
   refundedAmount: string | null;
+  refundedAmountFormatted: string | null;
   refundReason: string | null;
   refundFee: string | null;
 }
@@ -145,18 +146,31 @@ export interface SwapRefund {
 const refundSchema: z.ZodType<{
   swapDetails: {
     refundedAmount?: string | null;
+    refundedAmountFormatted?: string | null;
     refundReason?: string | null;
     refundFee?: string | null;
   };
 }> = z.looseObject({
   swapDetails: z.looseObject({
     refundedAmount: z.string().nullable().optional(),
+    refundedAmountFormatted: z.string().nullable().optional(),
     refundReason: z.string().nullable().optional(),
     refundFee: z.string().nullable().optional(),
   }),
 });
 
 const BASE_UNITS = /^\d+$/;
+const DECIMAL = /^\d+(\.\d+)?$/;
+
+function significant(digits: string): string {
+  return digits.replace(/^0+/, '').replace(/0+$/, '');
+}
+
+function sameDigits(baseUnits: string, formatted: string): boolean {
+  return (
+    DECIMAL.test(formatted) && significant(formatted.replace('.', '')) === significant(baseUnits)
+  );
+}
 
 export function refundOf(status: OneClickStatusResponse | null): SwapRefund | null {
   if (!status) return null;
@@ -166,9 +180,12 @@ export function refundOf(status: OneClickStatusResponse | null): SwapRefund | nu
       ? details.refundedAmount
       : null;
   const refunded = status.status === 'REFUNDED' || (amount !== null && BigInt(amount) > 0n);
+  const formatted = details.refundedAmountFormatted;
   return {
     refunded,
     refundedAmount: amount,
+    refundedAmountFormatted:
+      amount !== null && formatted && sameDigits(amount, formatted) ? formatted : null,
     refundReason: details.refundReason ?? null,
     refundFee: details.refundFee && BASE_UNITS.test(details.refundFee) ? details.refundFee : null,
   };

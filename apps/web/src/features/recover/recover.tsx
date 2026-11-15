@@ -31,7 +31,7 @@ import {
   receiptId,
   verifyReceipt,
 } from '../../shared/index.js';
-import { PayoutDetails, PayoutNotices, type RouteUpdate } from '../../ui/index.js';
+import { PayoutDetails, PayoutNotices, RefundNote, type RouteUpdate } from '../../ui/index.js';
 
 const fields = field();
 
@@ -251,6 +251,14 @@ export function Recover(props: {
             </dd>
             {snapshot && <PayoutDetails snapshot={snapshot} />}
           </dl>
+          {snapshot?.swap === 'REFUNDED' && (
+            <RefundNote
+              refund={snapshot.refund}
+              refundTo={receipt.refundTo}
+              symbol={receipt.origin.symbol}
+              chain={receipt.origin.chain}
+            />
+          )}
           {snapshot && <PayoutNotices snapshot={snapshot} />}
 
           {progress && !progress.terminal && (
