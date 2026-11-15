@@ -59,6 +59,7 @@ const POINTS: ReloadPoint[] = [
       const late = wallets.evm.behaviour.late('eth_sendTransaction');
       await app.clickSend();
       await expect(app.page.getByRole('button', { name: 'Confirm in your wallet…' })).toBeVisible();
+      await expect.poll(() => wallets.evm.behaviour.calls('eth_sendTransaction').length).toBe(1);
       await resumeIn(app, started, { reload: true });
       await expect(app.page.getByText(SEND_COPY.attemptingHeadline)).toBeVisible();
       await expectNoSendOffered(app);
