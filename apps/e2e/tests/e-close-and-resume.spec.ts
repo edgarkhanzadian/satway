@@ -53,6 +53,27 @@ test.describe('E. close the tab mid-swap and resume in a new one', () => {
     expect(wallets.evm.behaviour.calls('eth_sendTransaction')).toHaveLength(1);
   });
 
+  test('without connecting any wallet: "Follow this deposit" opens the tracking view', async ({
+    app,
+    world,
+    wallets,
+  }) => {
+    const { receipt } = await startAndCloseMidSwap(app);
+    await app.page.close();
+    const stacksRequests = wallets.stacks.behaviour.requests.length;
+
+    const later = await app.newTab();
+    await later.open();
+    await expect(later.to.getByRole('button', { name: 'Connect Stacks wallet' })).toBeVisible();
+    await later.openRecover();
+    await later.pickSavedReceipt(`${receipt.quoteResponse.quote.amountInFormatted} USDC`);
+    await resumeToDone(later, world, receipt);
+    await expect(later.page.getByRole('heading', { name: 'Before you start' })).toHaveCount(0);
+    await later.page.getByRole('button', { name: 'Start another' }).click();
+    await expect(later.page.getByRole('heading', { name: 'Before you start' })).toBeVisible();
+    expect(wallets.stacks.behaviour.requests).toHaveLength(stacksRequests);
+  });
+
   test('from the downloaded receipt file, with the browser storage gone', async ({
     app,
     world,

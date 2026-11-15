@@ -103,7 +103,7 @@ function sats(n: number): string {
 
 export function Deposit(props: {
   backend: Backend;
-  account: WalletAccount;
+  account: WalletAccount | null;
   source: SourceWallet | null;
   active: ActiveDeposit | null;
   onActive(active: ActiveDeposit | null): void;
@@ -192,7 +192,7 @@ export function Deposit(props: {
   useEffect(() => () => onRoute(null), [onRoute]);
 
   async function run(dry: boolean) {
-    if (!token) return;
+    if (!token || !account) return;
     const isLatest = previews.begin();
     setBusy(true);
     setError(null);
@@ -246,6 +246,8 @@ export function Deposit(props: {
       />
     );
   }
+
+  if (!account) return null;
 
   return (
     <section className={sheet()}>

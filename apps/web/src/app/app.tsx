@@ -34,7 +34,7 @@ export function App() {
     deposit: route?.deposit ?? null,
   });
 
-  const landing = account === null && tab === 'deposit';
+  const landing = account === null && active === null && tab === 'deposit';
 
   return (
     <styled.div backgroundGradient={{ base: 'band.narrow', md: 'band.wide' }}>
@@ -117,7 +117,7 @@ export function App() {
           </styled.div>
 
           {tab === 'deposit' &&
-            (account ? (
+            (account !== null || active !== null ? (
               <Deposit
                 key={resume?.depositAddress ?? 'new'}
                 backend={backend}
