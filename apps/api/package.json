@@ -13,6 +13,9 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "dependencies": {
     "@portage/core": "workspace:*"
   },
@@ -24,6 +27,8 @@
     "vitest": "3.2.7",
     "wrangler": "3.114.17"
   },
+  "main": "./src/index.ts",
   "prettier": "@portage/prettier-config",
-  "private": true
+  "private": true,
+  "types": "./src/index.ts"
 }

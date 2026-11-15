@@ -1,0 +1,40 @@
+{
+  "name": "@portage/e2e",
+  "description": "Playwright end-to-end tests: the production web build and the real Worker code against a simulated world",
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build:web": "tsx scripts/build-web.ts",
+    "format": "prettier . --write --ignore-path ../../.prettierignore",
+    "format:check": "prettier . --check --ignore-path ../../.prettierignore",
+    "lint": "eslint --cache --max-warnings 0",
+    "lint:fix": "pnpm lint --fix",
+    "test:e2e": "pnpm build:web && playwright test",
+    "test:e2e:canary": "pnpm build:web && playwright test --config playwright.canary.config.ts",
+    "test:e2e:smoke": "pnpm build:web && playwright test --config playwright.smoke.config.ts",
+    "test:e2e:ui": "pnpm build:web && playwright test --ui",
+    "test:e2e:visual:update": "pnpm build:web && E2E_VISUAL=1 playwright test --project visual --update-snapshots",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@noble/curves": "1.9.7",
+    "@playwright/test": "1.64.1",
+    "@portage/api": "workspace:*",
+    "@portage/core": "workspace:*",
+    "@scure/base": "1.2.6",
+    "@scure/btc-signer": "1.8.1",
+    "@stacks/transactions": "7.7.0"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
+    "@portage/prettier-config": "workspace:*",
+    "@portage/tsconfig-config": "workspace:*",
+    "@types/node": "26.6.6",
+    "prettier": "3.5.1",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vite": "6.4.6"
+  },
+  "prettier": "@portage/prettier-config",
+  "private": true
+}

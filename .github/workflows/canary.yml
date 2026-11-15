@@ -1,0 +1,51 @@
+name: canary
+
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: canary
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    name: live-canary
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: install
+        run: pnpm install --frozen-lockfile
+
+      - name: install-browser
+        run: pnpm --filter @portage/e2e exec playwright install --with-deps chromium
+
+      - name: canary
+        env:
+          CANARY_ONECLICK_JWT: ${{ secrets.CANARY_ONECLICK_JWT }}
+        run: pnpm test:e2e:canary
+
+      - name: upload-report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canary-report
+          path: |
+            apps/e2e/playwright-report/canary
+            apps/e2e/test-results/canary
+          retention-days: 14

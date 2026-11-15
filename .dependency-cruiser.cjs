@@ -33,9 +33,40 @@ module.exports = {
     {
       name: 'no-imports-between-apps',
       severity: 'error',
-      comment: 'apps/api and apps/web are deployed separately and must not import each other.',
-      from: { path: '^apps/([^/]+)/' },
+      comment:
+        'apps/api and apps/web are deployed separately and must not import each other. apps/e2e has its own, narrower rule below.',
+      from: { path: '^apps/([^/]+)/', pathNot: '^apps/e2e/' },
       to: { path: '^apps/([^/]+)/', pathNot: '^apps/$1/' },
+    },
+    {
+      name: 'e2e-uses-only-the-worker-entry',
+      severity: 'error',
+      comment:
+        'apps/e2e runs the real Worker code in-process through its entry apps/api/src/index.ts (the @portage/api package entry) and nothing else in apps/api. It tests the built web app through a browser, so it never imports apps/web.',
+      from: { path: '^apps/e2e/' },
+      to: { path: '^apps/(?!e2e/)', pathNot: '^apps/api/src/index[.]ts$' },
+    },
+    {
+      name: 'e2e-uses-package-entries-only',
+      severity: 'error',
+      comment:
+        'apps/e2e may use @portage/core and @portage/chains through their package entries only, and no other workspace package.',
+      from: { path: '^apps/e2e/' },
+      to: {
+        path: '^packages/',
+        pathNot: [
+          '^packages/core/src/index[.]ts$',
+          '^packages/chains/src/index[.]ts$',
+          '^packages/chains/src/send/solana/index[.]ts$',
+        ],
+      },
+    },
+    {
+      name: 'nothing-imports-e2e',
+      severity: 'error',
+      comment: 'apps/e2e is a test harness. Nothing outside it may import it.',
+      from: { pathNot: '^apps/e2e/' },
+      to: { path: '^apps/e2e/' },
     },
     {
       name: 'core-only-through-its-entry',
@@ -507,7 +538,13 @@ module.exports = {
         '^apps/web/dist-preview/',
         '^apps/web/preview/',
         '^apps/api/[.]wrangler/',
+        '^apps/e2e/[.]web-build/',
+        '^apps/e2e/test-results/',
+        '^apps/e2e/playwright-report/',
+        '^apps/e2e/blob-report/',
+        '^apps/e2e/[.]playwright/',
         '^[.]proofs/',
+        '^[.]claude/',
         '(^|/)[.]env',
         '^packages/eslint-config/',
         '^packages/prettier-config/',

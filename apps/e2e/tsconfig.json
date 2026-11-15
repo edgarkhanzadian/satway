@@ -1,0 +1,16 @@
+{
+  "extends": "@portage/tsconfig-config/tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": [
+    "src",
+    "tests",
+    "canary",
+    "smoke",
+    "scripts",
+    "playwright.config.ts",
+    "playwright.canary.config.ts",
+    "playwright.smoke.config.ts"
+  ]
+}

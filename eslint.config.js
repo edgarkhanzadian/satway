@@ -23,6 +23,18 @@ const zodThroughCore = {
     "Import z from @portage/core (../shared/index.js inside core). It turns on zod's jitless mode before any schema exists, so no eval runs under the page's script-src 'self'.",
 };
 
+const apiDeepImport = {
+  group: ['@portage/api/*', '**/api/src/**'],
+  message:
+    'apps/e2e runs the Worker through its entry only: import @portage/api, not files inside apps/api.',
+};
+
+const webSourceInE2e = {
+  group: ['@portage/web', '@portage/web/*', '**/web/src/**'],
+  message:
+    'apps/e2e tests the built web app through the browser. It must not import apps/web source.',
+};
+
 const browserGlobals = ['window', 'document', 'localStorage', 'sessionStorage', 'navigator'];
 
 const noBrowserGlobals = {
@@ -169,7 +181,7 @@ export default defineConfig([
     },
   },
   {
-    files: ['**/*.test.ts'],
+    files: ['**/*.test.ts', '**/*.spec.ts'],
     rules: {
       '@typescript-eslint/ban-ts-comment': 'off',
     },
@@ -186,6 +198,12 @@ export default defineConfig([
       '**/coverage/',
       '**/*.d.ts',
       '**/.env*',
+      '.claude/',
+      'apps/e2e/.web-build/',
+      'apps/e2e/test-results/',
+      'apps/e2e/playwright-report/',
+      'apps/e2e/blob-report/',
+      'apps/e2e/.playwright/',
     ],
   },
   {
@@ -301,6 +319,35 @@ export default defineConfig([
         },
       ],
       'no-restricted-syntax': ['error', ...sharedRestrictedSyntax, pandaEscapeHatch],
+    },
+  },
+  {
+    name: 'e2e',
+    files: ['apps/e2e/**/*.ts'],
+    rules: {
+      'no-empty-pattern': ['error', { allowObjectPatternsAsParameters: true }],
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: sharedRestrictedImportPaths,
+          patterns: [
+            coreDeepImport,
+            chainsDeepImport,
+            zodThroughCore,
+            stylesOnlyInWeb,
+            presetOnlyThroughPanda,
+            apiDeepImport,
+            webSourceInE2e,
+          ],
+        },
+      ],
+    },
+  },
+  {
+    name: 'e2e-worker-captures-the-notifier-log',
+    files: ['apps/e2e/src/worker/worker.ts'],
+    rules: {
+      'no-console': 'off',
     },
   },
   {

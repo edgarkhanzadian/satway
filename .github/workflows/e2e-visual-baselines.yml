@@ -1,0 +1,40 @@
+name: e2e-visual-baselines
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  baselines:
+    name: linux-visual-baselines
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: install
+        run: pnpm install --frozen-lockfile
+
+      - name: install-browser
+        run: pnpm --filter @portage/e2e exec playwright install --with-deps chromium
+
+      - name: generate
+        run: pnpm test:e2e:visual:update
+
+      - name: upload-baselines
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-baselines-linux
+          path: apps/e2e/visual-baselines/*-linux.png
+          retention-days: 14

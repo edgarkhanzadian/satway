@@ -9,13 +9,14 @@ address. This project holds no funds and no user keys.
 
 ## Layout
 
-| Path              | What it is                                                                                                                                     |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/core`   | Pure logic: deposit address, signer key verification, quote building and checking, payout detection, status, reclaim. No UI, no keys.          |
-| `packages/chains` | The other chains: chain metadata and address checks, EVM and Solana transfer building, sending and send records. No UI and no browser globals. |
-| `apps/web`        | Browser app (Vite + React): deposit flow, status tracking, recovery page.                                                                      |
-| `apps/api`        | Cloudflare Worker: keeps the 1Click API key off the client, and notifies the sBTC signers of payouts if the user closed the tab.               |
-| `scripts`         | Mainnet proof scripts and the bundle safety check.                                                                                             |
+| Path              | What it is                                                                                                                                           |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/core`   | Pure logic: deposit address, signer key verification, quote building and checking, payout detection, status, reclaim. No UI, no keys.                |
+| `packages/chains` | The other chains: chain metadata and address checks, EVM and Solana transfer building, sending and send records. No UI and no browser globals.       |
+| `apps/web`        | Browser app (Vite + React): deposit flow, status tracking, recovery page.                                                                            |
+| `apps/api`        | Cloudflare Worker: keeps the 1Click API key off the client, and notifies the sBTC signers of payouts if the user closed the tab.                     |
+| `apps/e2e`        | Playwright end-to-end tests: the production web build and the real Worker code against a simulated world. See [End-to-end tests](#end-to-end-tests). |
+| `scripts`         | Mainnet proof scripts and the bundle safety check.                                                                                                   |
 
 ### Structure inside the packages
 
@@ -75,6 +76,9 @@ The rules, in plain words:
   `index.ts` wires them. Nothing imports `index.ts`.
 - The two apps never import each other, nothing imports `scripts/`, and `scripts/` uses only
   the `@portage/core` and `@portage/chains` entries.
+- `apps/e2e` imports `@portage/core` and `@portage/chains` through their entries and
+  `apps/api` only through its entry (`@portage/api`, `apps/api/src/index.ts`). It never imports
+  `apps/web` (it tests the built app in a browser), and nothing imports `apps/e2e`.
 
 ## Rules the code is built around
 
@@ -98,6 +102,7 @@ pnpm test            # unit tests for core, chains, api and web
 pnpm typecheck
 pnpm build           # builds apps/web
 pnpm check:bundle    # fails if the build could run un-bundled code
+pnpm test:e2e        # Playwright end-to-end suite (not part of pnpm test)
 
 pnpm dry-quote 25    # live mainnet check, moves no funds
 ```
@@ -135,6 +140,257 @@ cp .env.example .env.local
 pnpm --filter @portage/api dev      # http://localhost:8787
 pnpm --filter @portage/web dev      # http://localhost:5173
 ```
+
+## End-to-end tests
+
+`apps/e2e` drives the production build of the web app in a real browser against the real
+Worker code, with every outside service replaced by a simulated "world". Nothing touches a
+real network, wallet or signer.
+
+```sh
+pnpm --filter @portage/e2e exec playwright install chromium webkit   # once
+pnpm test:e2e                                  # builds the app for e2e, then runs the suite
+pnpm test:e2e:ui                               # the same in Playwright's UI mode
+pnpm --filter @portage/e2e exec playwright test tests/d-manual-send.spec.ts   # one file, reusing the last build
+```
+
+Failures keep a trace, a screenshot and `world-log.json` (every request the world, the
+Worker and the wallets saw) in `apps/e2e/test-results`; the HTML report is in
+`apps/e2e/playwright-report`.
+
+### What runs for real
+
+- **The web app**: `build:web` (`apps/e2e/scripts/build-web.ts`) builds `apps/web` with Vite's
+  API, its own `vite.config.ts` and its real CSP, into the git-ignored `apps/e2e/.web-build`,
+  with `VITE_API_URL=http://127.0.0.1:4392`. Vite's `envDir` is an empty temporary directory
+  and the build refuses to run if `apps/web` has `.env` files the config would read, so no
+  `.env*` file is ever loaded. `apps/web/dist` and `check:bundle` are untouched. A tiny static
+  server (`scripts/serve-web.ts`, Playwright's `webServer`) serves it on `127.0.0.1:4391`.
+- **The Worker**: `src/worker/worker.ts` calls the exported `handle(request, env, fetchFn)` from
+  `@portage/api` with an in-memory KV (`src/worker/kv.ts`, pages its `list` two keys at a time)
+  and a `fetchFn` that goes to the world. `api.runScheduled()` calls the Worker's real
+  `scheduled` handler; for that one awaited call the test process's global `fetch` points at
+  the world (the handler uses the global) and the logged report is captured. This exercises
+  the handler, CORS, the proxy sanitising, `POST /deposits`, the KV store and the notifier,
+  but **not the workerd runtime** (it runs on Node). Requests from the page to the API origin
+  never reach a socket: the routing layer hands them to `handle` in-process, so each test has
+  its own Worker and KV and tests can run in parallel. Browsers do not apply CORS to responses
+  a test fulfils, so the harness checks it like a browser would (preflight for non-simple
+  requests, then `access-control-allow-origin` on the response) and fails the test otherwise.
+
+### The world (`src/world`)
+
+One `World` per test, seeded from the test title, so values are deterministic and tests are
+isolated. Tests drive it through typed methods:
+
+| Service                         | File          | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1Click                          | `oneclick.ts` | Token list (USDC on Base, ETH, SOL, USDC on Solana, USDT on Tron, BTC, plus `extraTokens` a test adds), dry and live quotes that echo the request like the real API (truncated deadline, provider fee entry, signature), one deposit address per live quote, status PENDING_DEPOSIT → PROCESSING → SUCCESS (and INCOMPLETE_DEPOSIT, REFUNDED, FAILED). `tamper` rewrites quote responses; `completeSwap({ reportHash: false })` withholds the payout hash until `revealPayout(swap)`.                                                                                                                                                                                                                                                                                                                                        |
+| Bitcoin (mempool.space Esplora) | `bitcoin.ts`  | A chain of blocks, mempool, address utxo and history paging, tx, hex, outspend, fee estimates and `POST /tx`. Payouts are real signed transactions from a treasury wallet; the signers' sweep is a real taproot script-path spend. Every spend is validated (`script-check.ts`): the output exists and is unspent, fee ≥ 1 sat/vB, BIP68 relative locks against the output's confirmation height (`non-BIP68-final`), p2wpkh and taproot key-path signatures, and for script paths the control block commitment, the sBTC deposit or reclaim leaf, the reclaim leaf's CSV against nSequence, and the Schnorr signature for the leaf's key. Rejections use Esplora's `sendrawtransaction RPC error: {"code":…,"message":…}` form. Blocks are mined only on command; `hexOverrides` serves a wrong raw transaction for a txid. |
+| Emily                           | `emily.ts`    | `/limits`, `GET /deposit?status=…`, `GET /deposit/:txid/:vout`, `POST /deposit` validating `transactionHex`, txid, output script and the deposit and reclaim scripts like the real service; statuses are set by the test.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Hiro                            | `hiro.ts`     | The sBTC registry read of the current aggregate key, which the world generates (`keyOverride` replaces it). The world also seeds a confirmed deposit swept recently, which the app needs as evidence for that key; `world.replaceEvidence('unswept' \| 'other-signer-key')` swaps it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Solana JSON-RPC (Reown URL)     | `solana.ts`   | Accounts, blockhash, rent, simulate, send (checks ed25519 signatures), signature statuses with `processed`/`confirmed`/`finalized` (`landAs`, `promote`), block height. A blockhash is valid for 150 blocks after it was issued; blocks advance with `solana.advance(n)` and with world time (one per 400 ms). `sendReplyFaults` makes the next `sendTransaction` accept-then-error or drop-then-error; every raw send is kept in `rpcSends`. Executes System transfers, associated token account creation and SPL `TransferChecked`.                                                                                                                                                                                                                                                                                        |
+| EVM                             | `evm.ts`      | Only reached through the wallet: records sent transactions and decodes native and ERC-20 transfers. With `autoMine = false` a transaction stays pending (no receipt) until `evm.mine()`, and only then credits 1Click; `revertNext` mines a reverted (`status: 0x0`) one that credits nothing.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+
+Deposits reach 1Click the way they do in reality: an EVM wallet send or a Solana transaction
+landing credits the swap deposit address. Useful controls: `world.reportDeposit()` (a manual
+send), `world.completeSwap()` (pays BTC and reports SUCCESS), `world.mine(n)`,
+`world.signers.accept|sweep|confirm|fail|mint(outpoint)`, `world.payTo(address, sats)` (dust
+and outsiders), `world.addFault({ service, method, path, rpcMethod, bodyIncludes, callers,
+outcome: reply | 'hang' | 'network-error', times })`, `world.hold(rule)` (answers the matching
+request normally once the returned gate is released; `harness.idle()` does not wait for held
+requests), and `world.log`, `world.requestsTo(service, filter)` for assertions.
+
+### Network isolation
+
+Every browser request goes through one route handler (`src/browser/harness.ts`): the app
+origin passes through to the static server, the API origin goes to the in-process Worker,
+Hiro, mempool.space, Emily and the Solana RPC go to the world, and anything else (including
+1Click from the page, the WalletConnect relay and its verify page unless a test opts into the
+fake relay below, and every other WebSocket) is aborted and recorded. On top of that the browser runs behind a proxy that does not exist
+(`127.0.0.1:9`, loopback excluded), so a request that escaped the routing layer would fail,
+and each test process replaces the global `fetch` with a trap. After every test the fixture
+fails it on any blocked request, CSP violation, CORS failure, uncaught page error, console
+error, world request without a route, or real `fetch` from the test process. The only console
+errors allowed by default are 404s on `/favicon.ico` and on Emily's `GET /deposit/:txid/:vout`
+(the app reads a 404 as "not registered yet"). A test can allow more with
+`test.use({ allow: { hosts, consoleErrors, worldUnexpected } })`. `tests/harness-*.spec.ts`
+prove that each guard fires.
+
+`harness.backendDown({ method, path, mode: 'refused' | 'hang', times })` takes our Worker
+off the network for matching requests (connection refused, or held until `backendUp()`).
+
+**WalletConnect against a fake relay.** With `test.use({ walletConnect: 'fake-relay' })`, and
+only then, the relay WebSocket (`wss://relay.walletconnect.org`) is routed to
+`world.relay` (`src/world/walletconnect-relay.ts`) and `https://verify.walletconnect.org/v3/attestation`
+is served a small page that posts an unsigned attestation back, as the real Verify iframe
+does. The fake relay speaks the relay JSON-RPC the 2.26 client uses (`wc_proposeSession`,
+`irn_subscribe`, `irn_batchSubscribe`, `irn_unsubscribe`, `irn_publish`,
+`irn_batchFetchMessages`, `irn_subscription` deliveries and their acknowledgements); the
+client's auth JWT is in the connect URL and is not checked. `world.relay.mode = 'unreachable'`
+closes every connection. `src/wallets/walletconnect-wallet.ts` plays the wallet side in Node
+with the protocol's own crypto (X25519, HKDF-SHA256, ChaCha20-Poly1305 envelopes, from
+`node:crypto` and `@noble/curves`): it reads and decrypts the proposal, approves a session
+with chosen EVM chains and Solana, answers session requests (an `eth_sendTransaction` reaches
+`world.evm`) and has the same scriptable `behaviour`. Every other WalletConnect host stays
+blocked.
+
+### Wallets (`src/wallets`, `src/browser/page-script.ts`)
+
+An init script installs three wallets in every page and forwards each call to Node through one
+binding, where the wallet logic, keys and request log live:
+
+- **Test EVM Wallet**: an EIP-1193 provider announced through EIP-6963 (`eth_requestAccounts`,
+  `eth_chainId`, `wallet_switchEthereumChain`, `eth_sendTransaction`, receipts). It starts on
+  chain 1 (`test.use({ evmStartChainId })`).
+- **Test Solana Wallet**: registered through the Wallet Standard events with `standard:connect`,
+  `solana:signAndSendTransaction` and `solana:signTransaction`, signing in Node with a real
+  ed25519 key. `test.use({ walletSetup: { solana: { features: ['sign'] } } })` makes it
+  sign-only.
+- **Test Stacks Wallet**: a WBIP004 provider registered in `window.wbip_providers`, so the
+  `@stacks/connect` 8.2.7 modal lists it as installed. `connect()` always shows that modal
+  (`forceWalletSelect`), so `app.connectStacksWallet()` clicks the wallet's "Connect" button
+  in it. It answers `getAddresses` with a mainnet Stacks address and BTC payment (p2wpkh) and
+  taproot addresses from real keys, and signs PSBTs for real (`signPsbt`).
+
+Script any wallet per test through `wallets.<evm|solana|stacks>.behaviour`: `reject(method,
+{ code: 4001 | 5000 })`, `hang(method)`, `late(method)` (returns a gate to `release()`),
+`malformed(method, value)`, `loseReply(method, 'hang' | { code, message })` (the wallet does
+the work, for example broadcasts, and then the reply never comes or is an error); every request
+is in `behaviour.requests`. The EVM wallet also has `switchMode = 'ignore'` (answers
+`wallet_switchEthereumChain` but stays on its chain), `changeAccount()` and `changeChain(id)`,
+which emit `accountsChanged` / `chainChanged` to listeners on the injected provider.
+
+### Time
+
+The context runs on Playwright's clock, installed at the world's time and flowing normally.
+The world clock is the real clock plus an offset. `app.fastForward(ms)` waits until no request
+is open, moves the world clock and then the page clock by `ms` (timers fire at most once) and
+waits again; `app.tick()` is a 20-second fast-forward, the app's poll interval.
+`app.waitForProgress(message)` checks the page and ticks until the message shows (at most 8
+ticks). Bitcoin blocks only advance with `world.mine()`; Solana blocks also advance with world
+time. The fake clock reports an error thrown in a timer as a console error, or as a failed
+`tick()` when the jump ran it, so both still fail the test.
+
+The Worker code reads `new Date()` and `Date.now()` itself (`handle()` takes no clock), so for
+each awaited Worker call (`dispatch`, `runScheduled`) `src/worker/worker.ts` replaces the
+global `Date` with one that reads the world clock, and puts the real one back when the last
+overlapping call ends (the fixture also resets it between tests). Code in the test process
+that must not see world time uses `realNow()` from `src/world/clock.ts`; the harness measures
+quiet periods with `performance.now()`. The in-memory KV keeps each entry's `expirationTtl`,
+refuses one below 60 seconds like Cloudflare KV, and drops the entry once the world clock
+passes it, so the 14-day watch TTL, the quote deadline window and the 15-minute wallet prompt
+window all behave as they would after that much real time.
+
+### Adding a scenario
+
+Add `tests/<name>.spec.ts` and import `test` and `expect` from `../src/fixtures.js`. The
+fixtures give `app` (page object: `open`, `connectStacksWallet`, `connectEvmWallet`,
+`connectSolanaWallet`, `fillDeposit`, `getQuote`, `continue`, `sendFromWallet`, `clickSend`,
+`waitForProgress`, `tick`, `openRecover`, `pickSavedReceipt`, `uploadReceipt`, `followDeposit`,
+`newTab`, `expectComplete`), `world`, `api` (the Worker: `requests`, `kv`, `watch()`,
+`runScheduled()`), `wallets` and `harness`. Assert both what the page says and what the world
+saw; `src/scenario/checks.ts` has receipt, watch and Emily registration checks,
+`src/scenario/journeys.ts` drives a deposit to "awaiting funds", payout or done and holds the
+app's copy, and `src/scenario/reclaim.ts` drives and inspects reclaims. Prefer roles, labels
+and visible text; the app has no `data-testid` attributes. A test tagged `@webkit` also runs in
+the WebKit project. A console error a scenario causes on purpose (a 5xx the world returns) is
+allowed per test with `harness.allowConsoleErrors(pattern)`.
+
+### Scenarios
+
+- `a-…` to `f-…`: the happy paths (phase 1).
+- `m1-…` to `m10-…`: money safety: unknown swap status, lost EVM wallet replies, wallet
+  rejections, two tabs, Solana sends whose RPC reply fails, tampered quotes, unverifiable
+  signer keys, network and account guards, tokens the wallet must not send, dust and outsiders
+  on the deposit address.
+- `r1-…` to `r8-…`: failure and recovery: refunded and failed swaps, short deposits, Emily
+  registration failures, reclaims and their targeting, receipt files, receipt storage, the
+  Worker watch lifecycle.
+- `harness-…`: self-checks for the guards and for every simulated behaviour the scenarios rely
+  on (spend validation, world clock and KV expiry, EVM pending/reverted/lost replies and events,
+  Solana blockhash expiry, commitments and send faults, held requests).
+- `s1-…` to `s6-…` (phase 3, resilience): our backend down at each step, each upstream down,
+  hanging or malformed while a deposit is tracked, browser storage blocked or full, the
+  `stxonector` to `portage` storage migration, reloads, history and tab switches mid-flow, and
+  a deposit left open for hours (requests and timers per poll stay constant; terminal states
+  stop polling).
+- `q1-…` to `q7-…` (phase 3, quality gates): axe (`@axe-core/playwright`, serious and critical
+  fail) plus structure, names, route `aria-current`, live regions and visible focus in every
+  main state in both themes; keyboard-only deposit and reclaim; 390x844 and 360x640 with touch;
+  reduced motion and theme tokens; visual snapshots; WebKit download and reclaim; the CSP,
+  `eval`/`Function`, allowed origins, referrer and secrets of the production build.
+- `w1-…`, `w2-…`: WalletConnect pairing and a full session against the fake relay.
+
+### Visual snapshots
+
+`tests/q5-visual.spec.ts` runs in its own project, `visual`, on Chromium only, with the world
+and the page clock frozen at a fixed instant (`test.use({ frozenClock })`), the world seed not
+varying with `--repeat-each`, animations disabled, reduced motion and fonts loaded. Baselines
+live in `apps/e2e/visual-baselines/<state>-<width>-<theme>-visual-<platform>.png` and are
+committed. Screenshots differ between operating systems, so the `visual` project only exists
+when baselines for the current platform are present (or `E2E_VISUAL=1` is set): on a machine or
+CI runner without them it is left out instead of comparing against another platform's images.
+Today only macOS (`darwin`) baselines exist, so CI on Linux skips it.
+
+```sh
+pnpm test:e2e:visual:update   # rebuild, then write this platform's baselines (review the diff!)
+```
+
+To produce Linux baselines, run the manual `e2e-visual-baselines` workflow (Actions tab), download
+its `visual-baselines-linux` artifact into `apps/e2e/visual-baselines/` and commit the
+`*-linux.png` files; from then on CI compares against them.
+
+### Live canary (real services, read-only, not part of `pnpm test:e2e`)
+
+```sh
+pnpm test:e2e:canary          # CANARY_ONECLICK_JWT=… optional; never printed
+```
+
+`playwright.canary.config.ts` runs `apps/e2e/canary` against the real Hiro, mempool.space,
+Emily, the Reown Solana RPC and 1Click, with the production build and the real Worker
+`handle` in-process (real `fetch`). It checks that signer verification, Emily limits,
+mempool.space tip and fees and the Solana RPC parse, that the token list loads through the
+Worker, and that dry quotes for USDC on Base, ETH, SOL and USDT on Tron pass the app's own
+verification (a Tron refusal on the provider's minimum is recorded, not failed). The fake wallets
+only hand out placeholder addresses. Safety rails in `src/canary/canary-fixtures.ts`: a click
+on Continue, Send, Reclaim or a resend button is swallowed and fails the test; a non-dry
+quote or any other `POST` to the backend is aborted before it reaches the Worker; any
+`POST` to Emily, `POST /tx`, or Solana RPC method outside a read-only list is aborted; wallet
+calls other than address requests are refused; every such attempt fails the test. The canary
+proves its own rails at the end of a run by pressing Continue and posting a non-dry quote.
+`.github/workflows/canary.yml` runs it daily and on manual dispatch, never on pull requests.
+
+### Real-wallet smoke test (manual, unverified, never in CI)
+
+```sh
+SMOKE_METAMASK_EXTENSION=/path/to/unpacked/metamask \
+SMOKE_LEATHER_EXTENSION=/path/to/unpacked/leather \
+pnpm test:e2e:smoke           # optional SMOKE_PROFILE_DIR keeps the wallets between runs
+```
+
+`playwright.smoke.config.ts` refuses to load when `CI` is set or the extension directories are
+missing. It opens a headed persistent Chromium with both extensions against the production
+build and real services, checks that the wallets are discovered, waits for you to approve the
+connections in the extensions, gets a dry quote, then asks you to press Continue and the send
+button yourself and to reject the request in MetaMask; it passes when the app shows the
+rejection and no send record is left. It never clicks Continue or a send button, never types
+into or approves anything in an extension, and blocks Emily registrations, `POST /tx` and
+Solana sends. It has not been run by its author (no extensions, no human at hand).
+
+Where the app does something that looks wrong, the test asserts the correct behaviour and is
+marked `test.fail` with a title starting `APP ISSUE:`; it starts failing the suite (as an
+unexpected pass) once the app is fixed, and should then become a normal test.
+
+### Not covered
+
+workerd and Cloudflare KV semantics beyond TTL expiry, real wallets and their UIs (only the
+manual smoke test), the real WalletConnect relay and wallets (a fake relay and a Node wallet
+stand in; Solana over WalletConnect is not driven), real 1Click, Emily and signer behaviour
+beyond what the read-only canary sees (no live quote, no payout), Bitcoin scripts other than
+p2wpkh, taproot key paths and the two sBTC deposit leaves, absolute locktimes, RBF,
+cross-process `localStorage` timing beyond what Chromium does locally, Firefox, visual
+baselines for Linux, and screen-reader output (axe and role checks only).
 
 ## Mainnet proof (moves real funds, small amounts)
 
