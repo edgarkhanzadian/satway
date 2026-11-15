@@ -14,7 +14,10 @@ const toActions = cx(actions(), css({ justifyContent: { base: 'flex-start', md: 
 export function StacksWalletPanel(props: {
   account: WalletAccount | null;
   onChange(a: WalletAccount | null): void;
+  direction?: 'deposit' | 'withdraw';
 }) {
+  const withdraw = props.direction === 'withdraw';
+  const sideActions = withdraw ? actions() : toActions;
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [storageWorks] = useState(localStorageWorks);
@@ -34,10 +37,11 @@ export function StacksWalletPanel(props: {
   const notConnected = storageWorks ? (
     <>
       <p className={notice()}>
-        Required. It supplies the Stacks address that receives your sBTC and the Bitcoin key that
-        lets you take your BTC back if a deposit is never minted.
+        {withdraw
+          ? 'Required. It holds the sBTC you withdraw and signs the withdrawal request.'
+          : 'Required. It supplies the Stacks address that receives your sBTC and the Bitcoin key that lets you take your BTC back if a deposit is never minted.'}
       </p>
-      <div className={toActions}>
+      <div className={sideActions}>
         <button
           className={button({ variant: 'primary' })}
           disabled={busy}
@@ -63,9 +67,9 @@ export function StacksWalletPanel(props: {
   );
 
   return (
-    <section className={end({ side: 'to' })} aria-labelledby="stacks-title">
+    <section className={end({ side: withdraw ? 'from' : 'to' })} aria-labelledby="stacks-title">
       <h2 id="stacks-title" className={endTitle}>
-        To
+        {withdraw ? 'From' : 'To'}
       </h2>
       <p className={endLede}>Your Stacks wallet, Leather or Xverse</p>
 
@@ -73,18 +77,18 @@ export function StacksWalletPanel(props: {
         <>
           <p className={connected}>Connected</p>
           <dl className={details({ layout: 'stacked' })}>
-            <dt>sBTC goes to</dt>
+            <dt>{withdraw ? 'sBTC comes from' : 'sBTC goes to'}</dt>
             <dd>
               <code title={props.account.stacksAddress}>{short(props.account.stacksAddress)}</code>
             </dd>
-            <dt>Reclaim key from</dt>
+            <dt>{withdraw ? 'Bitcoin address' : 'Reclaim key from'}</dt>
             <dd>
               <code title={props.account.reclaimKeyAddress}>
                 {short(props.account.reclaimKeyAddress)}
               </code>
             </dd>
           </dl>
-          <div className={toActions}>
+          <div className={sideActions}>
             <button
               className={button()}
               onClick={() => {

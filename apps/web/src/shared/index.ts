@@ -7,3 +7,6 @@ export * from './receipt.js';
 export * from './send-records.js';
 export * from './storage-migration.js';
 export * from './wallet-account.js';
+export * from './withdrawal-backend.js';
+export * from './withdrawal-progress.js';
+export * from './withdrawal-receipt.js';

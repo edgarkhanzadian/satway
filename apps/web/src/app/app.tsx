@@ -8,14 +8,28 @@ import type { SourceWallet } from '@satway/chains';
 import { SourceWalletPanel } from '../features/chain-wallets/index.js';
 import { Deposit } from '../features/deposit/index.js';
 import { Recover } from '../features/recover/index.js';
-import { StacksWalletPanel, signReclaimWithWallet } from '../features/stacks-wallet/index.js';
+import {
+  StacksWalletPanel,
+  requestWithdrawalWithWallet,
+  signReclaimWithWallet,
+} from '../features/stacks-wallet/index.js';
+import { FollowWithdrawal, Withdraw } from '../features/withdraw/index.js';
 import {
   type ActiveDeposit,
   type Receipt,
   type WalletAccount,
+  type WithdrawalReceiptFile,
   createBackend,
+  createWithdrawalBackend,
 } from '../shared/index.js';
-import { RouteMap, type RouteUpdate, routeState } from '../ui/index.js';
+import {
+  RouteMap,
+  type RouteUpdate,
+  WithdrawalRouteMap,
+  type WithdrawalRouteUpdate,
+  routeState,
+  withdrawalRouteState,
+} from '../ui/index.js';
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8787';
 
@@ -23,7 +37,11 @@ export function App() {
   const backend = useMemo(() => createBackend(API_URL), []);
   const [account, setAccount] = useState<WalletAccount | null>(null);
   const [source, setSource] = useState<SourceWallet | null>(null);
-  const [tab, setTab] = useState<'deposit' | 'recover'>('deposit');
+  const [tab, setTab] = useState<'deposit' | 'withdraw' | 'recover'>('deposit');
+  const quotes = useMemo(() => createWithdrawalBackend(API_URL), []);
+  const [withdrawRoute, setWithdrawRoute] = useState<WithdrawalRouteUpdate | null>(null);
+  const [withdrawResume, setWithdrawResume] = useState<WithdrawalReceiptFile | null>(null);
+  const withdraw = tab === 'withdraw';
   const [resume, setResume] = useState<Receipt | null>(null);
   const [active, setActive] = useState<ActiveDeposit | null>(null);
   const [route, setRoute] = useState<RouteUpdate | null>(null);
@@ -61,6 +79,13 @@ export function App() {
               onClick={() => setTab('deposit')}
             >
               Deposit
+            </button>
+            <button
+              className={button({ variant: 'tab' })}
+              aria-pressed={tab === 'withdraw'}
+              onClick={() => setTab('withdraw')}
+            >
+              Withdraw
             </button>
             <button
               className={button({ variant: 'tab' })}
@@ -106,13 +131,33 @@ export function App() {
               rowGap={{ base: 'space.10', md: 'space.12' }}
               columnGap={{ base: 'space.10', md: 'space.13' }}
             >
-              <SourceWalletPanel wallet={source} onChange={setSource} />
-              <RouteMap
-                state={state}
-                tracking={Boolean(route?.deposit)}
-                origin={route?.origin ?? null}
+              <SourceWalletPanel
+                wallet={source}
+                onChange={setSource}
+                direction={withdraw ? 'withdraw' : 'deposit'}
               />
-              <StacksWalletPanel account={account} onChange={setAccount} />
+              {withdraw ? (
+                <WithdrawalRouteMap
+                  state={withdrawalRouteState({
+                    stacksConnected: account !== null,
+                    destinationConnected: source !== null,
+                    milestones: withdrawRoute?.milestones ?? null,
+                  })}
+                  tracking={Boolean(withdrawRoute?.milestones)}
+                  destination={withdrawRoute?.destination ?? null}
+                />
+              ) : (
+                <RouteMap
+                  state={state}
+                  tracking={Boolean(route?.deposit)}
+                  origin={route?.origin ?? null}
+                />
+              )}
+              <StacksWalletPanel
+                account={account}
+                onChange={setAccount}
+                direction={withdraw ? 'withdraw' : 'deposit'}
+              />
             </styled.div>
           </styled.div>
 
@@ -171,6 +216,32 @@ export function App() {
               onRoute={setRoute}
               signReclaim={signReclaimWithWallet}
             />
+          )}
+
+          {tab === 'withdraw' && (
+            <Withdraw
+              key={withdrawResume?.depositAddress ?? 'new'}
+              backend={backend}
+              quotes={quotes}
+              account={account}
+              destinationWallet={source}
+              resume={withdrawResume}
+              requestWithdrawal={requestWithdrawalWithWallet}
+              onRoute={setWithdrawRoute}
+              onClosed={() => setWithdrawResume(null)}
+            />
+          )}
+
+          {tab === 'recover' && (
+            <styled.div marginTop="space.10">
+              <FollowWithdrawal
+                backend={backend}
+                onTrack={receipt => {
+                  setWithdrawResume(receipt);
+                  setTab('withdraw');
+                }}
+              />
+            </styled.div>
           )}
         </styled.main>
 

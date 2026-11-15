@@ -8,6 +8,7 @@ import {
 } from '@satway/core';
 
 import type { BackgroundRegistration } from './backend.js';
+import { looksLikeWithdrawalReceipt } from './withdrawal-receipt.js';
 
 export interface Receipt {
   version: 1;
@@ -91,6 +92,9 @@ function parseReceipt(value: unknown): Receipt {
 
 export function verifyReceipt(value: unknown): Receipt {
   if (typeof value !== 'object' || value === null) throw new Error('Not a receipt file');
+  if (looksLikeWithdrawalReceipt(value)) {
+    throw new Error('This is a withdrawal receipt. Load it under “Follow a withdrawal” below.');
+  }
   const r = parseReceipt(value);
   const rebuilt = buildDepositAddress({
     stacksAddress: r.stacksAddress,

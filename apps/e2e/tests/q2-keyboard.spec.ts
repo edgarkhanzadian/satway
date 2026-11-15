@@ -66,6 +66,7 @@ test.describe('Q2. keyboard only', () => {
     const stops = await tabWalk(app.page);
     expect(stops.map(s => s.name)).toEqual([
       'Deposit',
+      'Withdraw',
       'Recover',
       `${EVM_WALLET_NAME}For Ethereum, Base, Arbitrum and other EVM chains`,
       'Test Solana WalletFor Solana',

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { css } from 'satway-styles/css';
+import { css, cx } from 'satway-styles/css';
 import { actions, button, details, notice } from 'satway-styles/recipes';
 
 import { type EvmWalletOption, type SourceWallet, connectEvm } from '@satway/chains';
@@ -24,6 +24,11 @@ import {
 import { WalletConnectOption } from './walletconnect-panel.js';
 import { endWalletSession, sessionKey } from './walletconnect.js';
 
+const toSideActions = cx(
+  actions(),
+  css({ justifyContent: { base: 'flex-start', md: 'flex-end' } })
+);
+
 const walletList = css({
   display: 'grid',
   gap: 'space.04',
@@ -44,10 +49,19 @@ function canSend(wallet: SourceWallet): boolean {
   return wallet.kind === 'evm' || wallet.sender !== undefined;
 }
 
+function connectedNote(wallet: SourceWallet, withdraw: boolean): string {
+  if (withdraw) return 'Used to fill in the address that receives your withdrawal.';
+  return canSend(wallet)
+    ? 'Used as your refund address, and to send the funds when you are ready.'
+    : 'Used as your refund address. You send the funds from this wallet yourself.';
+}
+
 export function SourceWalletPanel(props: {
   wallet: SourceWallet | null;
   onChange(w: SourceWallet | null): void;
+  direction?: 'deposit' | 'withdraw';
 }) {
+  const withdraw = props.direction === 'withdraw';
   const [evmWallets, setEvmWallets] = useState<EvmWalletOption[]>([]);
   const [solanaWallets, setSolanaWallets] = useState<SolanaWalletOption[]>([]);
   const [hasSolana, setHasSolana] = useState(false);
@@ -110,11 +124,13 @@ export function SourceWalletPanel(props: {
   }
 
   return (
-    <section className={end({ side: 'from' })} aria-labelledby="source-title">
+    <section className={end({ side: withdraw ? 'to' : 'from' })} aria-labelledby="source-title">
       <h2 id="source-title" className={endTitle}>
-        From
+        {withdraw ? 'To' : 'From'}
       </h2>
-      <p className={endLede}>Your wallet on another chain</p>
+      <p className={endLede}>
+        {withdraw ? 'Your wallet on the chain you receive on' : 'Your wallet on another chain'}
+      </p>
 
       {props.wallet ? (
         <>
@@ -135,12 +151,8 @@ export function SourceWalletPanel(props: {
               <code title={props.wallet.address}>{short(props.wallet.address)}</code>
             </p>
           )}
-          <p className={notice()}>
-            {canSend(props.wallet)
-              ? 'Used as your refund address, and to send the funds when you are ready.'
-              : 'Used as your refund address. You send the funds from this wallet yourself.'}
-          </p>
-          <div className={actions()}>
+          <p className={notice()}>{connectedNote(props.wallet, withdraw)}</p>
+          <div className={withdraw ? toSideActions : actions()}>
             <button className={button()} disabled={busy} onClick={() => void disconnect()}>
               Disconnect
             </button>
@@ -149,8 +161,9 @@ export function SourceWalletPanel(props: {
       ) : (
         <>
           <p className={notice()}>
-            Optional. Connect the wallet holding the funds you want to move, on any chain NEAR
-            Intents supports.
+            {withdraw
+              ? 'Optional. Connect the EVM or Solana wallet that should receive the funds, to fill in its address.'
+              : 'Optional. Connect the wallet holding the funds you want to move, on any chain NEAR Intents supports.'}
           </p>
           <div className={walletList}>
             {evmWallets.map(option => (
@@ -182,7 +195,9 @@ export function SourceWalletPanel(props: {
                 onClick={() => void run(connectSolana)}
               >
                 <WalletName>Solana wallet</WalletName>
-                <WalletNote>Fills in the refund address only</WalletNote>
+                <WalletNote>
+                  {withdraw ? 'Fills in the address only' : 'Fills in the refund address only'}
+                </WalletNote>
               </button>
             )}
             <WalletConnectOption
@@ -201,8 +216,9 @@ export function SourceWalletPanel(props: {
             </p>
           )}
           <p className={notice()}>
-            No wallet, or a different chain? Skip this: you can type a refund address and send the
-            funds yourself.
+            {withdraw
+              ? 'No wallet here? Skip this: you can type the address yourself.'
+              : 'No wallet, or a different chain? Skip this: you can type a refund address and send the funds yourself.'}
           </p>
         </>
       )}
