@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   type BtcTx,
+  DepositCheckError,
   HttpError,
   TooManyOutputsError,
+  classifyRegistrationError,
   fetchAddressHistory,
   fetchDeposit,
   fetchDepositOutputs,
@@ -349,6 +351,45 @@ describe('verifyDepositTransaction', () => {
     ['empty', ''],
   ])('rejects transaction data that is %s', (_name, data) => {
     expect(() => verifyDepositTransaction(data, expected)).toThrow(/does not parse/);
+  });
+
+  it('throws a DepositCheckError so callers can tell a failed check from a network error', () => {
+    expect(() => verifyDepositTransaction(OTHER_TX.hex, expected)).toThrow(DepositCheckError);
+  });
+});
+
+describe('classifyRegistrationError', () => {
+  const EMILY = 'https://sbtc-emily.com';
+
+  it('treats a refusal from the signers’ API as a rejection', () => {
+    expect(
+      classifyRegistrationError(new HttpError(400, `${EMILY}/deposit`, 'bad hex'), EMILY)
+    ).toEqual({
+      kind: 'rejected',
+      status: 400,
+      message: `HTTP 400 from ${EMILY}/deposit: bad hex`,
+    });
+  });
+
+  it('treats a failed local transaction check as a rejection', () => {
+    expect(classifyRegistrationError(new DepositCheckError('has txid x'), EMILY)).toEqual({
+      kind: 'rejected',
+      status: null,
+      message: 'has txid x',
+    });
+  });
+
+  it.each([
+    ['a server error from the signers’ API', new HttpError(503, `${EMILY}/deposit`, 'down'), 503],
+    ['rate limiting', new HttpError(429, `${EMILY}/deposit`, 'slow down'), 429],
+    [
+      'a 4xx from the Bitcoin API',
+      new HttpError(404, 'https://mempool.space/api/tx/x/hex', ''),
+      404,
+    ],
+    ['a network error', new TypeError('Failed to fetch'), null],
+  ])('treats %s as transient', (_name, err, status) => {
+    expect(classifyRegistrationError(err, EMILY)).toMatchObject({ kind: 'transient', status });
   });
 });
 

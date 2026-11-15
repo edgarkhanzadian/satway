@@ -1,6 +1,6 @@
 import { base58 } from '@scure/base';
 
-import { type OneClickToken, parseWith, z } from '@portage/core';
+import { type OneClickToken, errorMessage, parseWith, z } from '@portage/core';
 
 export interface Eip1193Provider {
   request(args: { method: string; params?: unknown[] }): Promise<unknown>;
@@ -89,13 +89,7 @@ export function nextRefundField(field: RefundField, walletAddress: string | null
   return { value: field.value, autofilled: null };
 }
 
-type SessionStore = Pick<Storage, 'getItem' | 'setItem'>;
-export const SENT_TX_PREFIX = 'portage:sent-tx:';
 const TX_HASH = /^0x[0-9a-fA-F]{64}$/;
-
-function sessionStore(): SessionStore {
-  return globalThis.sessionStorage;
-}
 
 export function isSentTxFor(family: 'evm' | 'solana' | 'other', value: string): boolean {
   if (family === 'evm') return TX_HASH.test(value);
@@ -103,29 +97,45 @@ export function isSentTxFor(family: 'evm' | 'solana' | 'other', value: string): 
   return false;
 }
 
-export function loadSentTx(
-  depositAddress: string,
-  family: 'evm' | 'solana' | 'other',
-  store: () => SessionStore = sessionStore
-): string | null {
-  try {
-    const value = store().getItem(SENT_TX_PREFIX + depositAddress);
-    return value !== null && isSentTxFor(family, value) ? value : null;
-  } catch {
-    return null;
+export type SendPhase = 'not-sent' | 'rejected' | 'uncertain';
+
+export class SendError extends Error {
+  constructor(
+    message: string,
+    readonly phase: SendPhase,
+    readonly tx: string | null = null,
+    options?: ErrorOptions
+  ) {
+    super(message, options);
+    this.name = 'SendError';
   }
 }
 
-export function saveSentTx(
-  depositAddress: string,
-  hash: string,
-  store: () => SessionStore = sessionStore
-): void {
-  try {
-    store().setItem(SENT_TX_PREFIX + depositAddress, hash);
-  } catch {
-    return;
-  }
+const USER_REJECTED_CODES: ReadonlySet<unknown> = new Set([4001, 5000]);
+
+export function isUserRejection(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null || !('code' in err)) return false;
+  return USER_REJECTED_CODES.has(err.code);
+}
+
+export function walletFailure(err: unknown, fallback: string, tx: string | null = null): SendError {
+  if (err instanceof SendError) return err;
+  const message = errorMessage(err) || fallback;
+  if (isUserRejection(err)) return new SendError(message, 'rejected', null, { cause: err });
+  return new SendError(message, 'uncertain', tx, { cause: err });
+}
+
+export function signOnlyFailure(err: unknown): SendError {
+  if (err instanceof SendError) return err;
+  const message = errorMessage(err) || 'The wallet did not sign the transaction';
+  return new SendError(message, isUserRejection(err) ? 'rejected' : 'not-sent', null, {
+    cause: err,
+  });
+}
+
+export function notSent(err: unknown): SendError {
+  if (err instanceof SendError) return err;
+  return new SendError(errorMessage(err) || 'Nothing was sent', 'not-sent', null, { cause: err });
 }
 
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
@@ -187,10 +197,7 @@ async function walletResult<T>(
   return parseWith(schema, await provider.request({ method }), `the wallet (${method})`);
 }
 
-export async function sendFromEvm(
-  provider: Eip1193Provider,
-  transfer: EvmTransfer
-): Promise<string> {
+async function prepareEvmWallet(provider: Eip1193Provider, transfer: EvmTransfer): Promise<void> {
   const wanted = `0x${transfer.chainId.toString(16)}`;
   const current = await walletResult(provider, 'eth_chainId', chainIdSchema);
   if (BigInt(current) !== BigInt(wanted)) {
@@ -203,11 +210,51 @@ export async function sendFromEvm(
   if (!accounts.some(a => a.toLowerCase() === transfer.tx.from.toLowerCase())) {
     throw new Error('The connected wallet account changed. Reconnect and try again.');
   }
-  const hash = await provider.request({ method: 'eth_sendTransaction', params: [transfer.tx] });
-  if (typeof hash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(hash)) {
-    throw new Error('The wallet did not return a transaction hash');
+}
+
+export async function sendFromEvm(
+  provider: Eip1193Provider,
+  transfer: EvmTransfer
+): Promise<string> {
+  try {
+    await prepareEvmWallet(provider, transfer);
+  } catch (err) {
+    throw notSent(err);
+  }
+  let hash: unknown;
+  try {
+    hash = await provider.request({ method: 'eth_sendTransaction', params: [transfer.tx] });
+  } catch (err) {
+    throw walletFailure(err, 'The wallet did not confirm whether it sent the transaction');
+  }
+  if (typeof hash !== 'string' || !TX_HASH.test(hash)) {
+    throw new SendError('The wallet did not return a transaction hash', 'uncertain');
   }
   return hash;
+}
+
+export type EvmTransactionState = 'succeeded' | 'reverted' | 'pending' | 'unknown';
+
+const receiptSchema = z.looseObject({ status: z.string().optional() }).nullable();
+const transactionSchema = z.looseObject({ hash: z.string().optional() }).nullable();
+
+export async function evmTransactionState(
+  provider: Eip1193Provider,
+  hash: string
+): Promise<EvmTransactionState> {
+  const receipt = parseWith(
+    receiptSchema,
+    await provider.request({ method: 'eth_getTransactionReceipt', params: [hash] }),
+    'the wallet (eth_getTransactionReceipt)'
+  );
+  if (receipt?.status === '0x1') return 'succeeded';
+  if (receipt?.status === '0x0') return 'reverted';
+  const transaction = parseWith(
+    transactionSchema,
+    await provider.request({ method: 'eth_getTransactionByHash', params: [hash] }),
+    'the wallet (eth_getTransactionByHash)'
+  );
+  return transaction === null ? 'unknown' : 'pending';
 }
 
 interface Eip6963Detail {

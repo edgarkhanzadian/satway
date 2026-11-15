@@ -12,7 +12,14 @@ import {
   recipientTokenAccountReady,
   sameMessage,
 } from './solana-transfer.js';
-import { type SolanaAccount, isSolanaSignature } from './source-wallet.js';
+import {
+  SendError,
+  type SolanaAccount,
+  type SolanaSendResult,
+  isSolanaSignature,
+  notSent,
+  walletFailure,
+} from './source-wallet.js';
 
 export interface SolanaDepositInput {
   token: OneClickToken;
@@ -41,11 +48,26 @@ function signatureOf(transaction: Uint8Array): string {
   return base58.encode(signature);
 }
 
-export async function sendSolanaDeposit(
+export interface SignedSolanaSend {
+  signature: string;
+  transaction: Uint8Array;
+  lastValidBlockHeight: bigint;
+}
+
+export interface SolanaSendHooks {
+  onSigned?(signed: SignedSolanaSend): void;
+}
+
+interface PreparedSolanaTransfer {
+  transaction: Uint8Array;
+  lastValidBlockHeight: bigint;
+}
+
+async function prepareSolanaTransfer(
   input: SolanaDepositInput,
   account: SolanaAccount,
-  rpc: SolanaRpc = defaultRpc()
-): Promise<string> {
+  rpc: SolanaRpc
+): Promise<PreparedSolanaTransfer> {
   const latest = await rpc.latestBlockhash();
   const transfer = await buildSolanaTransfer(
     { ...input, sender: account.address },
@@ -57,25 +79,94 @@ export async function sendSolanaDeposit(
     throw new Error(
       `Solana says this transfer would fail, so it was not sent: ${simulationReason(simulation)}`
     );
+  return { transaction: transfer.transaction, lastValidBlockHeight: latest.lastValidBlockHeight };
+}
 
-  const result = await account.sender.send(transfer.transaction);
+function signedBy(transaction: Uint8Array, expected: Uint8Array): string {
+  if (!sameMessage(transaction, expected))
+    throw new Error('The wallet changed the transaction before signing it. Nothing was sent.');
+  return signatureOf(transaction);
+}
+
+export async function sendSolanaDeposit(
+  input: SolanaDepositInput,
+  account: SolanaAccount,
+  rpc: SolanaRpc = defaultRpc(),
+  hooks: SolanaSendHooks = {}
+): Promise<string> {
+  let prepared: PreparedSolanaTransfer;
+  try {
+    prepared = await prepareSolanaTransfer(input, account, rpc);
+  } catch (err) {
+    throw notSent(err);
+  }
+
+  let result: SolanaSendResult;
+  try {
+    result = await account.sender.send(prepared.transaction);
+  } catch (err) {
+    throw walletFailure(err, 'The wallet did not confirm whether it sent the transaction');
+  }
   if (result.kind === 'sent') {
     if (!isSolanaSignature(result.signature))
-      throw new Error('The wallet did not return a transaction signature');
+      throw new SendError('The wallet did not return a transaction signature', 'uncertain');
     return result.signature;
   }
-  if (!sameMessage(result.transaction, transfer.transaction))
-    throw new Error('The wallet changed the transaction before signing it. Nothing was sent.');
-  const signature = signatureOf(result.transaction);
+  let signature: string;
+  try {
+    signature = signedBy(result.transaction, prepared.transaction);
+  } catch (err) {
+    throw notSent(err);
+  }
+  hooks.onSigned?.({
+    signature,
+    transaction: result.transaction,
+    lastValidBlockHeight: prepared.lastValidBlockHeight,
+  });
   let accepted: string;
   try {
     accepted = await rpc.send(base64.encode(result.transaction));
   } catch (err) {
-    throw new Error(
-      `Solana did not accept the signed transaction: ${errorMessage(err) ?? 'unknown error'}`
+    throw new SendError(
+      `Solana did not confirm that it accepted the signed transaction: ${errorMessage(err) ?? 'unknown error'}`,
+      'uncertain',
+      signature,
+      { cause: err }
     );
   }
   return isSolanaSignature(accepted) ? accepted : signature;
+}
+
+export async function resendSignedTransaction(
+  signed: Pick<SignedSolanaSend, 'signature' | 'transaction'>,
+  rpc: SolanaRpc = defaultRpc()
+): Promise<string> {
+  if (signatureOf(signed.transaction) !== signed.signature)
+    throw new Error('The saved transaction does not match its signature');
+  await rpc.send(base64.encode(signed.transaction));
+  return signed.signature;
+}
+
+export type SolanaSendCheck =
+  | { status: 'landed' }
+  | { status: 'failed'; reason: string }
+  | { status: 'expired' }
+  | { status: 'pending' };
+
+export async function checkSolanaSend(
+  sent: { signature: string; lastValidBlockHeight: bigint | null },
+  rpc: SolanaRpc = defaultRpc()
+): Promise<SolanaSendCheck> {
+  const status = await rpc.signatureStatus(sent.signature);
+  if (status !== null)
+    return status.err === null ? { status: 'landed' } : { status: 'failed', reason: status.err };
+  if (sent.lastValidBlockHeight === null) return { status: 'pending' };
+  const height = await rpc.blockHeight();
+  if (height <= sent.lastValidBlockHeight) return { status: 'pending' };
+  const again = await rpc.signatureStatus(sent.signature);
+  if (again !== null)
+    return again.err === null ? { status: 'landed' } : { status: 'failed', reason: again.err };
+  return { status: 'expired' };
 }
 
 export type SolanaPayOffer =

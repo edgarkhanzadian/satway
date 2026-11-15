@@ -11,6 +11,7 @@ import {
   type OutpointSnapshot,
   type PayoutBasis,
   type Progress,
+  type RegistrationFailureKind,
   type WatchedDepositContext,
   applyRegistrations,
   assertQuoteMatchesRequest,
@@ -179,7 +180,14 @@ export interface Snapshot {
   tipHeight: number | null;
   truncated: boolean;
   registrationError: string | null;
-  registrationErrors: { outpoint: string; message: string }[];
+  registrationErrors: RegistrationErrorNote[];
+}
+
+export interface RegistrationErrorNote {
+  outpoint: string;
+  message: string;
+  kind: RegistrationFailureKind;
+  status: number | null;
 }
 
 export function depositContextOf(receipt: Receipt): WatchedDepositContext {
@@ -220,7 +228,16 @@ export async function checkProgress(
   const payout = selection.payout;
   const candidateKeys = new Set(selection.candidates.map(outpointOf));
   const registrationErrors = results.flatMap(r =>
-    r.error === null ? [] : [{ outpoint: r.outpoint, message: r.error }]
+    r.failure === null
+      ? []
+      : [
+          {
+            outpoint: r.outpoint,
+            message: r.failure.message,
+            kind: r.failure.kind,
+            status: r.failure.status,
+          },
+        ]
   );
   return {
     progress: o.progress,

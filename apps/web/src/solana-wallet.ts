@@ -1,10 +1,13 @@
 import { base58 } from '@scure/base';
 
 import {
+  SendError,
   type SolanaSendResult,
   type SolanaSender,
   type SourceWallet,
   isSolanaAddress,
+  signOnlyFailure,
+  walletFailure,
 } from './source-wallet.js';
 
 export const STANDARD_MAINNET = 'solana:mainnet';
@@ -146,31 +149,43 @@ export function standardSolanaSender(wallet: object, address: string): SolanaSen
     async send(transaction): Promise<SolanaSendResult> {
       const account = accountFor(field(wallet, 'accounts'), address);
       if (!account)
-        throw new Error('The connected wallet account changed. Reconnect and try again.');
+        throw new SendError(
+          'The connected wallet account changed. Reconnect and try again.',
+          'not-sent'
+        );
       const f = features(wallet);
       const signAndSend = method(field(f, SIGN_AND_SEND), 'signAndSendTransaction');
       if (signAndSend) {
-        const out = firstOutput(
-          await signAndSend({
+        let reply: unknown;
+        try {
+          reply = await signAndSend({
             account,
             transaction,
             chain: STANDARD_MAINNET,
             options: { preflightCommitment: 'confirmed' },
-          })
-        );
-        const signature = bytes(field(out, 'signature'));
+          });
+        } catch (err) {
+          throw walletFailure(err, 'The wallet did not confirm whether it sent the transaction');
+        }
+        const signature = bytes(field(firstOutput(reply), 'signature'));
         if (!signature || signature.length !== 64)
-          throw new Error('The wallet did not return a transaction signature');
+          throw new SendError('The wallet did not return a transaction signature', 'uncertain');
         return { kind: 'sent', signature: base58.encode(signature) };
       }
       const sign = method(field(f, SIGN), 'signTransaction');
       if (sign) {
-        const out = firstOutput(await sign({ account, transaction, chain: STANDARD_MAINNET }));
-        const signed = bytes(field(out, 'signedTransaction'));
-        if (!signed) throw new Error('The wallet did not return a signed transaction');
+        let reply: unknown;
+        try {
+          reply = await sign({ account, transaction, chain: STANDARD_MAINNET });
+        } catch (err) {
+          throw signOnlyFailure(err);
+        }
+        const signed = bytes(field(firstOutput(reply), 'signedTransaction'));
+        if (!signed)
+          throw new SendError('The wallet did not return a signed transaction', 'not-sent');
         return { kind: 'signed', transaction: signed };
       }
-      throw new Error('This wallet cannot send Solana transactions');
+      throw new SendError('This wallet cannot send Solana transactions', 'not-sent');
     },
   };
 }

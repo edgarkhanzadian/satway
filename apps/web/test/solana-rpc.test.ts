@@ -104,4 +104,36 @@ describe('createSolanaRpc', () => {
       params: ['AAAA', { encoding: 'base64', skipPreflight: false }],
     });
   });
+
+  it('looks up a signature status across history, and null when unknown', async () => {
+    const found = fakeFetch({
+      result: { value: [{ err: null, confirmationStatus: 'finalized', slot: 9 }] },
+    });
+    expect(await createSolanaRpc(URL, found.fetchFn).signatureStatus('sig')).toEqual({
+      err: null,
+      confirmation: 'finalized',
+    });
+    expect(found.bodies[0]).toMatchObject({
+      method: 'getSignatureStatuses',
+      params: [['sig'], { searchTransactionHistory: true }],
+    });
+    const failed = fakeFetch({ result: { value: [{ err: { InstructionError: [0, 'x'] } }] } });
+    expect((await createSolanaRpc(URL, failed.fetchFn).signatureStatus('sig'))?.err).toBe(
+      '{"InstructionError":[0,"x"]}'
+    );
+    const unknown = fakeFetch({ result: { value: [null] } });
+    expect(await createSolanaRpc(URL, unknown.fetchFn).signatureStatus('sig')).toBeNull();
+    await expect(
+      createSolanaRpc(URL, fakeFetch({ result: { value: [] } }).fetchFn).signatureStatus('sig')
+    ).rejects.toThrow(/no signature status/);
+  });
+
+  it('reads the confirmed block height', async () => {
+    const { bodies, fetchFn } = fakeFetch({ result: 1234 });
+    expect(await createSolanaRpc(URL, fetchFn).blockHeight()).toBe(1234n);
+    expect(bodies[0]).toMatchObject({
+      method: 'getBlockHeight',
+      params: [{ commitment: 'confirmed' }],
+    });
+  });
 });

@@ -6,6 +6,7 @@ import type { OneClickToken } from '@portage/core';
 import { SOLANA_MAINNET_CAIP2 } from '../src/config.js';
 import {
   EVM_CHAIN_IDS,
+  SendError,
   type SourceWallet,
   buildEvmTransfer,
   sendFromEvm,
@@ -334,6 +335,50 @@ describe('walletConnectSolanaSender', () => {
     await expect(empty.sender.send(TX)).rejects.toThrow(/did not return a transaction signature/);
   });
 
+  async function phaseOf(work: Promise<unknown>): Promise<string> {
+    try {
+      await work;
+      return 'resolved';
+    } catch (err) {
+      return err instanceof SendError ? err.phase : 'untyped';
+    }
+  }
+
+  function failing(methods: string[], error: Error) {
+    return walletConnectSolanaSender(
+      {
+        namespaces: () =>
+          solanaSession([`${SOLANA_MAINNET_CAIP2}:${SOL_WALLET}`], undefined, methods).namespaces,
+        request: () => Promise.reject(error),
+      },
+      SOL_WALLET
+    );
+  }
+
+  it('treats a lost or malformed reply to solana_signAndSendTransaction as uncertain', async () => {
+    const sendMethods = ['solana_signAndSendTransaction'];
+    expect(
+      await phaseOf(failing(sendMethods, new Error('Request expired. Please try again.')).send(TX))
+    ).toBe('uncertain');
+    expect(
+      await phaseOf(fakeSolana({ methods: sendMethods, reply: { signature: 42 } }).sender.send(TX))
+    ).toBe('uncertain');
+    expect(await phaseOf(fakeSolana({ methods: sendMethods, reply: null }).sender.send(TX))).toBe(
+      'uncertain'
+    );
+    const rejection = Object.assign(new Error('User rejected.'), { code: 5000 });
+    expect(await phaseOf(failing(sendMethods, rejection).send(TX))).toBe('rejected');
+  });
+
+  it('knows nothing was sent when the wallet only signs, or refuses before asking', async () => {
+    expect(
+      await phaseOf(failing(['solana_signTransaction'], new Error('Request expired')).send(TX))
+    ).toBe('not-sent');
+    expect(await phaseOf(fakeSolana({ methods: [], accounts: [] }).sender.send(TX))).toBe(
+      'not-sent'
+    );
+  });
+
   it('only fills in a signature for a single-signer transaction', () => {
     expect(() => withSignature(Uint8Array.from([2, 0]), SIG)).toThrow(/single-signer/);
   });
@@ -389,6 +434,41 @@ describe('walletConnectProvider with sendFromEvm', () => {
     const transport = fakeTransport({ approved: [8453], chain: 8453, accounts: [SWAP] });
     await expect(sendFromEvm(walletConnectProvider(transport), transfer)).rejects.toThrow(
       /account changed/
+    );
+  });
+
+  it('treats a lost relay reply or an unexpected reply to eth_sendTransaction as uncertain', async () => {
+    function replying(reply: () => Promise<unknown>) {
+      const transport = fakeTransport({ approved: [8453], chain: 8453 });
+      return walletConnectProvider({
+        approvedChainIds: transport.approvedChainIds,
+        request(args) {
+          if (args.method === 'eth_sendTransaction') return reply();
+          return transport.request(args);
+        },
+      });
+    }
+    async function phase(provider: ReturnType<typeof walletConnectProvider>) {
+      try {
+        await sendFromEvm(provider, transfer);
+        return 'resolved';
+      } catch (err) {
+        return err instanceof SendError ? err.phase : 'untyped';
+      }
+    }
+    expect(await phase(replying(() => Promise.reject(new Error('Request expired'))))).toBe(
+      'uncertain'
+    );
+    expect(await phase(replying(() => Promise.resolve({ result: HASH })))).toBe('uncertain');
+    expect(
+      await phase(
+        replying(() =>
+          Promise.reject(Object.assign(new Error('User rejected the request.'), { code: 4001 }))
+        )
+      )
+    ).toBe('rejected');
+    expect(await phase(walletConnectProvider(fakeTransport({ approved: [1], chain: 1 })))).toBe(
+      'not-sent'
     );
   });
 

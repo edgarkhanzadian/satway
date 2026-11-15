@@ -1,9 +1,9 @@
 import { WALLETCONNECT_STORAGE_PREFIX } from './config.js';
 import { RECEIPTS_KEY } from './receipt.js';
-import { SENT_TX_PREFIX } from './source-wallet.js';
 
 export const OLD_RECEIPTS_KEY = 'stxonector.receipts.v1';
 export const OLD_SENT_TX_PREFIX = 'stxonector:sent-tx:';
+export const LEGACY_SENT_TX_PREFIX = 'portage:sent-tx:';
 export const OLD_WALLETCONNECT_STORAGE_PREFIX = 'stxonector-evm';
 
 export const WALLETCONNECT_IDB_NAME = 'WALLET_CONNECT_V2_INDEXED_DB';
@@ -21,9 +21,8 @@ export interface AsyncKeyStore {
 
 export type Rename = (key: string) => string | null;
 
-export function renameSentTx(key: string): string | null {
-  if (!key.startsWith(OLD_SENT_TX_PREFIX)) return null;
-  return SENT_TX_PREFIX + key.slice(OLD_SENT_TX_PREFIX.length);
+export function isLegacySentTxKey(key: string): boolean {
+  return key.startsWith(OLD_SENT_TX_PREFIX) || key.startsWith(LEGACY_SENT_TX_PREFIX);
 }
 
 export function renameWalletConnect(key: string): string | null {
@@ -65,6 +64,23 @@ export function migrateKeys(store: KeyStore, rename: Rename): void {
   for (const key of keys) {
     const target = rename(key);
     if (target !== null) moveKey(store, key, target);
+  }
+}
+
+export function dropKeys(store: KeyStore, drop: (key: string) => boolean): void {
+  let keys: string[] = [];
+  try {
+    keys = listKeys(store);
+  } catch {
+    return;
+  }
+  for (const key of keys) {
+    if (!drop(key)) continue;
+    try {
+      store.removeItem(key);
+    } catch {
+      return;
+    }
   }
 }
 
@@ -178,7 +194,7 @@ export function migrateBrowserStorage(): void {
     migrateKeys(local, renameWalletConnect);
   }
   const session = browserStore('sessionStorage');
-  if (session) migrateKeys(session, renameSentTx);
+  if (session) dropKeys(session, isLegacySentTxKey);
 }
 
 let walletConnectMigration: Promise<void> | null = null;

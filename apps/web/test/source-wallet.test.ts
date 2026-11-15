@@ -4,21 +4,23 @@ import type { OneClickToken } from '@portage/core';
 
 import {
   type Eip1193Provider,
+  SendError,
   type SourceWallet,
   buildEvmTransfer,
   chainFamily,
   connectEvm,
   encodeErc20Transfer,
+  evmTransactionState,
   isSentTxFor,
   isSolanaAddress,
   isSolanaSignature,
-  loadSentTx,
+  isUserRejection,
   nextRefundField,
-  saveSentTx,
   sendFromEvm,
   solanaSenderOf,
   walletAddressFor,
   walletCovers,
+  walletFailure,
 } from '../src/source-wallet.js';
 
 const SIG =
@@ -163,41 +165,16 @@ describe('nextRefundField', () => {
   });
 });
 
-describe('sent transaction memory', () => {
+describe('isSentTxFor', () => {
   const HASH = '0x' + 'cd'.repeat(32);
 
-  function memory() {
-    const map = new Map<string, string>();
-    return () => ({
-      getItem: (k: string) => map.get(k) ?? null,
-      setItem: (k: string, v: string) => void map.set(k, v),
-    });
-  }
-
-  it('remembers a sent hash per deposit address', () => {
-    const store = memory();
-    expect(loadSentTx('bc1pa', 'evm', store)).toBeNull();
-    saveSentTx('bc1pa', HASH, store);
-    expect(loadSentTx('bc1pa', 'evm', store)).toBe(HASH);
-    expect(loadSentTx('bc1pb', 'evm', store)).toBeNull();
-  });
-
-  it('ignores a stored value that is not a transaction hash', () => {
-    const store = memory();
-    saveSentTx('bc1pa', 'nonsense', store);
-    expect(loadSentTx('bc1pa', 'evm', store)).toBeNull();
-    expect(loadSentTx('bc1pa', 'solana', store)).toBeNull();
-  });
-
   it('accepts a Solana signature only for a Solana deposit, and a 0x hash only for EVM', () => {
-    const store = memory();
-    saveSentTx('bc1ps', SIG, store);
-    saveSentTx('bc1pe', HASH, store);
-    expect(loadSentTx('bc1ps', 'solana', store)).toBe(SIG);
-    expect(loadSentTx('bc1ps', 'evm', store)).toBeNull();
-    expect(loadSentTx('bc1pe', 'evm', store)).toBe(HASH);
-    expect(loadSentTx('bc1pe', 'solana', store)).toBeNull();
-    expect(loadSentTx('bc1ps', 'other', store)).toBeNull();
+    expect(isSentTxFor('solana', SIG)).toBe(true);
+    expect(isSentTxFor('evm', SIG)).toBe(false);
+    expect(isSentTxFor('evm', HASH)).toBe(true);
+    expect(isSentTxFor('solana', HASH)).toBe(false);
+    expect(isSentTxFor('other', SIG)).toBe(false);
+    expect(isSentTxFor('evm', 'nonsense')).toBe(false);
   });
 
   it('rejects base58 values that are not 64 bytes as Solana signatures', () => {
@@ -207,13 +184,22 @@ describe('sent transaction memory', () => {
     expect(isSentTxFor('solana', `${SIG.slice(0, -1)}0`)).toBe(false);
     expect(isSentTxFor('solana', '')).toBe(false);
   });
+});
 
-  it('survives storage that throws', () => {
-    function broken(): Storage {
-      throw new Error('SecurityError');
-    }
-    expect(loadSentTx('bc1pa', 'evm', broken)).toBeNull();
-    expect(() => saveSentTx('bc1pa', HASH, broken)).not.toThrow();
+describe('where a wallet send failed', () => {
+  it('recognises the user-rejection codes of EIP-1193 and WalletConnect only', () => {
+    expect(isUserRejection({ code: 4001, message: 'User rejected the request.' })).toBe(true);
+    expect(isUserRejection({ code: 5000, message: 'User rejected.' })).toBe(true);
+    expect(isUserRejection({ code: -32603, message: 'User rejected' })).toBe(false);
+    expect(isUserRejection(new Error('User rejected the request'))).toBe(false);
+    expect(isUserRejection(null)).toBe(false);
+  });
+
+  it('classifies an unknown wallet error as uncertain, and keeps a typed one', () => {
+    expect(walletFailure(new Error('socket hang up'), 'x').phase).toBe('uncertain');
+    expect(walletFailure({ code: 4001, message: 'no' }, 'x').phase).toBe('rejected');
+    const typed = new SendError('before', 'not-sent');
+    expect(walletFailure(typed, 'x')).toBe(typed);
   });
 });
 
@@ -276,6 +262,7 @@ describe('sendFromEvm', () => {
     switches?: boolean;
     accounts?: string[];
     hash?: unknown;
+    sendError?: Error;
   }) {
     const calls: { method: string; params?: unknown[] }[] = [];
     let chain = opts.chain;
@@ -300,6 +287,7 @@ describe('sendFromEvm', () => {
         case 'eth_accounts':
           return opts.accounts ?? [FROM.toLowerCase()];
         case 'eth_sendTransaction':
+          if (opts.sendError !== undefined) throw opts.sendError;
           return 'hash' in opts ? opts.hash : HASH;
         default:
           throw new Error(`unexpected ${args.method}`);
@@ -348,6 +336,68 @@ describe('sendFromEvm', () => {
   it('rejects a reply that is not a transaction hash', async () => {
     const w = wallet({ chain: '0x2105', hash: null });
     await expect(sendFromEvm(w.provider, transfer)).rejects.toThrow(/hash/);
+  });
+
+  async function phaseOf(work: Promise<unknown>): Promise<string> {
+    try {
+      await work;
+      return 'resolved';
+    } catch (err) {
+      return err instanceof SendError ? err.phase : 'untyped';
+    }
+  }
+
+  it('says where a send failed: before the wallet, rejected, or after dispatch', async () => {
+    expect(
+      await phaseOf(sendFromEvm(wallet({ chain: '0x1', switches: false }).provider, transfer))
+    ).toBe('not-sent');
+    expect(
+      await phaseOf(sendFromEvm(wallet({ chain: '0x2105', accounts: [SWAP] }).provider, transfer))
+    ).toBe('not-sent');
+    expect(
+      await phaseOf(
+        sendFromEvm(
+          wallet({
+            chain: '0x2105',
+            sendError: Object.assign(new Error('User rejected'), { code: 4001 }),
+          }).provider,
+          transfer
+        )
+      )
+    ).toBe('rejected');
+    expect(
+      await phaseOf(
+        sendFromEvm(
+          wallet({ chain: '0x2105', sendError: new Error('timed out') }).provider,
+          transfer
+        )
+      )
+    ).toBe('uncertain');
+    expect(
+      await phaseOf(sendFromEvm(wallet({ chain: '0x2105', hash: '0x12' }).provider, transfer))
+    ).toBe('uncertain');
+  });
+});
+
+describe('evmTransactionState', () => {
+  const HASH = '0x' + 'ef'.repeat(32);
+
+  function provider(receipt: unknown, transaction: unknown): Eip1193Provider {
+    return {
+      request(args) {
+        expect(args.params).toEqual([HASH]);
+        if (args.method === 'eth_getTransactionReceipt') return Promise.resolve(receipt);
+        if (args.method === 'eth_getTransactionByHash') return Promise.resolve(transaction);
+        return Promise.reject(new Error(`unexpected ${args.method}`));
+      },
+    };
+  }
+
+  it('reads the receipt status, then whether the transaction is known', async () => {
+    expect(await evmTransactionState(provider({ status: '0x1' }, null), HASH)).toBe('succeeded');
+    expect(await evmTransactionState(provider({ status: '0x0' }, null), HASH)).toBe('reverted');
+    expect(await evmTransactionState(provider(null, { hash: HASH }), HASH)).toBe('pending');
+    expect(await evmTransactionState(provider(null, null), HASH)).toBe('unknown');
   });
 });
 

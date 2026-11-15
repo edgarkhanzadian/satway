@@ -1,5 +1,6 @@
 import {
   type AddressOutput,
+  DepositCheckError,
   type DepositOutputsOptions,
   fetchDepositOutputs,
   fetchTipHeight,
@@ -8,7 +9,7 @@ import {
 import type { NetworkConfig } from './config.js';
 import { type EmilyDepositStatus, fetchDeposit, fetchLimits, notifyDeposit } from './emily.js';
 import { errorMessage } from './errors.js';
-import type { FetchLike } from './http.js';
+import { type FetchLike, HttpError } from './http.js';
 import type { OneClickStatusResponse, OneClickSwapStatus } from './oneclick.js';
 import {
   MAX_REGISTRATIONS_PER_CHECK,
@@ -50,11 +51,37 @@ export interface DepositObservation {
   requests: number;
 }
 
+export type RegistrationFailureKind = 'transient' | 'rejected';
+
+export interface RegistrationFailure {
+  kind: RegistrationFailureKind;
+  status: number | null;
+  message: string;
+}
+
 export interface RegistrationResult {
   outpoint: string;
   output: AddressOutput;
   status: EmilyDepositStatus | null;
   error: string | null;
+  failure: RegistrationFailure | null;
+}
+
+const RETRYABLE_CLIENT_STATUSES = new Set([408, 425, 429]);
+
+export function classifyRegistrationError(err: unknown, sbtcApiUrl: string): RegistrationFailure {
+  const message = errorMessage(err) ?? String(err);
+  if (err instanceof DepositCheckError) return { kind: 'rejected', status: null, message };
+  if (err instanceof HttpError) {
+    const fromSigners = err.url.startsWith(`${sbtcApiUrl}/`);
+    const refused =
+      fromSigners &&
+      err.status >= 400 &&
+      err.status < 500 &&
+      !RETRYABLE_CLIENT_STATUSES.has(err.status);
+    return { kind: refused ? 'rejected' : 'transient', status: err.status, message };
+  }
+  return { kind: 'transient', status: null, message };
 }
 
 function progressFor(
@@ -168,9 +195,10 @@ export async function registerOutputs(
         },
         fetchFn
       );
-      results.push({ outpoint, output, status: registered.status, error: null });
+      results.push({ outpoint, output, status: registered.status, error: null, failure: null });
     } catch (err) {
-      results.push({ outpoint, output, status: null, error: errorMessage(err) ?? String(err) });
+      const failure = classifyRegistrationError(err, config.sbtcApiUrl);
+      results.push({ outpoint, output, status: null, error: failure.message, failure });
     }
   }
   return results;

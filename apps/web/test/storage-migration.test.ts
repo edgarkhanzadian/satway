@@ -1,18 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RECEIPTS_KEY, loadReceipts } from '../src/receipt.js';
-import { loadSentTx } from '../src/source-wallet.js';
 import {
   type AsyncKeyStore,
   type KeyStore,
+  LEGACY_SENT_TX_PREFIX,
   OLD_RECEIPTS_KEY,
   OLD_SENT_TX_PREFIX,
   OLD_WALLETCONNECT_STORAGE_PREFIX,
+  dropKeys,
+  isLegacySentTxKey,
   migrateAsyncKeys,
   migrateBrowserStorage,
   migrateKeys,
   moveKey,
-  renameSentTx,
   renameWalletConnect,
 } from '../src/storage-migration.js';
 
@@ -62,7 +63,6 @@ const OTHER_HASH = '0x' + 'cd'.repeat(32);
 const OLD_LIST = JSON.stringify(['old']);
 const NEW_LIST = JSON.stringify(['new']);
 const OLD_SENT_ONE = `${OLD_SENT_TX_PREFIX}bc1qone`;
-const OLD_SENT_TWO = `${OLD_SENT_TX_PREFIX}bc1qtwo`;
 const NEW_SENT_ONE = 'portage:sent-tx:bc1qone';
 const NEW_SENT_TWO = 'portage:sent-tx:bc1qtwo';
 const OLD_WC_KEYCHAIN = `wc@2:core:0.3${OLD_WALLETCONNECT_STORAGE_PREFIX}//keychain`;
@@ -79,10 +79,12 @@ describe('storage names', () => {
     expect(OLD_WALLETCONNECT_STORAGE_PREFIX).toBe('stxonector-evm');
   });
 
-  it('renames sent-tx keys by prefix only', () => {
-    expect(renameSentTx(OLD_SENT_ONE)).toBe(NEW_SENT_ONE);
-    expect(renameSentTx(NEW_SENT_ONE)).toBeNull();
-    expect(renameSentTx(`other:${OLD_SENT_ONE}`)).toBeNull();
+  it('recognises both generations of address-keyed sent-tx records by prefix only', () => {
+    expect(LEGACY_SENT_TX_PREFIX).toBe('portage:sent-tx:');
+    expect(isLegacySentTxKey(OLD_SENT_ONE)).toBe(true);
+    expect(isLegacySentTxKey(NEW_SENT_ONE)).toBe(true);
+    expect(isLegacySentTxKey(`other:${OLD_SENT_ONE}`)).toBe(false);
+    expect(isLegacySentTxKey('portage:send-record:v1:x:')).toBe(false);
   });
 
   it('renames WalletConnect keys in both separator forms and nothing else', () => {
@@ -137,43 +139,37 @@ describe('moveKey', () => {
   });
 });
 
-describe('migrateKeys', () => {
-  it('migrates every sent-tx record and leaves other keys alone', () => {
+describe('dropKeys', () => {
+  it('drops every address-keyed sent-tx record and leaves other keys alone', () => {
     const store = memoryStore([
       [OLD_SENT_ONE, HASH],
-      [OLD_SENT_TWO, OTHER_HASH],
+      [NEW_SENT_TWO, OTHER_HASH],
       ['unrelated', 'x'],
     ]);
-    migrateKeys(store, renameSentTx);
-    expect(store.data).toEqual(
-      new Map([
-        ['unrelated', 'x'],
-        [NEW_SENT_ONE, HASH],
-        [NEW_SENT_TWO, OTHER_HASH],
-      ])
-    );
-    expect(loadSentTx('bc1qone', 'evm', () => store)).toBe(HASH);
+    dropKeys(store, isLegacySentTxKey);
+    expect(store.data).toEqual(new Map([['unrelated', 'x']]));
   });
 
-  it('does not overwrite a newer sent-tx record', () => {
-    const store = memoryStore([
-      [OLD_SENT_ONE, HASH],
-      [NEW_SENT_ONE, OTHER_HASH],
-    ]);
-    migrateKeys(store, renameSentTx);
-    expect(store.data.get(NEW_SENT_ONE)).toBe(OTHER_HASH);
+  it('does not crash when listing or removing keys throws', () => {
+    const listing = memoryStore([[OLD_SENT_ONE, HASH]]);
+    listing.key = () => {
+      throw new Error('SecurityError');
+    };
+    expect(() => dropKeys(listing, isLegacySentTxKey)).not.toThrow();
+    const removing = memoryStore([[OLD_SENT_ONE, HASH]]);
+    removing.removeItem = () => {
+      throw new Error('SecurityError');
+    };
+    expect(() => dropKeys(removing, isLegacySentTxKey)).not.toThrow();
   });
+});
 
+describe('migrateKeys', () => {
   it('is idempotent', () => {
-    const store = memoryStore([
-      [OLD_WC_KEYCHAIN, '{"a":1}'],
-      [OLD_SENT_ONE, HASH],
-    ]);
+    const store = memoryStore([[OLD_WC_KEYCHAIN, '{"a":1}']]);
     migrateKeys(store, renameWalletConnect);
-    migrateKeys(store, renameSentTx);
     const once = new Map(store.data);
     migrateKeys(store, renameWalletConnect);
-    migrateKeys(store, renameSentTx);
     expect(store.data).toEqual(once);
     expect(store.data.get(NEW_WC_KEYCHAIN)).toBe('{"a":1}');
   });
@@ -183,7 +179,7 @@ describe('migrateKeys', () => {
     store.key = () => {
       throw new Error('SecurityError');
     };
-    expect(() => migrateKeys(store, renameSentTx)).not.toThrow();
+    expect(() => migrateKeys(store, renameWalletConnect)).not.toThrow();
   });
 });
 
@@ -236,12 +232,16 @@ describe('migrateBrowserStorage', () => {
     vi.unstubAllGlobals();
   });
 
-  it('migrates receipts, WalletConnect fallback keys and sent-tx records', () => {
+  it('migrates receipts and WalletConnect fallback keys, and drops address-keyed sent-tx records', () => {
     const local = memoryStore([
       [OLD_RECEIPTS_KEY, '[]'],
       [OLD_WC_KEYCHAIN, '"k"'],
     ]);
-    const session = memoryStore([[OLD_SENT_ONE, HASH]]);
+    const session = memoryStore([
+      [OLD_SENT_ONE, HASH],
+      [NEW_SENT_TWO, OTHER_HASH],
+      ['other', 'kept'],
+    ]);
     vi.stubGlobal('localStorage', local);
     vi.stubGlobal('sessionStorage', session);
     migrateBrowserStorage();
@@ -251,7 +251,7 @@ describe('migrateBrowserStorage', () => {
         [NEW_WC_KEYCHAIN, '"k"'],
       ])
     );
-    expect(session.data).toEqual(new Map([[NEW_SENT_ONE, HASH]]));
+    expect(session.data).toEqual(new Map([['other', 'kept']]));
   });
 
   it('copies corrupt old receipts without crashing, and loading them still works', () => {

@@ -3,10 +3,22 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { OneClickToken } from '@portage/core';
 
-import type { RawAccount, SimulationResult, SolanaRpc } from '../src/solana-rpc.js';
-import { sendSolanaDeposit, simulationReason, solanaPayOffer } from '../src/solana-send.js';
+import type {
+  RawAccount,
+  SignatureStatus,
+  SimulationResult,
+  SolanaRpc,
+} from '../src/solana-rpc.js';
+import {
+  type SignedSolanaSend,
+  checkSolanaSend,
+  resendSignedTransaction,
+  sendSolanaDeposit,
+  simulationReason,
+  solanaPayOffer,
+} from '../src/solana-send.js';
 import { TOKEN_2022_PROGRAM, associatedTokenAccount } from '../src/solana-transfer.js';
-import type { SolanaSendResult } from '../src/source-wallet.js';
+import { SendError, type SolanaSendResult } from '../src/source-wallet.js';
 
 const SYSTEM = '11111111111111111111111111111111';
 const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
@@ -42,15 +54,24 @@ function fakeRpc(opts: {
   simulation?: SimulationResult;
   send?(): Promise<string>;
   rent?: bigint;
+  statuses?: (SignatureStatus | null)[];
+  height?: bigint;
 }) {
   const sent: string[] = [];
   const simulated: string[] = [];
+  const built: string[] = [];
+  const statuses = [...(opts.statuses ?? [])];
   const rpc: SolanaRpc = {
-    latestBlockhash: () =>
-      Promise.resolve({
+    latestBlockhash() {
+      built.push('latestBlockhash');
+      return Promise.resolve({
         blockhash: 'BL2sQysVf3SYJqtmRgfXG6oUWf7RUSN4sHXM582sjJsZ',
-        lastValidBlockHeight: 1n,
-      }),
+        lastValidBlockHeight: 1000n,
+      });
+    },
+    signatureStatus: () =>
+      Promise.resolve(statuses.length > 1 ? (statuses.shift() ?? null) : (statuses[0] ?? null)),
+    blockHeight: () => Promise.resolve(opts.height ?? 1n),
     accounts: addresses => Promise.resolve(addresses.map(a => opts.accounts?.[a] ?? null)),
     rentExemptMinimum: () => Promise.resolve(opts.rent ?? 890_880n),
     simulate(wire) {
@@ -62,7 +83,7 @@ function fakeRpc(opts: {
       return opts.send ? opts.send() : Promise.resolve(SIG);
     },
   };
-  return { rpc, sent, simulated };
+  return { rpc, sent, simulated, built };
 }
 
 const funded = {
@@ -157,7 +178,125 @@ describe('sendSolanaDeposit', () => {
       return { kind: 'signed', transaction: signed };
     });
     await expect(sendSolanaDeposit(input, wallet, rpc)).rejects.toThrow(
-      'Solana did not accept the signed transaction: Solana RPC error: Blockhash not found'
+      'Solana did not confirm that it accepted the signed transaction: Solana RPC error: Blockhash not found'
+    );
+  });
+
+  it('hands over the signature, signed bytes and expiry before the RPC send, and keeps the signature when it fails', async () => {
+    const order: string[] = [];
+    const { rpc } = fakeRpc({
+      accounts: funded,
+      send() {
+        order.push('rpc.send');
+        return Promise.reject(new Error('Could not reach the Solana RPC: network error'));
+      },
+    });
+    const wallet = account(tx => {
+      const signed = Uint8Array.from(tx);
+      signed.set(base58.decode(SIG), 1);
+      return { kind: 'signed', transaction: signed };
+    });
+    const handed: SignedSolanaSend[] = [];
+    const failure = await sendSolanaDeposit(input, wallet, rpc, {
+      onSigned(signed) {
+        order.push('onSigned');
+        handed.push(signed);
+      },
+    }).catch((err: unknown) => err);
+    expect(order).toEqual(['onSigned', 'rpc.send']);
+    expect(handed[0]?.signature).toBe(SIG);
+    expect(handed[0]?.lastValidBlockHeight).toBe(1000n);
+    expect(base58.encode(handed[0]?.transaction.subarray(1, 65) ?? new Uint8Array())).toBe(SIG);
+    expect(failure).toBeInstanceOf(SendError);
+    if (!(failure instanceof SendError)) return;
+    expect(failure.phase).toBe('uncertain');
+    expect(failure.tx).toBe(SIG);
+  });
+
+  it('says nothing was sent when it fails before the wallet is asked', async () => {
+    const { rpc } = fakeRpc({
+      accounts: funded,
+      simulation: { err: '"AccountNotFound"', logs: [], unitsConsumed: null },
+    });
+    const wallet = account(() => ({ kind: 'sent', signature: SIG }));
+    const failure = await sendSolanaDeposit(input, wallet, rpc).catch((err: unknown) => err);
+    expect(failure instanceof SendError && failure.phase).toBe('not-sent');
+  });
+
+  it('treats a lost reply from a sending wallet as uncertain and a rejection as rejected', async () => {
+    const { rpc } = fakeRpc({ accounts: funded });
+    const lost = {
+      address: SENDER,
+      sender: { send: () => Promise.reject(new Error('Request expired. Please try again.')) },
+    };
+    const lostFailure = await sendSolanaDeposit(input, lost, rpc).catch((err: unknown) => err);
+    expect(lostFailure instanceof SendError && lostFailure.phase).toBe('uncertain');
+    const rejecting = {
+      address: SENDER,
+      sender: {
+        send: () => Promise.reject(Object.assign(new Error('User rejected'), { code: 4001 })),
+      },
+    };
+    const rejected = await sendSolanaDeposit(input, rejecting, rpc).catch((err: unknown) => err);
+    expect(rejected instanceof SendError && rejected.phase).toBe('rejected');
+  });
+});
+
+describe('resendSignedTransaction', () => {
+  it('sends exactly the saved bytes again and builds nothing new', async () => {
+    const { rpc, sent, built, simulated } = fakeRpc({});
+    const signed = Uint8Array.from([1, ...base58.decode(SIG), 7, 7, 7]);
+    expect(await resendSignedTransaction({ signature: SIG, transaction: signed }, rpc)).toBe(SIG);
+    expect(sent).toEqual([base64.encode(signed)]);
+    expect(built).toEqual([]);
+    expect(simulated).toEqual([]);
+  });
+
+  it('refuses bytes that do not carry the saved signature', async () => {
+    const { rpc, sent } = fakeRpc({});
+    const other = Uint8Array.from([1, ...new Array<number>(64).fill(3), 7]);
+    await expect(
+      resendSignedTransaction({ signature: SIG, transaction: other }, rpc)
+    ).rejects.toThrow(/does not match/);
+    expect(sent).toEqual([]);
+  });
+});
+
+describe('checkSolanaSend', () => {
+  it('reports a signature found on chain as landed, or failed when it errored', async () => {
+    const landed = fakeRpc({ statuses: [{ err: null, confirmation: 'confirmed' }] }).rpc;
+    expect(await checkSolanaSend({ signature: SIG, lastValidBlockHeight: 10n }, landed)).toEqual({
+      status: 'landed',
+    });
+    const failed = fakeRpc({
+      statuses: [{ err: '{"InstructionError":[0,"x"]}', confirmation: 'confirmed' }],
+    }).rpc;
+    expect(
+      (await checkSolanaSend({ signature: SIG, lastValidBlockHeight: 10n }, failed)).status
+    ).toBe('failed');
+  });
+
+  it('reports expiry only once the block height passed and the signature is still unknown', async () => {
+    const before = fakeRpc({ statuses: [null], height: 10n }).rpc;
+    expect(await checkSolanaSend({ signature: SIG, lastValidBlockHeight: 10n }, before)).toEqual({
+      status: 'pending',
+    });
+    const after = fakeRpc({ statuses: [null], height: 11n }).rpc;
+    expect(await checkSolanaSend({ signature: SIG, lastValidBlockHeight: 10n }, after)).toEqual({
+      status: 'expired',
+    });
+    const raced = fakeRpc({
+      statuses: [null, { err: null, confirmation: 'finalized' }],
+      height: 11n,
+    }).rpc;
+    expect(await checkSolanaSend({ signature: SIG, lastValidBlockHeight: 10n }, raced)).toEqual({
+      status: 'landed',
+    });
+    const noExpiry = fakeRpc({ statuses: [null], height: 99n }).rpc;
+    expect(await checkSolanaSend({ signature: SIG, lastValidBlockHeight: null }, noExpiry)).toEqual(
+      {
+        status: 'pending',
+      }
     );
   });
 

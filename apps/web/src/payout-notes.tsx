@@ -2,7 +2,7 @@ import { notice } from 'portage-styles/recipes';
 
 import { type AddressOutput, type EmilyDepositStatus, outpointOf } from '@portage/core';
 
-import type { Snapshot } from './flow.js';
+import type { RegistrationErrorNote, Snapshot } from './flow.js';
 
 function sats(n: number): string {
   return `${n.toLocaleString('en-US')} sats`;
@@ -88,11 +88,72 @@ export function PayoutNotices(props: { snapshot: Snapshot }) {
           checked. Older payments may be missing from this page.
         </p>
       )}
-      {snapshot.registrationErrors.map(e => (
-        <p key={e.outpoint} className={notice({ tone: 'error' })} role="alert">
-          Could not register <code>{e.outpoint}</code> with the sBTC signers: {e.message}
-        </p>
+      <RegistrationNotices snapshot={snapshot} />
+    </>
+  );
+}
+
+export interface RegistrationNoticeGroups {
+  rejected: RegistrationErrorNote[];
+  transient: RegistrationErrorNote[];
+  others: RegistrationErrorNote[];
+}
+
+export function registrationNoticeGroups(
+  snapshot: Pick<Snapshot, 'payout' | 'candidates' | 'registrationErrors'>
+): RegistrationNoticeGroups {
+  const watched = new Set(
+    [...(snapshot.payout ? [snapshot.payout] : []), ...snapshot.candidates].map(outpointOf)
+  );
+  const mine = snapshot.registrationErrors.filter(e => watched.has(e.outpoint));
+  return {
+    rejected: mine.filter(e => e.kind === 'rejected'),
+    transient: mine.filter(e => e.kind === 'transient'),
+    others: snapshot.registrationErrors.filter(e => !watched.has(e.outpoint)),
+  };
+}
+
+function Reasons(props: { notes: RegistrationErrorNote[] }) {
+  return (
+    <>
+      {props.notes.map(e => (
+        <span key={e.outpoint}>
+          {' '}
+          <code>{e.outpoint}</code>: {e.message}
+        </span>
       ))}
+    </>
+  );
+}
+
+export function RegistrationNotices(props: {
+  snapshot: Pick<Snapshot, 'payout' | 'candidates' | 'registrationErrors'>;
+}) {
+  const groups = registrationNoticeGroups(props.snapshot);
+  return (
+    <>
+      {groups.rejected.length > 0 && (
+        <p className={notice({ tone: 'error' })} role="alert">
+          The sBTC signers have not been told about your Bitcoin payment yet: they refused the
+          registration. Reason:
+          <Reasons notes={groups.rejected} />. Your BTC is safe at the deposit address and can be
+          reclaimed after the timelock. This page keeps trying while it is open, and loading the
+          receipt again later retries.
+        </p>
+      )}
+      {groups.rejected.length === 0 && groups.transient.length > 0 && (
+        <p className={notice({ tone: 'warn' })} role="status">
+          The sBTC signers have not been told about your Bitcoin payment yet, because their service
+          could not be reached. This page keeps retrying.
+          <Reasons notes={groups.transient} />
+        </p>
+      )}
+      {groups.others.length > 0 && (
+        <p className={notice()}>
+          Other payments to this address could not be registered with the sBTC signers yet.
+          <Reasons notes={groups.others} />
+        </p>
+      )}
     </>
   );
 }

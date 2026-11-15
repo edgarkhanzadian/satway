@@ -7,6 +7,7 @@ import {
   isUsableSolanaWallet,
   standardSolanaSender,
 } from '../src/solana-wallet.js';
+import { SendError } from '../src/source-wallet.js';
 
 const ADDRESS = 'DgrD34m4MdR1SWr7VYezeddN61i9ib14YUVXh5QvKG1H';
 const OTHER = 'oCMJgh2BEpNyWN4RBFnjXfaLG5NgMCGcqRkEomN6jo6';
@@ -112,6 +113,32 @@ describe('standardSolanaSender', () => {
     await expect(standardSolanaSender(wallet, ADDRESS).send(Uint8Array.from([1]))).rejects.toThrow(
       /did not return a transaction signature/
     );
+  });
+
+  async function phaseOf(work: Promise<unknown>): Promise<string> {
+    try {
+      await work;
+      return 'resolved';
+    } catch (err) {
+      return err instanceof SendError ? err.phase : 'untyped';
+    }
+  }
+
+  it('says where it failed: refused before asking, rejected, or unknown after sending', async () => {
+    const { wallet, signAndSendTransaction } = fakeWallet({});
+    const tx = Uint8Array.from([1]);
+    expect(await phaseOf(standardSolanaSender(wallet, OTHER).send(tx))).toBe('not-sent');
+    signAndSendTransaction.mockRejectedValueOnce(
+      Object.assign(new Error('User rejected the request.'), { code: 4001 })
+    );
+    expect(await phaseOf(standardSolanaSender(wallet, ADDRESS).send(tx))).toBe('rejected');
+    signAndSendTransaction.mockRejectedValueOnce(new Error('Connection lost'));
+    expect(await phaseOf(standardSolanaSender(wallet, ADDRESS).send(tx))).toBe('uncertain');
+    signAndSendTransaction.mockResolvedValueOnce([]);
+    expect(await phaseOf(standardSolanaSender(wallet, ADDRESS).send(tx))).toBe('uncertain');
+    const signOnly = fakeWallet({ signAndSend: false, sign: true });
+    signOnly.signTransaction.mockRejectedValueOnce(new Error('Connection lost'));
+    expect(await phaseOf(standardSolanaSender(signOnly.wallet, ADDRESS).send(tx))).toBe('not-sent');
   });
 });
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { css, cx } from 'portage-styles/css';
 import { styled } from 'portage-styles/jsx';
@@ -16,14 +16,34 @@ import {
 import { PayoutDetails, PayoutNotices } from './payout-notes.js';
 import { type Receipt, downloadReceipt, rememberReceipt } from './receipt.js';
 import type { RouteUpdate } from './route.js';
+import {
+  type AttemptOutcome,
+  type ResolveDeps,
+  attemptSend,
+  confirmNothingSent,
+  latestSwap,
+  resendRecord,
+  resolveRecord,
+  sendPanel,
+  settleFromProvider,
+} from './send-attempt.js';
+import { SendRecordView } from './send-record-view.js';
+import {
+  type SendFamily,
+  type SendRecord,
+  recordTx,
+  sendRecords,
+  swapTargetOf,
+  watchSendRecords,
+} from './send-record.js';
 import type { SolanaPayOffer } from './solana-send.js';
 import {
+  type EvmTransfer,
   type SourceWallet,
   buildEvmTransfer,
   chainFamily,
-  loadSentTx,
+  evmTransactionState,
   nextRefundField,
-  saveSentTx,
   sendFromEvm,
   solanaSenderOf,
   walletAddressFor,
@@ -341,15 +361,81 @@ function Tracking(props: {
   const { backend, receipt, source, token, onRoute } = props;
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [stale, setStale] = useState(false);
   const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
   const family = chainFamily(receipt.origin.chain);
-  const [sentTx, setSentTx] = useState<string | null>(() =>
-    loadSentTx(receipt.depositAddress, family)
-  );
-  const [sendError, setSendError] = useState<string | null>(null);
-  const stopped = useRef(false);
+  const sendFamily: SendFamily | null = family === 'other' ? null : family;
   const quote = receipt.quoteResponse.quote;
+  const target = useMemo(
+    () => swapTargetOf(quote.depositAddress, quote.depositMemo),
+    [quote.depositAddress, quote.depositMemo]
+  );
+  const readRecord = useCallback(
+    () => (target && sendFamily ? sendRecords.read(target, sendFamily) : null),
+    [target, sendFamily]
+  );
+  const [record, setRecord] = useState<SendRecord | null>(readRecord);
+  const [durable] = useState(() => sendRecords.durable());
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [sendInfo, setSendInfo] = useState<string | null>(null);
+  const [checkNote, setCheckNote] = useState<string | null>(null);
+  const [resending, setResending] = useState(false);
+  const stopped = useRef(false);
   const solanaAccount = family === 'solana' ? solanaSenderOf(source) : null;
+
+  useEffect(() => {
+    setRecord(readRecord());
+    return watchSendRecords(window, () => setRecord(readRecord()));
+  }, [readRecord]);
+
+  useEffect(() => {
+    if (!snapshot || sendingRef.current) return;
+    setRecord(settleFromProvider(sendRecords, readRecord(), snapshot.swap));
+  }, [snapshot, readRecord]);
+
+  const recordStamp = record ? `${record.state}|${record.startedAt}|${recordTx(record) ?? ''}` : '';
+  const checkable = record !== null && record.state !== 'sent' && recordTx(record) !== null;
+  const evmProvider = source?.kind === 'evm' ? source.provider : null;
+
+  useEffect(() => {
+    if (!checkable || sending) return;
+    let live = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deps: ResolveDeps = {
+      async checkSolana(sent) {
+        const { checkSolanaSend } = await import('./solana-send.js');
+        return checkSolanaSend(sent);
+      },
+      evmState(hash) {
+        if (!evmProvider)
+          return Promise.reject(new Error('connect the wallet you sent from to check it'));
+        return evmTransactionState(evmProvider, hash);
+      },
+    };
+    async function check() {
+      const current = readRecord();
+      if (current === null || current.state === 'sent') return;
+      try {
+        const result = await resolveRecord(sendRecords, current, deps);
+        if (!live) return;
+        if (result.kind === 'cleared') setSendInfo(result.message);
+        setCheckNote(result.kind === 'unchanged' ? result.note : null);
+        setRecord(readRecord());
+      } catch (err) {
+        if (live)
+          setCheckNote(
+            `Could not check the transaction: ${errorMessage(err) ?? 'unknown error'}. Retrying.`
+          );
+      }
+      if (live) timer = setTimeout(() => void check(), 15_000);
+    }
+    void check();
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [checkable, recordStamp, sending, readRecord, evmProvider]);
 
   useEffect(() => {
     stopped.current = false;
@@ -359,10 +445,14 @@ function Tracking(props: {
         const next = await checkProgress(config, backend, receipt);
         if (stopped.current) return;
         setSnapshot(next);
+        setStale(false);
         setProblem(null);
         if (next.progress.terminal) return;
       } catch (err) {
-        if (!stopped.current) setProblem(`Could not refresh: ${errorMessage(err)}. Retrying.`);
+        if (!stopped.current) {
+          setStale(true);
+          setProblem(`Could not refresh: ${errorMessage(err)}. Retrying.`);
+        }
       }
       timer = setTimeout(() => void tick(), 20_000);
     }
@@ -380,58 +470,109 @@ function Tracking(props: {
   }, [onRoute, receipt, stage]);
 
   const waitingForFunds = !snapshot || progress?.stage === 'awaiting-funds';
-  const pendingDeposit = !sentTx && (snapshot?.swap ?? 'PENDING_DEPOSIT') === 'PENDING_DEPOSIT';
   const walletCanSend =
     family === 'evm' ? source?.kind === 'evm' : family === 'solana' && solanaAccount !== null;
-  const canSendFromWallet =
+  const walletReady =
     walletCanSend &&
+    target !== null &&
     token !== undefined &&
     token.blockchain === receipt.origin.chain &&
-    walletCovers(source, token) &&
-    pendingDeposit;
-  const offerSolanaPay =
+    walletCovers(source, token);
+  const solanaPayReady =
     family === 'solana' &&
     solanaAccount === null &&
     token !== undefined &&
     token.blockchain === 'sol' &&
-    pendingDeposit &&
     !quote.depositMemo;
+  const panel = sendPanel({
+    swap: latestSwap(snapshot, stale),
+    record,
+    walletCanSend: walletReady || solanaPayReady,
+    sending,
+    durable: durable || !walletReady,
+  });
+
+  function showOutcome(outcome: AttemptOutcome) {
+    if (outcome.kind === 'refused') setSendError(outcome.message);
+    if (outcome.kind === 'cleared')
+      setSendError(
+        outcome.rejected
+          ? 'The request was rejected in your wallet, so nothing was sent.'
+          : outcome.message
+      );
+  }
 
   async function sendFromWallet() {
-    if (!token || !quote.depositAddress) return;
+    if (!token || !target || sendingRef.current) return;
+    sendingRef.current = true;
     setSending(true);
     setSendError(null);
+    setSendInfo(null);
+    setCheckNote(null);
+    const swapAddress = target.address;
     try {
-      let sent: string;
       if (family === 'solana' && solanaAccount) {
         const { sendSolanaDeposit } = await import('./solana-send.js');
-        sent = await sendSolanaDeposit(
-          {
-            token,
-            recipient: quote.depositAddress,
-            amount: quote.amountIn,
-            memo: quote.depositMemo,
-          },
-          solanaAccount
+        showOutcome(
+          await attemptSend(
+            sendRecords,
+            { target, family: 'solana', account: solanaAccount.address, now: new Date() },
+            hooks =>
+              sendSolanaDeposit(
+                { token, recipient: swapAddress, amount: quote.amountIn, memo: quote.depositMemo },
+                solanaAccount,
+                undefined,
+                hooks
+              )
+          )
         );
       } else if (family === 'evm' && source?.kind === 'evm') {
-        const transfer = buildEvmTransfer({
+        const provider = source.provider;
+        const transfer: EvmTransfer = buildEvmTransfer({
           token,
           from: source.address,
-          to: quote.depositAddress,
+          to: swapAddress,
           amount: quote.amountIn,
         });
-        sent = await sendFromEvm(source.provider, transfer);
-      } else {
-        return;
+        showOutcome(
+          await attemptSend(
+            sendRecords,
+            { target, family: 'evm', account: source.address, now: new Date() },
+            () => sendFromEvm(provider, transfer)
+          )
+        );
       }
-      saveSentTx(receipt.depositAddress, sent);
-      setSentTx(sent);
     } catch (err) {
       setSendError(errorMessage(err) || 'The wallet did not send the transaction');
     } finally {
+      sendingRef.current = false;
       setSending(false);
+      setRecord(readRecord());
     }
+  }
+
+  async function resendSame(current: SendRecord) {
+    setResending(true);
+    setSendError(null);
+    try {
+      const { resendSignedTransaction } = await import('./solana-send.js');
+      const outcome = await resendRecord(sendRecords, current, signed =>
+        resendSignedTransaction(signed)
+      );
+      if (outcome.kind === 'uncertain') setCheckNote(outcome.record.message);
+    } catch (err) {
+      setCheckNote(errorMessage(err) ?? 'The transaction could not be sent again.');
+    } finally {
+      setResending(false);
+      setRecord(readRecord());
+    }
+  }
+
+  function confirmNothing(current: SendRecord) {
+    confirmNothingSent(sendRecords, current);
+    setCheckNote(null);
+    setSendInfo(null);
+    setRecord(readRecord());
   }
 
   return (
@@ -443,7 +584,7 @@ function Tracking(props: {
       {waitingForFunds && quote.depositAddress && (
         <div className={send}>
           <p className={sendLine}>
-            {canSendFromWallet ? 'Send exactly this:' : 'Send exactly this, from your own wallet:'}
+            {walletReady ? 'Send exactly this:' : 'Send exactly this, from your own wallet:'}
           </p>
           <p className={sendFigure}>
             {quote.amountInFormatted} {receipt.origin.symbol} on {receipt.origin.chain}
@@ -460,23 +601,50 @@ function Tracking(props: {
           {quote.deadline && (
             <p className={sendNote}>before {new Date(quote.deadline).toLocaleString()}</p>
           )}
-          {canSendFromWallet && (
+          {walletReady && (panel.kind === 'offer' || panel.kind === 'sending') && (
             <div className={sendActions}>
               <button
                 className={button({ variant: 'primary' })}
-                disabled={sending}
+                disabled={panel.kind === 'sending'}
                 onClick={() => void sendFromWallet()}
               >
-                {sending ? 'Confirm in your wallet…' : `Send from ${source?.name ?? 'wallet'}`}
+                {panel.kind === 'sending'
+                  ? 'Confirm in your wallet…'
+                  : `Send from ${source?.name ?? 'wallet'}`}
               </button>
             </div>
           )}
-          {offerSolanaPay && token && quote.depositAddress && (
-            <SolanaPayLink token={token} recipient={quote.depositAddress} amount={quote.amountIn} />
+          {!walletReady && solanaPayReady && panel.kind === 'offer' && token && target && (
+            <SolanaPayLink token={token} recipient={target.address} amount={quote.amountIn} />
           )}
-          {sentTx && (
+          {panel.kind === 'checking' && (
+            <p className={sendNote}>Checking whether a payment has already arrived…</p>
+          )}
+          {panel.kind === 'unknown' && (
+            <p className={sendNote}>
+              Can’t confirm the swap status right now. If you have not paid yet you can still send
+              manually using the details above.
+            </p>
+          )}
+          {panel.kind === 'no-storage' && (
+            <p className={sendNote}>
+              Sending from your wallet is turned off because this browser cannot save a record of
+              the payment, which is what stops it being sent twice. Send it manually using the
+              details above.
+            </p>
+          )}
+          {panel.kind === 'record' && (
+            <SendRecordView
+              record={panel.record}
+              note={checkNote}
+              resending={resending}
+              onResend={() => void resendSame(panel.record)}
+              onConfirmNothingSent={() => confirmNothing(panel.record)}
+            />
+          )}
+          {sendInfo && (
             <p className={sendStatus} role="status">
-              Sent from your wallet. Transaction <code>{sentTx}</code>. Do not send again.
+              {sendInfo}
             </p>
           )}
           {sendError && (

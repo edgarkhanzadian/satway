@@ -28,12 +28,19 @@ export interface LatestBlockhash {
   lastValidBlockHeight: bigint;
 }
 
+export interface SignatureStatus {
+  err: string | null;
+  confirmation: string | null;
+}
+
 export interface SolanaRpc {
   latestBlockhash(): Promise<LatestBlockhash>;
   accounts(addresses: readonly string[]): Promise<(RawAccount | null)[]>;
   rentExemptMinimum(space: number): Promise<bigint>;
   simulate(wireBase64: string): Promise<SimulationResult>;
   send(wireBase64: string): Promise<string>;
+  signatureStatus(signature: string): Promise<SignatureStatus | null>;
+  blockHeight(): Promise<bigint>;
 }
 
 function field(value: unknown, key: string): unknown {
@@ -175,6 +182,27 @@ export function createSolanaRpc(url: string, fetchFn: RpcFetch = fetch): SolanaR
         ]),
         'transaction signature'
       );
+    },
+    async signatureStatus(signature) {
+      const value = field(
+        await call('getSignatureStatuses', [[signature], { searchTransactionHistory: true }]),
+        'value'
+      );
+      if (!Array.isArray(value) || value.length !== 1)
+        throw new Error('The Solana RPC returned no signature status');
+      const status: unknown = value[0];
+      if (status === null) return null;
+      if (typeof status !== 'object')
+        throw new Error('The Solana RPC returned an invalid signature status');
+      const err = field(status, 'err');
+      const confirmation = field(status, 'confirmationStatus');
+      return {
+        err: err === null || err === undefined ? null : describeRpcError(err),
+        confirmation: typeof confirmation === 'string' ? confirmation : null,
+      };
+    },
+    async blockHeight() {
+      return integer(await call('getBlockHeight', [{ commitment: 'confirmed' }]), 'block height');
     },
   };
 }

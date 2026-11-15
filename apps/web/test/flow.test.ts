@@ -432,6 +432,7 @@ describe('checkProgress', () => {
     expect(snap.progress.stage).toBe('minting');
     expect(snap.payout).toMatchObject({ vout: 2, amountSats: 35_500 });
     expect(snap.registrationError).toBeNull();
+    expect(snap.registrationErrors).toEqual([]);
   });
 
   it('sends the real raw transaction for a payout at output 0', async () => {
@@ -454,6 +455,7 @@ describe('checkProgress', () => {
     expect(w.posts).toHaveLength(0);
     expect(snap.progress.stage).toBe('awaiting-notification');
     expect(snap.registrationError).toMatch(/has txid/);
+    expect(snap.registrationErrors[0]).toMatchObject({ kind: 'rejected', status: null });
   });
 
   it('reports a rejected registration instead of dropping it', async () => {
@@ -462,6 +464,7 @@ describe('checkProgress', () => {
     expect(w.posts).toHaveLength(1);
     expect(snap.mint).toBeNull();
     expect(snap.registrationError).toMatch(/HTTP 400 .*invalid transaction hex/);
+    expect(snap.registrationErrors[0]).toMatchObject({ kind: 'rejected', status: 400 });
   });
 
   it('still finds and registers the payout when the provider status is unavailable', async () => {
@@ -635,6 +638,7 @@ describe('checkProgress: which output is the payout', () => {
     expect(postedOutpoints(w)).toHaveLength(2);
     expect(snap.registrationErrors.map(e => e.outpoint)).toEqual([OTHER_OUT]);
     expect(snap.registrationErrors[0]?.message).toMatch(/HTTP 503/);
+    expect(snap.registrationErrors[0]).toMatchObject({ kind: 'transient', status: 503 });
     expect(w.emily.get(REAL_OUT)).toBe('pending');
   });
 });

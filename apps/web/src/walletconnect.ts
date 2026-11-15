@@ -6,11 +6,15 @@ import { SOLANA_MAINNET_CAIP2 } from './config.js';
 import {
   EVM_CHAIN_IDS,
   type Eip1193Provider,
+  SendError,
   type SolanaSendResult,
   type SolanaSender,
   type SourceWallet,
   isSolanaAddress,
   isSolanaSignature,
+  notSent,
+  signOnlyFailure,
+  walletFailure,
 } from './source-wallet.js';
 
 export const WALLETCONNECT_METHODS: readonly string[] = Object.freeze([
@@ -223,9 +227,14 @@ export function walletConnectProvider(transport: WalletConnectTransport): Eip119
         return transport.request(args);
       }
       if (args.method === 'eth_sendTransaction') {
-        const chainId = await currentChain();
+        let chainId: number;
+        try {
+          chainId = await currentChain();
+        } catch (err) {
+          throw notSent(err);
+        }
         if (!transport.approvedChainIds().includes(chainId))
-          throw new Error(missingChainMessage(chainId));
+          throw new SendError(missingChainMessage(chainId), 'not-sent');
       }
       return transport.request(args);
     },
@@ -247,39 +256,59 @@ export function walletConnectSolanaSender(
   return {
     async send(transaction): Promise<SolanaSendResult> {
       const approval = approvedSolana(transport.namespaces());
-      if (approval.addresses.length === 0) throw new Error(MISSING_SOLANA_MESSAGE);
+      if (approval.addresses.length === 0) throw new SendError(MISSING_SOLANA_MESSAGE, 'not-sent');
       if (!approval.addresses.includes(address))
-        throw new Error('The connected wallet account changed. Reconnect and try again.');
+        throw new SendError(
+          'The connected wallet account changed. Reconnect and try again.',
+          'not-sent'
+        );
       const encoded = base64.encode(transaction);
       if (approval.methods.includes('solana_signAndSendTransaction')) {
-        const out = await transport.request({
-          method: 'solana_signAndSendTransaction',
-          params: { transaction: encoded, sendOptions: { preflightCommitment: 'confirmed' } },
-        });
+        let out: unknown;
+        try {
+          out = await transport.request({
+            method: 'solana_signAndSendTransaction',
+            params: { transaction: encoded, sendOptions: { preflightCommitment: 'confirmed' } },
+          });
+        } catch (err) {
+          throw walletFailure(err, 'The wallet did not confirm whether it sent the transaction');
+        }
         const signature = field(out, 'signature');
         if (typeof signature !== 'string' || !isSolanaSignature(signature))
-          throw new Error('The wallet did not return a transaction signature');
+          throw new SendError('The wallet did not return a transaction signature', 'uncertain');
         return { kind: 'sent', signature };
       }
       if (approval.methods.includes('solana_signTransaction')) {
-        const out = await transport.request({
-          method: 'solana_signTransaction',
-          params: { transaction: encoded },
-        });
+        let out: unknown;
+        try {
+          out = await transport.request({
+            method: 'solana_signTransaction',
+            params: { transaction: encoded },
+          });
+        } catch (err) {
+          throw signOnlyFailure(err);
+        }
         const signed = field(out, 'transaction');
         if (typeof signed === 'string' && signed !== '') {
           try {
             return { kind: 'signed', transaction: base64.decode(signed) };
           } catch {
-            throw new Error('The wallet returned a signed transaction that could not be read');
+            throw new SendError(
+              'The wallet returned a signed transaction that could not be read',
+              'not-sent'
+            );
           }
         }
         const signature = field(out, 'signature');
         if (typeof signature !== 'string' || !isSolanaSignature(signature))
-          throw new Error('The wallet did not return a transaction signature');
-        return { kind: 'signed', transaction: withSignature(transaction, signature) };
+          throw new SendError('The wallet did not return a transaction signature', 'not-sent');
+        try {
+          return { kind: 'signed', transaction: withSignature(transaction, signature) };
+        } catch (err) {
+          throw notSent(err);
+        }
       }
-      throw new Error(MISSING_SOLANA_MESSAGE);
+      throw new SendError(MISSING_SOLANA_MESSAGE, 'not-sent');
     },
   };
 }
