@@ -1,4 +1,9 @@
-import type { OneClickQuoteRequest } from '../oneclick/index.js';
+import {
+  type OneClickQuoteRequest,
+  QUOTE_REFERRAL,
+  appFeesFor,
+  assertAppFeeConfig,
+} from '../oneclick/index.js';
 import { isMainnetTaproot } from '../sbtc/index.js';
 import type { NetworkConfig } from '../shared/index.js';
 
@@ -30,9 +35,7 @@ export function buildQuoteRequest(
   if (!input.refundTo.trim()) {
     throw new Error('A refund address on the origin chain is required');
   }
-  if (config.appFeeBps < 0 || config.appFeeBps > 100) {
-    throw new Error('App fee must be between 0 and 100 basis points');
-  }
+  assertAppFeeConfig(config);
 
   const now = input.now ?? new Date();
   const deadline = new Date(now.getTime() + config.quoteDeadlineMinutes * 60_000);
@@ -50,11 +53,9 @@ export function buildQuoteRequest(
     recipient: input.depositAddress,
     recipientType: 'DESTINATION_CHAIN',
     deadline: deadline.toISOString(),
-    referral: 'portage',
+    referral: QUOTE_REFERRAL,
   };
-  if (config.appFeeBps > 0) {
-    if (!config.appFeeRecipient) throw new Error('App fee is set but has no recipient');
-    request.appFees = [{ recipient: config.appFeeRecipient, fee: config.appFeeBps }];
-  }
+  const appFees = appFeesFor(config);
+  if (appFees) request.appFees = appFees;
   return request;
 }

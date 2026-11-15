@@ -1,0 +1,473 @@
+import { Cl, serializeCV } from '@stacks/transactions';
+import { describe, expect, it } from 'vitest';
+
+import {
+  MAINNET_WITHDRAWAL_FLOW_CONFIG as C,
+  type ExpectedWithdrawal,
+  type StacksTransaction,
+  WithdrawalDataError,
+  assertActiveWithdrawalContract,
+  describeWithdrawalTxFailure,
+  fetchActiveWithdrawalContract,
+  fetchOnChainWithdrawalRequest,
+  fetchStacksTransaction,
+  fetchWithdrawalStatus,
+  findWithdrawalAcceptEvent,
+  parseClarityHex,
+  parseSweepDataValue,
+  parseWith,
+  parseWithdrawalCreateEvent,
+  parseWithdrawalRequestValue,
+  readWithdrawalRequestTransaction,
+  requestIdOfResult,
+  stacksTransactionSchema,
+} from '../../src/index.js';
+import { fakeWithdrawalApis, routesFor } from '../fake-withdrawal-apis.js';
+import { defined, jsonResponse } from '../fixtures.js';
+import { REAL_ACTIVE_WITHDRAWAL_CONTRACT } from '../real-withdrawal-quotes.js';
+import {
+  REAL_FAILED_REQUESTS,
+  REAL_WITHDRAWALS,
+  type RealWithdrawal,
+} from '../real-withdrawals.js';
+
+function txOf(blob: unknown): StacksTransaction {
+  return parseWith(stacksTransactionSchema, blob, 'fixture');
+}
+
+function expectedOf(w: RealWithdrawal): ExpectedWithdrawal {
+  return {
+    sender: w.sender,
+    amountSats: w.amountSats,
+    maxFeeSats: w.maxFeeSats,
+    recipient: { version: w.version, hashbytes: w.hashbytes },
+  };
+}
+
+function createEventHex(w: RealWithdrawal): string {
+  const tx = txOf(w.requestTx);
+  const log = defined(
+    tx.events?.find(e => e.contract_log?.contract_id.endsWith('.sbtc-registry'))?.contract_log
+  );
+  return log.value.hex;
+}
+
+const ACCEPTED = REAL_WITHDRAWALS.filter(w => w.outcome === 'accepted');
+const REJECTED = REAL_WITHDRAWALS.filter(w => w.outcome === 'rejected');
+const DIRECT = REAL_WITHDRAWALS.filter(w => w.direct);
+
+describe('reading real withdrawal request transactions', () => {
+  it.each(DIRECT.map(w => [w.id, w] as const))(
+    'request %i: id from the result and the withdrawal-create event agree with the arguments',
+    (id, w) => {
+      const reading = readWithdrawalRequestTransaction(txOf(w.requestTx), C);
+      if (reading.kind !== 'tx-succeeded') throw new Error(`unexpected ${reading.kind}`);
+      expect(reading.requestId).toBe(id);
+      expect(reading.call).toEqual(expectedOf(w));
+      expect(reading.event).toEqual({ ...expectedOf(w), requestId: id, burnHeight: w.burnHeight });
+    }
+  );
+
+  it.each(REAL_WITHDRAWALS.map(w => [w.id, w] as const))(
+    'request %i: the withdrawal-create print parses',
+    (id, w) => {
+      expect(parseWithdrawalCreateEvent(createEventHex(w))).toEqual({
+        ...expectedOf(w),
+        requestId: id,
+        burnHeight: w.burnHeight,
+      });
+    }
+  );
+
+  it('reports withdrawals made through another contract as not ours to track', () => {
+    for (const w of REAL_WITHDRAWALS.filter(r => !r.direct)) {
+      expect(readWithdrawalRequestTransaction(txOf(w.requestTx), C).kind).toBe('not-a-withdrawal');
+    }
+  });
+
+  it('parses the request id of a real result', () => {
+    expect(requestIdOfResult('0x07010000000000000000000000000000140b')).toBe(5131);
+    expect(() => requestIdOfResult('0x080100000000000000000000000000000001')).toThrow(/error/);
+  });
+
+  it('refuses a result whose id disagrees with the withdrawal-create event', () => {
+    const w = defined(DIRECT[0]);
+    const tx = txOf(w.requestTx);
+    const forged = { ...tx, tx_result: { hex: `0x${serializeCV(Cl.ok(Cl.uint(w.id + 1)))}` } };
+    expect(() => readWithdrawalRequestTransaction(forged, C)).toThrow(WithdrawalDataError);
+  });
+
+  it('ignores withdrawal-create prints from contracts other than the registry', () => {
+    const w = defined(DIRECT[0]);
+    const tx = txOf(w.requestTx);
+    const spoofed = {
+      ...tx,
+      events: (tx.events ?? []).map(e =>
+        e.contract_log
+          ? {
+              ...e,
+              contract_log: {
+                ...e.contract_log,
+                contract_id: 'SP000000000000000000002Q6VF78.fake',
+              },
+            }
+          : e
+      ),
+    };
+    const reading = readWithdrawalRequestTransaction(spoofed, C);
+    expect(reading.kind === 'tx-succeeded' ? reading.event : 'wrong').toBeNull();
+  });
+
+  it('reads pending and dropped transactions', () => {
+    const tx = txOf(defined(DIRECT[0]).requestTx);
+    expect(readWithdrawalRequestTransaction({ ...tx, tx_status: 'pending' }, C).kind).toBe(
+      'tx-pending'
+    );
+    const dropped = readWithdrawalRequestTransaction(
+      { ...tx, tx_status: 'dropped_replace_by_fee', tx_result: undefined },
+      C
+    );
+    expect(dropped.kind === 'tx-failed' ? dropped.failure.code : null).toBe('dropped');
+  });
+
+  it('refuses a transaction to another contract or function', () => {
+    const tx = txOf(defined(DIRECT[0]).requestTx);
+    const call = defined(tx.contract_call);
+    expect(
+      readWithdrawalRequestTransaction(
+        { ...tx, contract_call: { ...call, function_name: 'accept-withdrawal-request' } },
+        C
+      ).kind
+    ).toBe('not-a-withdrawal');
+    expect(
+      readWithdrawalRequestTransaction(
+        {
+          ...tx,
+          contract_call: { ...call, contract_id: 'SP000000000000000000002Q6VF78.sbtc-withdrawal' },
+        },
+        C
+      ).kind
+    ).toBe('not-a-withdrawal');
+  });
+});
+
+describe('failed real withdrawal requests', () => {
+  it('maps the real post-condition abort', () => {
+    const f = defined(REAL_FAILED_REQUESTS.find(r => r.txid.startsWith('bd9b3e')));
+    const reading = readWithdrawalRequestTransaction(txOf(f.requestTx), C);
+    if (reading.kind !== 'tx-failed') throw new Error(`unexpected ${reading.kind}`);
+    expect(reading.failure.code).toBe('post-condition');
+    expect(reading.failure.clarityError).toBe('(err u1)');
+    expect(reading.failure.message).toMatch(/no sBTC moved/);
+  });
+
+  it('maps the real insufficient-balance abort (ft-burn err u1)', () => {
+    const f = defined(REAL_FAILED_REQUESTS.find(r => r.txid.startsWith('0fd045')));
+    const reading = readWithdrawalRequestTransaction(txOf(f.requestTx), C);
+    if (reading.kind !== 'tx-failed') throw new Error(`unexpected ${reading.kind}`);
+    expect(reading.failure.code).toBe('insufficient-balance');
+    expect(reading.failure.message).toMatch(/balance was too low/);
+  });
+
+  it.each([
+    [500, 'invalid-recipient-version'],
+    [501, 'invalid-recipient-hashbytes'],
+    [502, 'below-dust'],
+    [400, 'not-active-contract'],
+    [507, 'other'],
+  ])('maps contract error u%i', (code, expected) => {
+    const tx = txOf(defined(REAL_FAILED_REQUESTS[1]).requestTx);
+    const failed = {
+      ...tx,
+      tx_status: 'abort_by_response',
+      tx_result: { hex: `0x${serializeCV(Cl.error(Cl.uint(code)))}`, repr: `(err u${code})` },
+    };
+    const failure = describeWithdrawalTxFailure(failed);
+    expect(failure.code).toBe(expected);
+    expect(failure.clarityError).toBe(`(err u${code})`);
+  });
+});
+
+describe('registry read-only results', () => {
+  it.each(REAL_WITHDRAWALS.map(w => [w.id, w.outcome, w] as const))(
+    'request %i (%s): get-withdrawal-request parses with the right status',
+    (id, outcome, w) => {
+      const request = parseWithdrawalRequestValue(
+        parseClarityHex(w.getWithdrawalRequest, 'fixture'),
+        id
+      );
+      expect(request).toEqual({
+        ...expectedOf(w),
+        requestId: id,
+        burnHeight: w.burnHeight,
+        status: outcome,
+      });
+    }
+  );
+
+  it.each(ACCEPTED.map(w => [w.id, w] as const))(
+    'request %i: the sweep data names the payout transaction',
+    (_id, w) => {
+      const sweep = parseSweepDataValue(parseClarityHex(w.getSweepData, 'fixture'));
+      expect(sweep?.sweepTxid).toBe(w.payoutTxid);
+    }
+  );
+
+  it('reads none for rejected and unknown requests', () => {
+    for (const w of REJECTED) {
+      expect(parseSweepDataValue(parseClarityHex(w.getSweepData, 'fixture'))).toBeNull();
+    }
+    expect(parseWithdrawalRequestValue(parseClarityHex('0x09', 'none'), 1)).toBeNull();
+  });
+
+  it('refuses a result of the wrong shape', () => {
+    expect(() => parseWithdrawalRequestValue(Cl.uint(1), 1)).toThrow(/not an optional/);
+    expect(() => parseClarityHex('0x0a', 'broken')).toThrow(/does not decode/);
+    expect(() => parseClarityHex('nothex', 'broken')).toThrow(/not a hex/);
+  });
+
+  it('calls the registry read-only functions with a uint argument', async () => {
+    const w = defined(ACCEPTED[0]);
+    const api = fakeWithdrawalApis(routesFor(w));
+    const request = await fetchOnChainWithdrawalRequest(C, w.id, api.fetchFn);
+    expect(request?.status).toBe('accepted');
+    expect(api.urls).toEqual([
+      'https://api.hiro.so/v2/contracts/call-read/SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4/sbtc-registry/get-withdrawal-request',
+    ]);
+    await expect(fetchOnChainWithdrawalRequest(C, 0, api.fetchFn)).rejects.toThrow(/positive/);
+  });
+
+  it('checks the active withdrawal contract against the real registry answer', async () => {
+    const api = fakeWithdrawalApis({
+      readOnly: { 'get-active-protocol': REAL_ACTIVE_WITHDRAWAL_CONTRACT },
+    });
+    expect(await fetchActiveWithdrawalContract(C, api.fetchFn)).toBe(
+      'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-withdrawal'
+    );
+    await expect(assertActiveWithdrawalContract(C, api.fetchFn)).resolves.toBeUndefined();
+    const moved = fakeWithdrawalApis({
+      readOnly: {
+        'get-active-protocol': `0x${serializeCV(Cl.some(Cl.principal('SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-withdrawal-v2')))}`,
+      },
+    });
+    await expect(assertActiveWithdrawalContract(C, moved.fetchFn)).rejects.toThrow(
+      /sbtc-withdrawal-v2 as the withdrawal contract/
+    );
+    const failing = fakeWithdrawalApis({});
+    await expect(assertActiveWithdrawalContract(C, failing.fetchFn)).rejects.toThrow(
+      /Read-only call get-active-protocol failed/
+    );
+  });
+});
+
+describe('withdrawal-accept events', () => {
+  it.each(ACCEPTED.map(w => [w.id, w] as const))(
+    'request %i: the accept event gives the payout outpoint and fee',
+    (id, w) => {
+      const event = findWithdrawalAcceptEvent(txOf(w.acceptTx), C, id);
+      expect(event).toMatchObject({
+        requestId: id,
+        bitcoinTxid: w.payoutTxid,
+        outputIndex: w.payoutVout,
+        feeSats: w.feeSats,
+        sweepTxid: w.payoutTxid,
+      });
+      expect(defined(w.feeSats)).toBeLessThanOrEqual(w.maxFeeSats);
+    }
+  );
+
+  it('finds nothing for another request id or a failed transaction', () => {
+    const w = defined(ACCEPTED[0]);
+    const tx = txOf(w.acceptTx);
+    expect(findWithdrawalAcceptEvent(tx, C, w.id + 1)).toBeNull();
+    expect(
+      findWithdrawalAcceptEvent({ ...tx, tx_status: 'abort_by_response' }, C, w.id)
+    ).toBeNull();
+  });
+});
+
+describe('fetchWithdrawalStatus on real data', () => {
+  it.each(ACCEPTED.filter(w => w.direct).map(w => [w.id, w] as const))(
+    'request %i: accepted, with the payout from the on-chain accept event',
+    async (id, w) => {
+      const api = fakeWithdrawalApis(routesFor(w));
+      const status = await fetchWithdrawalStatus(C, w.requestTxid, expectedOf(w), api.fetchFn);
+      if (status.kind !== 'accepted') throw new Error(`unexpected ${status.kind}`);
+      expect(status.request.requestId).toBe(id);
+      expect(status.payout).toEqual({
+        bitcoinTxid: w.payoutTxid,
+        outputIndex: w.payoutVout,
+        feeSats: w.feeSats,
+        acceptStacksTxid: w.acceptTxid,
+        source: 'accept-event',
+      });
+      expect(status.sweep?.sweepTxid).toBe(w.payoutTxid);
+    }
+  );
+
+  it.each(REJECTED.map(w => [w.id, w] as const))('request %i: rejected', async (id, w) => {
+    const api = fakeWithdrawalApis(routesFor(w));
+    const status = await fetchWithdrawalStatus(C, w.requestTxid, expectedOf(w), api.fetchFn);
+    expect(status.kind).toBe('rejected');
+    expect(status.kind === 'rejected' ? status.request.requestId : null).toBe(id);
+  });
+
+  it('is requested while the registry has no status', async () => {
+    const w = defined(REJECTED[0]);
+    const pending = `0x${serializeCV(
+      Cl.some(
+        Cl.tuple({
+          amount: Cl.uint(w.amountSats),
+          'max-fee': Cl.uint(w.maxFeeSats),
+          sender: Cl.principal(w.sender),
+          recipient: Cl.tuple({
+            version: Cl.bufferFromHex(w.version),
+            hashbytes: Cl.bufferFromHex(w.hashbytes),
+          }),
+          'block-height': Cl.uint(w.burnHeight),
+          status: Cl.none(),
+        })
+      )
+    )}`;
+    const routes = routesFor(w);
+    const api = fakeWithdrawalApis({
+      ...routes,
+      readOnly: { ...routes.readOnly, 'get-withdrawal-request': pending },
+    });
+    const status = await fetchWithdrawalStatus(C, w.requestTxid, expectedOf(w), api.fetchFn);
+    expect(status.kind).toBe('requested');
+  });
+
+  it('reports an unknown transaction', async () => {
+    const w = defined(ACCEPTED[0]);
+    const api = fakeWithdrawalApis({});
+    expect((await fetchWithdrawalStatus(C, w.requestTxid, expectedOf(w), api.fetchFn)).kind).toBe(
+      'unknown-tx'
+    );
+  });
+
+  it('reports a failed transaction with its reason', async () => {
+    const f = defined(REAL_FAILED_REQUESTS[1]);
+    const api = fakeWithdrawalApis({ stacksTxs: { [f.txid]: f.requestTx } });
+    const w = defined(ACCEPTED[0]);
+    const status = await fetchWithdrawalStatus(C, f.txid, expectedOf(w), api.fetchFn);
+    expect(status.kind === 'tx-failed' ? status.failure.code : status.kind).toBe(
+      'insufficient-balance'
+    );
+  });
+
+  it.each([
+    ['amount', (e: ExpectedWithdrawal) => ({ ...e, amountSats: e.amountSats + 1 }), /amount is/],
+    ['fee cap', (e: ExpectedWithdrawal) => ({ ...e, maxFeeSats: e.maxFeeSats - 1 }), /fee cap is/],
+    [
+      'recipient',
+      (e: ExpectedWithdrawal) => ({
+        ...e,
+        recipient: { ...e.recipient, hashbytes: '00'.repeat(20) },
+      }),
+      /recipient differs/,
+    ],
+    [
+      'recipient version',
+      (e: ExpectedWithdrawal) => ({ ...e, recipient: { ...e.recipient, version: '02' } }),
+      /recipient differs/,
+    ],
+    [
+      'sender',
+      (e: ExpectedWithdrawal) => ({ ...e, sender: 'SP000000000000000000002Q6VF78' }),
+      /sender is/,
+    ],
+  ])('reports a mismatch when the receipt %s differs from the chain', async (_n, tamper, msg) => {
+    const w = defined(ACCEPTED[0]);
+    const api = fakeWithdrawalApis(routesFor(w));
+    const status = await fetchWithdrawalStatus(
+      C,
+      w.requestTxid,
+      tamper(expectedOf(w)),
+      api.fetchFn
+    );
+    if (status.kind !== 'mismatch') throw new Error(`unexpected ${status.kind}`);
+    expect(status.requestId).toBe(w.id);
+    expect(status.problems.join(' ')).toMatch(msg);
+    expect(status.problems.some(p => p.startsWith('sBTC registry'))).toBe(true);
+  });
+
+  it('reports a mismatch when the registry has no such request', async () => {
+    const w = defined(ACCEPTED[0]);
+    const routes = routesFor(w);
+    const api = fakeWithdrawalApis({
+      ...routes,
+      readOnly: { ...routes.readOnly, 'get-withdrawal-request': '0x09' },
+    });
+    const status = await fetchWithdrawalStatus(C, w.requestTxid, expectedOf(w), api.fetchFn);
+    expect(status.kind === 'mismatch' ? status.problems.join(' ') : status.kind).toMatch(
+      /no withdrawal request/
+    );
+  });
+
+  it('keeps the acceptance but no payout when Emily is down', async () => {
+    const w = defined(ACCEPTED[0]);
+    const routes = routesFor(w);
+    const api = fakeWithdrawalApis({
+      ...routes,
+      overrides: { [`${C.sbtcApiUrl}/withdrawal/${w.id}`]: jsonResponse({}, 502) },
+    });
+    const status = await fetchWithdrawalStatus(C, w.requestTxid, expectedOf(w), api.fetchFn);
+    if (status.kind !== 'accepted') throw new Error(`unexpected ${status.kind}`);
+    expect(status.payout).toBeNull();
+    expect(status.payoutError).toMatch(/HTTP 502/);
+    expect(status.sweep?.sweepTxid).toBe(w.payoutTxid);
+  });
+
+  it('does not trust an Emily hint pointing at an unrelated transaction', async () => {
+    const w = defined(ACCEPTED[0]);
+    const other = defined(ACCEPTED[1]);
+    const routes = routesFor(w);
+    const api = fakeWithdrawalApis({
+      ...routes,
+      stacksTxs: { ...routes.stacksTxs, ...routesFor(other).stacksTxs },
+      emilyWithdrawals: { [w.id]: other.emily },
+    });
+    const status = await fetchWithdrawalStatus(C, w.requestTxid, expectedOf(w), api.fetchFn);
+    if (status.kind !== 'accepted') throw new Error(`unexpected ${status.kind}`);
+    expect(status.payout).toBeNull();
+    expect(status.payoutError).toMatch(/no acceptance event for this request/);
+  });
+
+  it('reports a mismatch when the accept event and registry disagree on the sweep', async () => {
+    const w = defined(ACCEPTED[0]);
+    const routes = routesFor(w);
+    const otherSweep = `0x${serializeCV(
+      Cl.some(
+        Cl.tuple({
+          'sweep-txid': Cl.bufferFromHex('11'.repeat(32)),
+          'sweep-burn-hash': Cl.bufferFromHex('22'.repeat(32)),
+          'sweep-burn-height': Cl.uint(1),
+        })
+      )
+    )}`;
+    const api = fakeWithdrawalApis({
+      ...routes,
+      readOnly: { ...routes.readOnly, 'get-completed-withdrawal-sweep-data': otherSweep },
+    });
+    const status = await fetchWithdrawalStatus(C, w.requestTxid, expectedOf(w), api.fetchFn);
+    expect(status.kind === 'mismatch' ? status.problems.join(' ') : status.kind).toMatch(
+      /disagree about the sweep/
+    );
+  });
+
+  it('passes Stacks API failures to the caller and refuses bad txids', async () => {
+    const w = defined(ACCEPTED[0]);
+    const api = fakeWithdrawalApis({
+      overrides: {
+        [`${C.stxApiUrl}/extended/v1/tx/0x${w.requestTxid}?event_limit=50`]: jsonResponse({}, 500),
+      },
+    });
+    await expect(
+      fetchWithdrawalStatus(C, w.requestTxid, expectedOf(w), api.fetchFn)
+    ).rejects.toThrow(/HTTP 500/);
+    await expect(fetchStacksTransaction(C.stxApiUrl, 'abc', api.fetchFn)).rejects.toThrow(
+      /Not a Stacks transaction id/
+    );
+  });
+});

@@ -31,5 +31,8 @@
   "main": "./src/index.ts",
   "prettier": "@portage/prettier-config",
   "private": true,
+  "sideEffects": [
+    "./src/shared/schema.ts"
+  ],
   "types": "./src/index.ts"
 }
