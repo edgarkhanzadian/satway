@@ -2,6 +2,7 @@ import type { ReceiptFile } from '../src/app/receipt.js';
 import { PROGRESS, type SatwayApp } from '../src/app/satway-app.js';
 import { expect, test } from '../src/fixtures.js';
 import { expectRegisteredWithEmily } from '../src/scenario/checks.js';
+import { REFUSED, REGISTRATION_COPY } from '../src/scenario/journeys.js';
 import type { World } from '../src/world/world.js';
 
 async function startAndCloseMidSwap(
@@ -22,6 +23,10 @@ async function startAndCloseMidSwap(
 async function resumeToDone(later: SatwayApp, world: World, receipt: ReceiptFile): Promise<void> {
   await expect(later.progress(PROGRESS.swapping)).toBeVisible();
   await later.followDeposit();
+  await followedToDone(later, world, receipt);
+}
+
+async function followedToDone(later: SatwayApp, world: World, receipt: ReceiptFile): Promise<void> {
   await expect(later.page.getByRole('heading', { name: 'Deposit in progress' })).toBeVisible();
   await later.waitForProgress(PROGRESS.swapping);
   await expect(later.page.getByText(receipt.depositAddress, { exact: true })).toBeVisible();
@@ -72,6 +77,50 @@ test.describe('E. close the tab mid-swap and resume in a new one', () => {
     await later.page.getByRole('button', { name: 'Start another' }).click();
     await expect(later.page.getByRole('heading', { name: 'Before you start' })).toBeVisible();
     expect(wallets.stacks.behaviour.requests).toHaveLength(stacksRequests);
+  });
+
+  test('a deposit the closed tab never registered is registered when it is followed again', async ({
+    app,
+    world,
+    api,
+    harness,
+  }) => {
+    harness.allowConsoleErrors(REFUSED);
+    harness.backendDown({ method: 'POST', path: /^\/deposits$/ });
+    const { receipt } = await startAndCloseMidSwap(app);
+    await expect(app.progress(REGISTRATION_COPY.unreachable)).toBeVisible();
+    await app.page.close();
+    expect(api.watched()).toEqual([]);
+
+    harness.backendUp();
+    const later = await app.newTab();
+    await later.open();
+    await later.openRecover();
+    await later.pickSavedReceipt(`${receipt.quoteResponse.quote.amountInFormatted} USDC`);
+    await later.followDeposit();
+    await expect(later.progress(REGISTRATION_COPY.closable)).toBeVisible();
+    expect(api.watched()).toEqual([receipt.depositAddress]);
+    expect(api.depositPosts().map(p => p.status)).toEqual([201]);
+    await followedToDone(later, world, receipt);
+  });
+
+  test('following an already registered deposit again is answered as registered', async ({
+    app,
+    world,
+    api,
+  }) => {
+    const { receipt } = await startAndCloseMidSwap(app);
+    await expect(app.progress(REGISTRATION_COPY.closable)).toBeVisible();
+    await app.page.close();
+
+    const later = await app.newTab();
+    await later.open();
+    await later.openRecover();
+    await later.pickSavedReceipt(`${receipt.quoteResponse.quote.amountInFormatted} USDC`);
+    await later.followDeposit();
+    await expect(later.progress(REGISTRATION_COPY.closable)).toBeVisible();
+    expect(api.depositPosts().map(p => p.status)).toEqual([201, 409]);
+    await followedToDone(later, world, receipt);
   });
 
   test('from the downloaded receipt file, with the browser storage gone', async ({

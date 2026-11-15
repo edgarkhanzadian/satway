@@ -191,6 +191,39 @@ describe('createBackend register', () => {
     expect(await createBackend(BASE).register('aa', 'bb', 'cc')).toEqual(expected);
   });
 
+  it('passes on the Worker’s Retry-After for a busy answer', async () => {
+    vi.stubGlobal('fetch', () =>
+      Promise.resolve(
+        new Response(JSON.stringify({ message: 'Too many requests. Try again later.' }), {
+          status: 429,
+          headers: { 'retry-after': '60' },
+        })
+      )
+    );
+    expect(await createBackend(BASE).register('aa', 'bb', 'cc')).toEqual({
+      kind: 'unavailable',
+      status: 429,
+      message: 'Too many requests. Try again later.',
+      retryAfterSeconds: 60,
+    });
+  });
+
+  it('ignores a Retry-After that is not a number of seconds', async () => {
+    vi.stubGlobal('fetch', () =>
+      Promise.resolve(
+        new Response('{}', {
+          status: 503,
+          headers: { 'retry-after': 'Wed, 21 Oct 2026 07:28:00 GMT' },
+        })
+      )
+    );
+    expect(await createBackend(BASE).register('aa', 'bb', 'cc')).toEqual({
+      kind: 'unavailable',
+      status: 503,
+      message: 'Request failed (503)',
+    });
+  });
+
   it('returns an unreachable backend as unavailable', async () => {
     vi.stubGlobal('fetch', () => Promise.reject(new TypeError('Failed to fetch')));
     expect(await createBackend(BASE).register('aa', 'bb', 'cc')).toEqual({

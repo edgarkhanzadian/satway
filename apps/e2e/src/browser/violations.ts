@@ -1,4 +1,4 @@
-import { FAVICON_URL } from '../config.js';
+import { API_ORIGIN, FAVICON_URL } from '../config.js';
 import type { World } from '../world/world.js';
 import type { BrowserEvent, Harness, NetworkEntry } from './harness.js';
 
@@ -37,10 +37,15 @@ const EXPECTED_NOT_FOUND: readonly RegExp[] = [
   /^https:\/\/sbtc-emily\.com\/deposit\/[0-9a-f]{64}\/\d+$/,
 ];
 
+const CONFLICT = 'Failed to load resource: the server responded with a status of 409 (Conflict)';
+
+const EXPECTED_CONFLICT = `${API_ORIGIN}/deposits`;
+
 function allowedConsole(event: BrowserEvent, allow: Allowances): boolean {
   const url = event.url;
   if (event.text === NOT_FOUND && url !== undefined && EXPECTED_NOT_FOUND.some(p => p.test(url)))
     return true;
+  if (event.text === CONFLICT && url === EXPECTED_CONFLICT) return true;
   return allow.consoleErrors.some(pattern => pattern.test(event.text));
 }
 

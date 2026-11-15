@@ -30,6 +30,18 @@ export const SEND_COPY = {
   sendManually: 'Send the funds from your wallet yourself instead.',
 } as const;
 
+function keepOpen(reason: string): string {
+  return `Keep this page open: the deposit is not registered for background tracking yet, because ${reason}. This page keeps trying. Until it succeeds, only this page can register your Bitcoin payment with the sBTC signers, so if you close it, open it again later and load the receipt file.`;
+}
+
+export const REGISTRATION_COPY = {
+  closable:
+    'You can close this page. The deposit continues, and you can check on it later by loading the receipt file.',
+  busy: keepOpen('our server is busy'),
+  unreachable: keepOpen('our server could not be reached'),
+  unknownSwap: keepOpen('the swap provider has not listed this swap yet'),
+} as const;
+
 export interface EvmStart {
   amount?: string;
   asset?: string;

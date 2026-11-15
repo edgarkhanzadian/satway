@@ -37,6 +37,7 @@ import { type OneClickToken, MAINNET_CONFIG as config, errorMessage } from '@sat
 import {
   type ActiveDeposit,
   type Backend,
+  type BackgroundRegistration,
   ProgressReadError,
   type Receipt,
   type Snapshot,
@@ -59,7 +60,13 @@ import {
   type RouteUpdate,
   SendRecordView,
 } from '../../ui/index.js';
-import { registerForBackground } from './background-registration.js';
+import {
+  type RegistrationState,
+  closingNote,
+  firstRegistration,
+  keepRegistering,
+  registeredThisSession,
+} from './background-registration.js';
 import { type Prepared, prepareDeposit } from './flow.js';
 
 const POPULAR = ['USDC', 'USDT', 'ETH', 'SOL', 'BNB', 'TRX'];
@@ -67,6 +74,7 @@ const POPULAR = ['USDC', 'USDT', 'ETH', 'SOL', 'BNB', 'TRX'];
 const fields = field();
 
 const afterActions = cx(notice(), css({ marginTop: 'space.08' }));
+const afterActionsWarn = cx(notice({ tone: 'warn' }), css({ marginTop: 'space.08' }));
 
 const send = css({
   borderLeftWidth: 'accent',
@@ -212,14 +220,16 @@ export function Deposit(props: {
       const remembered = rememberReceipt(prepared.receipt);
       downloadReceipt(prepared.receipt);
       const swapAddress = prepared.receipt.quoteResponse.quote.depositAddress;
-      if (swapAddress) {
-        const { depositScript, reclaimScript } = prepared.receipt;
-        await registerForBackground(() =>
-          backend.register(depositScript, reclaimScript, swapAddress)
-        );
-      }
+      const { depositScript, reclaimScript } = prepared.receipt;
+      const first = swapAddress
+        ? await firstRegistration(() => backend.register(depositScript, reclaimScript, swapAddress))
+        : undefined;
       setPreview(prepared);
-      onActive({ receipt: prepared.receipt, receiptUnsaved: !remembered });
+      onActive({
+        receipt: prepared.receipt,
+        receiptUnsaved: !remembered,
+        ...(first === undefined ? {} : { firstRegistration: first }),
+      });
     } catch (err) {
       if (!dry || isLatest()) setError(errorMessage(err) ?? null);
     } finally {
@@ -238,6 +248,7 @@ export function Deposit(props: {
         backend={backend}
         receipt={active.receipt}
         receiptUnsaved={active.receiptUnsaved}
+        firstRegistration={active.firstRegistration}
         source={source}
         token={tokens.find(t => t.assetId === active.receipt.origin.assetId)}
         onRoute={onRoute}
@@ -398,12 +409,36 @@ function Tracking(props: {
   backend: Backend;
   receipt: Receipt;
   receiptUnsaved: boolean;
+  firstRegistration: BackgroundRegistration | null | undefined;
   source: SourceWallet | null;
   token: OneClickToken | undefined;
   onRoute(route: RouteUpdate | null): void;
   onDone(): void;
 }) {
   const { backend, receipt, source, token, onRoute } = props;
+  const [registration, setRegistration] = useState<RegistrationState>(() =>
+    props.firstRegistration?.kind === 'registered'
+      ? { kind: 'registered' }
+      : { kind: 'registering' }
+  );
+  const firstRegistrationRef = useRef(props.firstRegistration);
+  const stopRegistrationRef = useRef<() => void>(() => undefined);
+  useEffect(() => {
+    const swapAddress = receipt.quoteResponse.quote.depositAddress;
+    if (!swapAddress) return;
+    const first = firstRegistrationRef.current;
+    firstRegistrationRef.current = undefined;
+    const stop = keepRegistering(
+      () => backend.register(receipt.depositScript, receipt.reclaimScript, swapAddress),
+      {
+        ...(first === undefined ? {} : { first }),
+        known: { swaps: registeredThisSession, swapAddress },
+        onState: setRegistration,
+      }
+    );
+    stopRegistrationRef.current = stop;
+    return stop;
+  }, [backend, receipt]);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [reading, setReading] = useState<SwapReading | undefined>(undefined);
   const [problem, setProblem] = useState<string | null>(null);
@@ -539,6 +574,11 @@ function Tracking(props: {
 
   const progress = snapshot?.progress;
   const stage = progress?.stage ?? null;
+  const terminal = progress?.terminal ?? false;
+  useEffect(() => {
+    if (terminal) stopRegistrationRef.current();
+  }, [terminal]);
+  const closable = terminal || registration.kind === 'registered';
   useEffect(() => {
     onRoute({ origin: `${receipt.origin.symbol} on ${receipt.origin.chain}`, deposit: { stage } });
   }, [onRoute, receipt, stage]);
@@ -868,9 +908,8 @@ function Tracking(props: {
           {progress?.terminal ? 'Start another' : 'Hide'}
         </button>
       </div>
-      <p className={afterActions}>
-        You can close this page. The deposit continues, and you can check on it later by loading the
-        receipt file.
+      <p className={closable ? afterActions : afterActionsWarn} role="status">
+        {closingNote(registration, progress?.terminal ?? false)}
       </p>
     </section>
   );

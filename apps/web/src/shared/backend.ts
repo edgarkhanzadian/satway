@@ -18,7 +18,7 @@ export const UNKNOWN_SWAP = 'unknown-swap';
 export type BackgroundRegistration =
   | { kind: 'registered'; address: string }
   | { kind: 'rejected'; status: number; message: string; code?: typeof UNKNOWN_SWAP }
-  | { kind: 'unavailable'; status: number | null; message: string };
+  | { kind: 'unavailable'; status: number | null; message: string; retryAfterSeconds?: number };
 
 export interface Backend {
   tokens(): Promise<OneClickToken[]>;
@@ -79,7 +79,13 @@ function registrationFrom(url: string, res: Response, body: unknown): Background
       ...(unknownSwap ? { code: UNKNOWN_SWAP } : {}),
     };
   }
-  return { kind: 'unavailable', status: res.status, message };
+  const retryAfter = res.headers.get('retry-after')?.trim() ?? '';
+  return {
+    kind: 'unavailable',
+    status: res.status,
+    message,
+    ...(/^\d+$/.test(retryAfter) ? { retryAfterSeconds: Number(retryAfter) } : {}),
+  };
 }
 
 export function createBackend(baseUrl: string): Backend {

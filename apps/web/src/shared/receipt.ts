@@ -7,6 +7,8 @@ import {
   z,
 } from '@satway/core';
 
+import type { BackgroundRegistration } from './backend.js';
+
 export interface Receipt {
   version: 1;
   createdAt: string;
@@ -30,6 +32,7 @@ export interface Receipt {
 export interface ActiveDeposit {
   receipt: Receipt;
   receiptUnsaved: boolean;
+  firstRegistration?: BackgroundRegistration | null;
 }
 
 const REQUIRED_TEXT = [

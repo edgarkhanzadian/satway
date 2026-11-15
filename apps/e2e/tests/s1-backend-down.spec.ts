@@ -1,8 +1,14 @@
 import { PROGRESS, type SatwayApp } from '../src/app/satway-app.js';
 import { expect, test } from '../src/fixtures.js';
-import { expectRegisteredWithEmily, notifierRun } from '../src/scenario/checks.js';
 import {
+  expectRegisteredWithEmily,
+  expectWatchRegistered,
+  notifierRun,
+} from '../src/scenario/checks.js';
+import {
+  FAILED_TO_LOAD,
   REFUSED,
+  REGISTRATION_COPY,
   SEND_COPY,
   expectNoSendOffered,
   finishJourney,
@@ -135,10 +141,56 @@ test.describe('S1. our backend (the Worker) is down', () => {
     expect(api.depositPosts()).toEqual([]);
     expect(api.watched()).toEqual([]);
     await expect(app.page.getByRole('alert')).toHaveCount(0);
+    await expect(app.progress(REGISTRATION_COPY.unreachable)).toBeVisible();
+    await expect(app.page.getByText(REGISTRATION_COPY.closable)).toHaveCount(0);
     await app.sendFromWallet();
     const payout = await finishJourney(app, world);
     expectRegisteredWithEmily(world, started.receipt, payout.outpoint, 'page');
     expect(await api.runScheduled()).toEqual(notifierRun({ watched: 0 }));
+  });
+
+  test('POST /deposits fails at Continue: the page says to keep it open, retries, and says it can be closed once registered', async ({
+    app,
+    harness,
+    api,
+  }) => {
+    harness.allowConsoleErrors(REFUSED);
+    harness.backendDown({ method: 'POST', path: /^\/deposits$/, times: 2 });
+    const started = await startAwaitingFunds(app);
+    await expect(app.progress(REGISTRATION_COPY.unreachable)).toBeVisible();
+    await expect(app.page.getByText(REGISTRATION_COPY.closable)).toHaveCount(0);
+    expect(api.watched()).toEqual([]);
+
+    await app.fastForward(5_000);
+    await expect(app.progress(REGISTRATION_COPY.unreachable)).toBeVisible();
+    expect(api.watched()).toEqual([]);
+    await app.fastForward(15_000);
+    await expect(app.progress(REGISTRATION_COPY.closable)).toBeVisible();
+    await expect(app.page.getByText(/^Keep this page open/)).toHaveCount(0);
+    expect(api.watched()).toEqual([started.receipt.depositAddress]);
+    expectWatchRegistered(api, started.receipt);
+    await expect(app.page.getByRole('alert')).toHaveCount(0);
+  });
+
+  test('POST /deposits is rate limited: the page waits as long as the Worker asks, then registers', async ({
+    app,
+    harness,
+    api,
+  }) => {
+    harness.allowConsoleErrors(FAILED_TO_LOAD);
+    api.limiters.deposit.deny = true;
+    const started = await startAwaitingFunds(app);
+    expect(api.depositPosts().map(p => p.status)).toEqual([429]);
+    await expect(app.progress(REGISTRATION_COPY.busy)).toBeVisible();
+    await expect(app.page.getByText(REGISTRATION_COPY.closable)).toHaveCount(0);
+
+    api.limiters.deposit.deny = false;
+    await app.fastForward(30_000);
+    expect(api.depositPosts().map(p => p.status)).toEqual([429]);
+    await app.fastForward(30_000);
+    expect(api.depositPosts().map(p => p.status)).toEqual([429, 201]);
+    await expect(app.progress(REGISTRATION_COPY.closable)).toBeVisible();
+    expect(api.watched()).toEqual([started.receipt.depositAddress]);
   });
 
   test('during tracking: the swap status becomes unknown, no send is offered, and it recovers when the backend returns', async ({
