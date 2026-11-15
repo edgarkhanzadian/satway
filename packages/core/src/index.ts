@@ -1,14 +1,15 @@
-export * from './config.js';
-export * from './deposit-address.js';
-export * from './signers.js';
-export * from './emily.js';
-export * from './validate.js';
-export * from './oneclick.js';
-export * from './bitcoin.js';
-export * from './payout-selection.js';
-export * from './observe-deposit.js';
-export * from './status.js';
-export * from './reclaim.js';
-export { HttpError, type FetchLike } from './http.js';
-export { ResponseShapeError, parseWith, z } from './schema.js';
-export { errorMessage } from './errors.js';
+export * from './bitcoin/index.js';
+export * from './deposit/index.js';
+export * from './oneclick/index.js';
+export * from './sbtc/index.js';
+export {
+  type FetchLike,
+  HttpError,
+  MAINNET_CONFIG,
+  type NetworkConfig,
+  P2TR_DUST_SATS,
+  ResponseShapeError,
+  errorMessage,
+  parseWith,
+  z,
+} from './shared/index.js';

@@ -2,10 +2,15 @@ import { describe, expect, it } from 'vitest';
 
 import { buildQuoteRequest, MAINNET_CONFIG as config } from '@portage/core';
 
+import {
+  BadRequest,
+  DEADLINE_MARGIN_MINUTES,
+  registerDeposit,
+  sanitizeQuoteRequest,
+} from '../src/http/index.js';
 import { type Env, handle } from '../src/index.js';
-import { registerDeposit, runNotifier } from '../src/notifier.js';
-import { BadRequest, DEADLINE_MARGIN_MINUTES, sanitizeQuoteRequest } from '../src/proxy.js';
-import { type KV, listWatched } from '../src/store.js';
+import { runNotifier } from '../src/notifier/index.js';
+import { type KV, listWatched } from '../src/store/index.js';
 
 const D = {
   txid: '5ab7ae554358d3ffdab7cc48db49ff144c5ae4fdd617b4140eac1b1936109bf5',

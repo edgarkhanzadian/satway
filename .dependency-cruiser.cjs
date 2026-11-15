@@ -41,8 +41,265 @@ module.exports = {
       name: 'core-only-through-its-entry',
       severity: 'error',
       comment: 'Outside packages/core, import @portage/core through its package entry only.',
-      from: { path: '^(?:apps|scripts)/' },
+      from: { path: '^(?:apps|scripts|packages/(?!core/))' },
       to: { path: '^packages/core/', pathNot: '^packages/core/src/index[.]ts$' },
+    },
+    {
+      name: 'core-shared-imports-nothing-in-core',
+      severity: 'error',
+      comment:
+        'packages/core/src/shared (http, schema, errors, config) is the bottom layer: it imports no other core directory.',
+      from: { path: '^packages/core/src/shared/' },
+      to: { path: '^packages/core/src/', pathNot: '^packages/core/src/shared/' },
+    },
+    {
+      name: 'core-bitcoin-imports-only-shared',
+      severity: 'error',
+      comment:
+        'packages/core/src/bitcoin knows Bitcoin only: it may import shared, never sBTC, 1Click or a flow directory.',
+      from: { path: '^packages/core/src/bitcoin/' },
+      to: {
+        path: '^packages/core/src/',
+        pathNot: ['^packages/core/src/bitcoin/', '^packages/core/src/shared/'],
+      },
+    },
+    {
+      name: 'core-sbtc-imports-only-shared-and-bitcoin',
+      severity: 'error',
+      comment:
+        'packages/core/src/sbtc may import shared and bitcoin. It never imports oneclick or a flow directory.',
+      from: { path: '^packages/core/src/sbtc/' },
+      to: {
+        path: '^packages/core/src/',
+        pathNot: [
+          '^packages/core/src/sbtc/',
+          '^packages/core/src/shared/',
+          '^packages/core/src/bitcoin/',
+        ],
+      },
+    },
+    {
+      name: 'core-oneclick-imports-only-shared',
+      severity: 'error',
+      comment:
+        'packages/core/src/oneclick may import shared only. It never imports sbtc, bitcoin or a flow directory.',
+      from: { path: '^packages/core/src/oneclick/' },
+      to: {
+        path: '^packages/core/src/',
+        pathNot: ['^packages/core/src/oneclick/', '^packages/core/src/shared/'],
+      },
+    },
+    {
+      name: 'core-flows-import-only-base-layers',
+      severity: 'error',
+      comment:
+        'Every packages/core/src directory other than shared, bitcoin, sbtc and oneclick is a flow (deposit today, withdrawal later). A flow may import the base layers and its own files. Flows never import each other.',
+      from: { path: '^packages/core/src/(?!(?:shared|bitcoin|sbtc|oneclick)/)([^/]+)/' },
+      to: {
+        path: '^packages/core/src/',
+        pathNot: ['^packages/core/src/$1/', '^packages/core/src/(?:shared|bitcoin|sbtc|oneclick)/'],
+      },
+    },
+    {
+      name: 'core-flows-only-from-the-entry',
+      severity: 'error',
+      comment:
+        'Only the package entry packages/core/src/index.ts imports a flow directory from outside it. Base layers are covered by their own rules; this one covers root files and tests.',
+      from: {
+        path: '^packages/core/(?:src/[^/]+$|test/)',
+        pathNot: '^packages/core/src/index[.]ts$',
+      },
+      to: { path: '^packages/core/src/(?!(?:shared|bitcoin|sbtc|oneclick)/)[^/]+/' },
+    },
+    {
+      name: 'core-directories-through-their-index',
+      severity: 'error',
+      comment:
+        'A packages/core/src directory is imported from outside it only through its index.ts. Files inside a directory import their siblings directly.',
+      from: { path: '^packages/core/(src/(?:[^/]+/|[^/]+$)|test/)' },
+      to: {
+        path: '^packages/core/src/[^/]+/',
+        pathNot: ['^packages/core/$1', '^packages/core/src/[^/]+/index[.]ts$'],
+      },
+    },
+    {
+      name: 'chains-is-ui-free',
+      severity: 'error',
+      comment:
+        'packages/chains is usable outside a browser UI (a CLI or agent): no React, no Stacks wallet UI, no WalletConnect, no apps, scripts or Panda output, and among workspace packages only the @portage/core entry.',
+      from: { path: '^packages/chains/' },
+      to: {
+        path: [
+          'node_modules/react/',
+          'node_modules/react-dom/',
+          'node_modules/@types/react/',
+          'node_modules/@types/react-dom/',
+          'node_modules/@stacks/connect/',
+          'node_modules/@walletconnect/',
+          'node_modules/@reown/',
+          'node_modules/@fontsource',
+          '^react(?:-dom)?(?:/|$)',
+          '^@stacks/connect(?:/|$)',
+          '^@(?:walletconnect|reown)/',
+          '(^|/)portage-styles(/|$)',
+          '^(?:apps|scripts)/',
+          '^packages/(?!chains/|core/src/index[.]ts$)',
+        ],
+      },
+    },
+    {
+      name: 'chains-only-through-its-entries',
+      severity: 'error',
+      comment:
+        'Outside packages/chains, import @portage/chains through its entries only: the package entry, or @portage/chains/solana for the lazily loaded Solana send code.',
+      from: { pathNot: '^packages/chains/' },
+      to: {
+        path: '^packages/chains/',
+        pathNot: [
+          '^packages/chains/src/index[.]ts$',
+          '^packages/chains/src/send/solana/index[.]ts$',
+        ],
+      },
+    },
+    {
+      name: 'chains-metadata-does-not-import-send',
+      severity: 'error',
+      comment:
+        'packages/chains/src/metadata (chain families, chain ids, native assets, address checks) is reusable by any flow. It must not import the send directory.',
+      from: { path: '^packages/chains/src/metadata/' },
+      to: { path: '^packages/chains/src/', pathNot: '^packages/chains/src/metadata/' },
+    },
+    {
+      name: 'chains-solana-send-stays-lazy',
+      severity: 'error',
+      comment:
+        'The Solana send code (packages/chains/src/send/solana) is loaded lazily by the web app through @portage/chains/solana. The rest of the package may only import its types, or the main entry would pull it into the first chunk.',
+      from: { path: '^packages/chains/src/', pathNot: '^packages/chains/src/send/solana/' },
+      to: { path: '^packages/chains/src/send/solana/', dependencyTypesNot: ['type-only'] },
+    },
+    {
+      name: 'chains-directories-through-their-index',
+      severity: 'error',
+      comment:
+        'A packages/chains/src directory is imported from outside it only through its index.ts. Files inside a directory import their siblings directly.',
+      from: { path: '^packages/chains/src/([^/]+/|[^/]+$)' },
+      to: {
+        path: '^packages/chains/src/[^/]+/',
+        pathNot: ['^packages/chains/src/$1', '^packages/chains/src/[^/]+/index[.]ts$'],
+      },
+    },
+    {
+      name: 'chains-solana-through-its-index',
+      severity: 'error',
+      comment:
+        'Inside packages/chains, code outside send/solana reaches it only through send/solana/index.ts (and only for types, see chains-solana-send-stays-lazy).',
+      from: { path: '^packages/chains/src/', pathNot: '^packages/chains/src/send/solana/' },
+      to: {
+        path: '^packages/chains/src/send/solana/',
+        pathNot: '^packages/chains/src/send/solana/index[.]ts$',
+      },
+    },
+    {
+      name: 'scripts-use-package-entries-only',
+      severity: 'error',
+      comment:
+        'scripts/ may use @portage/core and @portage/chains through their package entries only, and no other workspace package.',
+      from: { path: '^scripts/' },
+      to: {
+        path: '^packages/',
+        pathNot: [
+          '^packages/core/src/index[.]ts$',
+          '^packages/chains/src/index[.]ts$',
+          '^packages/chains/src/send/solana/index[.]ts$',
+        ],
+      },
+    },
+    {
+      name: 'web-nothing-imports-app',
+      severity: 'error',
+      comment:
+        'apps/web/src/app composes the page (main.tsx, app.tsx). It may import everything in the web app; nothing imports it.',
+      from: { path: '^apps/web/', pathNot: '^apps/web/src/app/' },
+      to: { path: '^apps/web/src/app/' },
+    },
+    {
+      name: 'web-features-do-not-import-each-other',
+      severity: 'error',
+      comment:
+        'A directory under apps/web/src/features never imports another one (any feature, present or future). Features are composed in app/, which passes values and callbacks down.',
+      from: { path: '^apps/web/src/features/([^/]+)/' },
+      to: { path: '^apps/web/src/features/', pathNot: '^apps/web/src/features/$1/' },
+    },
+    {
+      name: 'web-ui-is-presentational',
+      severity: 'error',
+      comment:
+        'apps/web/src/ui holds presentational components: it never imports features, app, or the network-reading Solana send code.',
+      from: { path: '^apps/web/src/ui/' },
+      to: {
+        path: ['^apps/web/src/(?:features|app)/', '^packages/chains/src/send/solana/'],
+      },
+    },
+    {
+      name: 'web-ui-only-types-from-shared',
+      severity: 'error',
+      comment:
+        'apps/web/src/ui may import types from shared, never its code (the backend client, storage, progress checks).',
+      from: { path: '^apps/web/src/ui/' },
+      to: { path: '^apps/web/src/shared/', dependencyTypesNot: ['type-only'] },
+    },
+    {
+      name: 'web-shared-is-the-base',
+      severity: 'error',
+      comment: 'apps/web/src/shared never imports features, ui or app.',
+      from: { path: '^apps/web/src/shared/' },
+      to: { path: '^apps/web/src/(?:features|ui|app)/' },
+    },
+    {
+      name: 'web-directories-through-their-index',
+      severity: 'error',
+      comment:
+        'Inside apps/web/src, ui, shared and each feature directory are imported from outside only through their index.ts. Files inside a directory import their siblings directly.',
+      from: { path: '^apps/web/src/([^/]+/)' },
+      to: {
+        path: '^apps/web/src/(?:ui|shared|features/[^/]+)/',
+        pathNot: ['^apps/web/src/$1', '^apps/web/src/(?:ui|shared|features/[^/]+)/index[.]ts$'],
+      },
+    },
+    {
+      name: 'api-http-and-notifier-are-independent',
+      severity: 'error',
+      comment:
+        'apps/api/src/http (routes, proxy, POST /deposits) and apps/api/src/notifier (scheduled run) never import each other. Both use store/; index.ts wires them.',
+      from: { path: '^apps/api/src/(http|notifier)/' },
+      to: { path: '^apps/api/src/(?:http|notifier)/', pathNot: '^apps/api/src/$1/' },
+    },
+    {
+      name: 'api-store-is-the-base',
+      severity: 'error',
+      comment:
+        'apps/api/src/store (the KV watch store) imports neither http, notifier nor the entry.',
+      from: { path: '^apps/api/src/store/' },
+      to: { path: '^apps/api/src/', pathNot: '^apps/api/src/store/' },
+    },
+    {
+      name: 'api-nothing-imports-the-entry',
+      severity: 'error',
+      comment:
+        'apps/api/src/index.ts is the Worker entry. Code under apps/api/src never imports it.',
+      from: { path: '^apps/api/src/' },
+      to: { path: '^apps/api/src/index[.]ts$' },
+    },
+    {
+      name: 'api-directories-through-their-index',
+      severity: 'error',
+      comment:
+        'An apps/api/src directory is imported from outside it only through its index.ts. Files inside a directory import their siblings directly.',
+      from: { path: '^apps/api/(src/(?:[^/]+/|[^/]+$)|test/)' },
+      to: {
+        path: '^apps/api/src/[^/]+/',
+        pathNot: ['^apps/api/$1', '^apps/api/src/[^/]+/index[.]ts$'],
+      },
     },
     {
       name: 'styled-system-only-in-web',
@@ -72,11 +329,11 @@ module.exports = {
       name: 'no-raw-css-in-web',
       severity: 'error',
       comment:
-        'apps/web is styled through Panda. The only stylesheets it imports are src/app.css (the Panda entry) and Fontsource font files.',
+        'apps/web is styled through Panda. The only stylesheets it imports are src/app/app.css (the Panda entry) and Fontsource font files.',
       from: { path: '^apps/web/src/' },
       to: {
         path: '[.]css$',
-        pathNot: ['^apps/web/src/app[.]css$', 'node_modules/@fontsource(-variable)?/'],
+        pathNot: ['^apps/web/src/app/app[.]css$', 'node_modules/@fontsource(-variable)?/'],
       },
     },
     {

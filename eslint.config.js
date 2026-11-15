@@ -11,11 +11,58 @@ const coreDeepImport = {
   message: 'Import from the package entry @portage/core, not from its internal files.',
 };
 
+const chainsDeepImport = {
+  group: ['@portage/chains/*', '!@portage/chains/solana'],
+  message:
+    'Import from the package entry @portage/chains, or @portage/chains/solana for the lazily loaded Solana send code, not from its internal files.',
+};
+
 const zodThroughCore = {
   group: ['zod', 'zod/*'],
   message:
-    "Import z from @portage/core (./schema.js inside core). It turns on zod's jitless mode before any schema exists, so no eval runs under the page's script-src 'self'.",
+    "Import z from @portage/core (../shared/index.js inside core). It turns on zod's jitless mode before any schema exists, so no eval runs under the page's script-src 'self'.",
 };
+
+const browserGlobals = ['window', 'document', 'localStorage', 'sessionStorage', 'navigator'];
+
+const noBrowserGlobals = {
+  'no-restricted-globals': [
+    'error',
+    ...browserGlobals.map(name => ({
+      name,
+      message: `${name} is a browser global. This package runs outside a browser too: take the dependency as a parameter and let the web app pass the browser implementation.`,
+    })),
+  ],
+  'no-restricted-properties': [
+    'error',
+    ...browserGlobals.flatMap(property =>
+      ['globalThis', 'self'].map(object => ({
+        object,
+        property,
+        message: `${property} is a browser global. This package runs outside a browser too: take the dependency as a parameter.`,
+      }))
+    ),
+  ],
+};
+
+const coreNetworkExports = [
+  'OneClickClient',
+  'fetchAddressHistory',
+  'fetchDeposit',
+  'fetchDepositOutputs',
+  'fetchLimits',
+  'fetchSignersPublicKey',
+  'fetchTipHeight',
+  'fetchTransaction',
+  'fetchTransactionHex',
+  'fetchUnspentOutputs',
+  'fetchVerifiedSigners',
+  'isOutputSpent',
+  'notifyDeposit',
+  'observeDeposit',
+  'registerOutputs',
+  'snapshotOutpoints',
+];
 
 const stylesOnlyInWeb = {
   group: ['portage-styles', 'portage-styles/*'],
@@ -40,6 +87,14 @@ const pandaEscapeHatch = {
     "Panda's [value] escape hatch bypasses the tokens. Add or reuse a token in @portage/panda-preset instead.",
 };
 
+const webRestrictedPatterns = [
+  coreDeepImport,
+  chainsDeepImport,
+  zodThroughCore,
+  presetOnlyThroughPanda,
+  rawCssInWeb,
+];
+
 const webRestrictedSyntax = [
   ...sharedRestrictedSyntax,
   pandaEscapeHatch,
@@ -57,6 +112,33 @@ const webRestrictedSyntax = [
     message: 'No literal class names. Use css(), cx() or a recipe from portage-styles.',
   },
 ];
+
+const chainsRestrictedImports = {
+  paths: [
+    ...sharedRestrictedImportPaths,
+    { name: 'react', message: 'packages/chains is UI-free. Keep React in apps/web.' },
+    { name: 'react-dom', message: 'packages/chains is UI-free. Keep React in apps/web.' },
+    {
+      name: '@stacks/connect',
+      message: 'packages/chains holds no wallet UI. Stacks wallet connection lives in apps/web.',
+    },
+  ],
+  patterns: [
+    { group: ['react/*', 'react-dom/*'], message: 'packages/chains is UI-free.' },
+    {
+      group: ['@walletconnect/*', '@reown/*'],
+      message:
+        'packages/chains does not connect wallets. WalletConnect lives in apps/web/src/features/chain-wallets.',
+    },
+    stylesOnlyInWeb,
+    {
+      group: ['@portage/*', '!@portage/core'],
+      message: 'packages/chains may import @portage/core only among workspace packages.',
+    },
+    coreDeepImport,
+    zodThroughCore,
+  ],
+};
 
 const coreRestrictedImports = {
   paths: [
@@ -120,8 +202,20 @@ export default defineConfig([
     },
   },
   {
+    name: 'core-and-chains-run-outside-a-browser',
+    files: ['packages/core/**/*.ts', 'packages/chains/**/*.ts'],
+    rules: noBrowserGlobals,
+  },
+  {
+    name: 'chains',
+    files: ['packages/chains/**/*.ts'],
+    rules: {
+      'no-restricted-imports': ['error', chainsRestrictedImports],
+    },
+  },
+  {
     name: 'core-zod-entry',
-    files: ['packages/core/src/schema.ts'],
+    files: ['packages/core/src/shared/schema.ts'],
     rules: {
       'no-restricted-imports': ['error', coreRestrictedImports],
     },
@@ -134,7 +228,13 @@ export default defineConfig([
         'error',
         {
           paths: sharedRestrictedImportPaths,
-          patterns: [coreDeepImport, zodThroughCore, stylesOnlyInWeb, presetOnlyThroughPanda],
+          patterns: [
+            coreDeepImport,
+            chainsDeepImport,
+            zodThroughCore,
+            stylesOnlyInWeb,
+            presetOnlyThroughPanda,
+          ],
         },
       ],
     },
@@ -148,10 +248,38 @@ export default defineConfig([
         'error',
         {
           paths: sharedRestrictedImportPaths,
-          patterns: [coreDeepImport, zodThroughCore, presetOnlyThroughPanda, rawCssInWeb],
+          patterns: webRestrictedPatterns,
         },
       ],
       'no-restricted-syntax': ['error', ...webRestrictedSyntax],
+    },
+  },
+  {
+    name: 'web-ui-reads-no-network',
+    files: ['apps/web/src/ui/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            ...sharedRestrictedImportPaths,
+            {
+              name: '@portage/core',
+              importNames: coreNetworkExports,
+              message:
+                'apps/web/src/ui is presentational. Read from the network in a feature or in shared, and pass the result down.',
+            },
+          ],
+          patterns: [
+            ...webRestrictedPatterns,
+            {
+              group: ['@portage/chains/solana'],
+              message:
+                'apps/web/src/ui is presentational. The Solana send code reads the Solana RPC; call it from a feature.',
+            },
+          ],
+        },
+      ],
     },
   },
   {

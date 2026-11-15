@@ -1,0 +1,37 @@
+{
+  "name": "@portage/chains",
+  "description": "EVM and Solana transfers, sends and send records for the origin chain. No UI, no browser globals.",
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "format": "prettier . --write --ignore-path ../../.prettierignore",
+    "format:check": "prettier . --check --ignore-path ../../.prettierignore",
+    "lint": "eslint --cache --max-warnings 0",
+    "lint:fix": "pnpm lint --fix",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./solana": "./src/send/solana/index.ts"
+  },
+  "dependencies": {
+    "@portage/core": "workspace:*",
+    "@scure/base": "1.2.6",
+    "@solana-program/system": "0.16.0",
+    "@solana-program/token": "0.18.0",
+    "@solana/kit": "8.6.0",
+    "uqr": "0.1.3"
+  },
+  "devDependencies": {
+    "@portage/prettier-config": "workspace:*",
+    "@portage/tsconfig-config": "workspace:*",
+    "prettier": "3.5.1",
+    "typescript": "5.9.3",
+    "vitest": "3.2.7"
+  },
+  "main": "./src/index.ts",
+  "prettier": "@portage/prettier-config",
+  "private": true,
+  "types": "./src/index.ts"
+}

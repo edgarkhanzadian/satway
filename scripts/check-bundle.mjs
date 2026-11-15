@@ -97,7 +97,7 @@ if (!csp) {
 // broken feature and a CSP violation report, so it must not ship at all.
 // zod has two Function sites: a feature probe that returns early when
 // `jitless` is set, and the object JIT compiler, which only runs when the probe
-// succeeded. packages/core/src/schema.ts sets `z.config({ jitless: true })`
+// succeeded. packages/core/src/shared/schema.ts sets `z.config({ jitless: true })`
 // before any schema exists, so neither runs. They are allowed only while that
 // config call is in the bundle.
 const directEval = /(?<![\w$.])eval\s*\(/;
@@ -136,7 +136,7 @@ for (const file of scripts) {
 if (zodSites > 0 && !jitlessConfigured)
   problems.push("the bundle contains zod's JIT but not the z.config({ jitless: true }) call");
 
-for (const pkgPath of ['packages/core', 'apps/web', 'apps/api']) {
+for (const pkgPath of ['packages/core', 'packages/chains', 'apps/web', 'apps/api']) {
   const pkg = JSON.parse(readFileSync(join(root, pkgPath, 'package.json'), 'utf8'));
   for (const [name, version] of Object.entries(pkg.dependencies ?? {})) {
     if (version.startsWith('workspace:')) continue;

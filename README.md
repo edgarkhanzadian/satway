@@ -9,12 +9,72 @@ address. This project holds no funds and no user keys.
 
 ## Layout
 
-| Path            | What it is                                                                                                                            |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/core` | Pure logic: deposit address, signer key verification, quote building and checking, payout detection, status, reclaim. No UI, no keys. |
-| `apps/web`      | Browser app (Vite + React): deposit flow, status tracking, recovery page.                                                             |
-| `apps/api`      | Cloudflare Worker: keeps the 1Click API key off the client, and notifies the sBTC signers of payouts if the user closed the tab.      |
-| `scripts`       | Mainnet proof scripts and the bundle safety check.                                                                                    |
+| Path              | What it is                                                                                                                                     |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/core`   | Pure logic: deposit address, signer key verification, quote building and checking, payout detection, status, reclaim. No UI, no keys.          |
+| `packages/chains` | The other chains: chain metadata and address checks, EVM and Solana transfer building, sending and send records. No UI and no browser globals. |
+| `apps/web`        | Browser app (Vite + React): deposit flow, status tracking, recovery page.                                                                      |
+| `apps/api`        | Cloudflare Worker: keeps the 1Click API key off the client, and notifies the sBTC signers of payouts if the user closed the tab.               |
+| `scripts`         | Mainnet proof scripts and the bundle safety check.                                                                                             |
+
+### Structure inside the packages
+
+Each directory below has an `index.ts` that is its public surface. Code outside a directory
+imports only that `index.ts`; files inside a directory import their siblings directly.
+`pnpm lint:deps` (dependency-cruiser) enforces every rule listed here, and ESLint adds the
+ones it cannot see.
+
+```
+packages/core/src/
+  shared/      http helpers, the zod wrapper (schema), errors, config
+  bitcoin/     Esplora reads: address history, unspent outputs, transactions, tip height
+  sbtc/        deposit address, signer keys, Emily, reclaim, deposit transaction check
+  oneclick/    1Click client, quote and status schemas, quote checks, reading a status
+  deposit/     the deposit flow: quote request, payout selection, observing, progress, amount checks
+  index.ts     the package entry, the only file other packages import
+packages/chains/src/
+  metadata/    chain families, EVM chain ids, native assets, Solana address checks, RPC config
+  send/        wallet types, EVM transfers and sends, send records, send attempts
+  send/solana/ Solana transfer building, RPC client, Solana Pay, send (loaded lazily)
+  index.ts     the package entry; @portage/chains/solana is the second, lazy entry
+apps/web/src/
+  app/         main.tsx, app.tsx, app.css: composes the page
+  features/    deposit, recover, chain-wallets (From panel), stacks-wallet (To panel)
+  ui/          presentational components and shared panel styles
+  shared/      backend client, receipts, progress checks, storage and its migration, config
+apps/api/src/
+  http/        routes, the 1Click proxy, POST /deposits
+  notifier/    the scheduled signer notifier
+  store/       the KV watch store, used by http and notifier
+  index.ts     the Worker entry that wires http and notifier
+```
+
+The rules, in plain words:
+
+- `packages/core`: `shared` imports nothing else in core. `bitcoin` imports only `shared`.
+  `sbtc` imports `shared` and `bitcoin`. `oneclick` imports only `shared`, so `sbtc` and
+  `oneclick` never import each other. `deposit` is a flow directory: every core directory
+  other than `shared`, `bitcoin`, `sbtc` and `oneclick` is a flow (a `withdrawal` flow would
+  sit beside `deposit`). A flow may import the four base layers; sibling flows never import
+  each other, base layers never import a flow, and only `index.ts` imports a flow from
+  outside it. Nothing outside the package imports anything but `index.ts`.
+- `packages/core` and `packages/chains` run outside a browser: no React, no wallet UI, no
+  `window`, `document`, `localStorage`, `sessionStorage` or `navigator`. Storage and fetch
+  are passed in.
+- `packages/chains` imports only the `@portage/core` entry among workspace packages, and no
+  React, `@stacks/connect`, WalletConnect, apps, scripts or Panda output. `metadata` never
+  imports `send`. Outside `send/solana`, the package imports Solana send code for its types
+  only, so the web app can load it lazily through `@portage/chains/solana`.
+- `apps/web`: `app` may import anything and nothing imports it. A feature may import `ui`,
+  `shared`, `@portage/core` and `@portage/chains`, never another feature (any directory under
+  `features/`, including future ones); `app` passes values and callbacks between them. `ui`
+  imports types only from `shared`, never a feature or `app`, never the Solana send code,
+  and never a network-reading export of `@portage/core`. `shared` never imports a feature,
+  `ui` or `app`.
+- `apps/api`: `http` and `notifier` never import each other; both use `store`, and only
+  `index.ts` wires them. Nothing imports `index.ts`.
+- The two apps never import each other, nothing imports `scripts/`, and `scripts/` uses only
+  the `@portage/core` and `@portage/chains` entries.
 
 ## Rules the code is built around
 
@@ -24,7 +84,7 @@ address. This project holds no funds and no user keys.
   our own backend records are never the source of truth.
 - The signer key is not trusted from one API: it must also appear in recent
   confirmed deposits and have swept one on Bitcoin recently.
-- Fees and endpoints live in `packages/core/src/config.ts`, checked in, and
+- Fees and endpoints live in `packages/core/src/shared/config.ts`, checked in, and
   cannot be changed by a request, a host page or a server response.
 - The production page runs only bundled code (`script-src 'self'`).
 
@@ -34,7 +94,7 @@ Requires Node 26.13.1 and pnpm 10.33.0 (`proto use` installs both from `.prototo
 
 ```sh
 pnpm install
-pnpm test            # unit tests for core, api and web
+pnpm test            # unit tests for core, chains, api and web
 pnpm typecheck
 pnpm build           # builds apps/web
 pnpm check:bundle    # fails if the build could run un-bundled code
@@ -65,7 +125,7 @@ Styling uses [PandaCSS](https://panda-css.com), structured like leather-io/mono.
 `strictPropertyValues` on. `pnpm install` runs `panda codegen` (the web app's `prepare` script),
 which writes the git-ignored `apps/web/portage-styles`; `lint`, `typecheck`, `build` and `dev`
 run it again first. App code imports from `portage-styles/*` only: no `.css` files besides
-`src/app.css` and Fontsource, no inline styles, no literal class names and no `[value]` escape
+`src/app/app.css` and Fontsource, no inline styles, no literal class names and no `[value]` escape
 hatches (ESLint and dependency-cruiser enforce this).
 
 Local development:
@@ -119,6 +179,6 @@ Content-Security-Policy is generated from it.
 - Responses from 1Click, Hiro, Emily, mempool.space and the wallet are checked
   with zod schemas before use. The schemas keep unknown fields, so a stored quote
   response keeps every field the provider sent. zod runs in `jitless` mode (set in
-  `packages/core/src/schema.ts`; import `z` from `@portage/core`), so it never
+  `packages/core/src/shared/schema.ts`; import `z` from `@portage/core`), so it never
   needs `eval` under the page's CSP.
 - `@stacks/connect` bundles WalletConnect, which is most of the bundle size.
