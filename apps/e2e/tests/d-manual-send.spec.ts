@@ -5,6 +5,7 @@ import {
   expectRegisteredWithEmily,
   expectWatchRegistered,
 } from '../src/scenario/checks.js';
+import { field } from '../src/world/http.js';
 import { TOKENS } from '../src/world/oneclick.js';
 
 test('D. manual send: no chain wallet connected, the user pays the shown address themselves', async ({
@@ -55,4 +56,30 @@ test('D. manual send: no chain wallet connected, the user pays the shown address
   expect(wallets.evm.behaviour.requests).toEqual([]);
   expect(wallets.solana.behaviour.requests).toEqual([]);
   expect(wallets.stacks.behaviour.requests.map(r => r.method)).toEqual(['getAddresses']);
+});
+
+test('D. manual send: the amount to send comes from the verified base units, not the provider’s formatted text', async ({
+  app,
+  world,
+}) => {
+  world.oneClick.tamper = (response, { dry }) => {
+    const quote = field(response, 'quote');
+    if (!dry && typeof quote === 'object' && quote !== null)
+      Reflect.set(quote, 'amountInFormatted', '400.0');
+  };
+  await app.open();
+  await app.connectStacksWallet();
+  await app.fillDeposit({ asset: 'USDC on base', amount: '40', refundTo: world.rng.evmAddress() });
+  await app.getQuote();
+  const { receipt } = await app.continue();
+  expect(receipt.quoteResponse.quote.amountInFormatted).toBe('400.0');
+  expect(receipt.quoteResponse.quote.amountIn).toBe('40000000');
+  expect(receipt.origin).toMatchObject({ decimals: TOKENS.usdcBase.decimals });
+
+  await app.waitForProgress(PROGRESS.awaitingFunds);
+  await expect(app.page.getByText('40.0 USDC on base', { exact: true })).toBeVisible();
+  await expect(app.page.getByText(/400\.0/)).toHaveCount(0);
+
+  await app.openRecover();
+  expect(await app.savedReceiptLabels()).toEqual([expect.stringMatching(/^40\.0 USDC, started /)]);
 });

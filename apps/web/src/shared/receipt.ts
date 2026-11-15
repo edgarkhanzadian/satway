@@ -2,6 +2,7 @@ import {
   type OneClickQuoteResponse,
   ResponseShapeError,
   buildDepositAddress,
+  formatBaseUnits,
   oneClickQuoteResponseSchema,
   z,
 } from '@satway/core';
@@ -19,7 +20,7 @@ export interface Receipt {
   depositScriptPubKey: string;
   depositScript: string;
   reclaimScript: string;
-  origin: { chain: string; symbol: string; assetId: string };
+  origin: { chain: string; symbol: string; assetId: string; decimals?: number };
   refundTo: string;
   quoteResponse: OneClickQuoteResponse;
   priorOutpoints?: string[];
@@ -45,6 +46,8 @@ const REQUIRED_TEXT = [
 
 const text = z.string().min(1);
 
+const MAX_TOKEN_DECIMALS = 36;
+
 const receiptSchema: z.ZodType<Receipt> = z.looseObject({
   version: z.literal(1),
   createdAt: z.string(),
@@ -58,7 +61,12 @@ const receiptSchema: z.ZodType<Receipt> = z.looseObject({
   depositScriptPubKey: text,
   depositScript: text,
   reclaimScript: text,
-  origin: z.looseObject({ chain: z.string(), symbol: z.string(), assetId: z.string() }),
+  origin: z.looseObject({
+    chain: z.string(),
+    symbol: z.string(),
+    assetId: z.string(),
+    decimals: z.number().int().min(0).max(MAX_TOKEN_DECIMALS).optional(),
+  }),
   refundTo: text,
   quoteResponse: oneClickQuoteResponseSchema,
   priorOutpoints: z.array(z.string().regex(/^[0-9a-f]{64}:\d+$/)).optional(),
@@ -100,6 +108,26 @@ export function verifyReceipt(value: unknown): Receipt {
     throw new Error('Receipt does not add up: the quote pays a different address');
   }
   return r;
+}
+
+export type SendAmount = { kind: 'verified'; text: string } | { kind: 'base-units'; units: string };
+
+export function sendAmountOf(
+  receipt: Receipt,
+  tokenDecimals: number | null,
+  owed?: bigint
+): SendAmount {
+  const amountIn = receipt.quoteResponse.quote.amountIn;
+  const units = owed?.toString() ?? amountIn;
+  const decimals = receipt.origin.decimals ?? tokenDecimals;
+  if (decimals === null || !/^\d+$/.test(units)) return { kind: 'base-units', units };
+  return { kind: 'verified', text: formatBaseUnits(BigInt(units), decimals) };
+}
+
+export function sendAmountText(amount: SendAmount, symbol: string): string {
+  return amount.kind === 'verified'
+    ? `${amount.text} ${symbol}`
+    : `${amount.units} base units of ${symbol}`;
 }
 
 export const RECEIPTS_KEY = 'satway.receipts.v1';

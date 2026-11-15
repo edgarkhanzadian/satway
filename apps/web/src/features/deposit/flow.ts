@@ -131,6 +131,7 @@ export async function prepareDeposit(
       chain: input.token.blockchain,
       symbol: input.token.symbol,
       assetId: input.token.assetId,
+      decimals: input.token.decimals,
     },
     refundTo: input.refundTo.trim(),
     quoteResponse: response,

@@ -7,6 +7,7 @@ import {
   appFeesFor,
   assertAppFeeConfig,
   assertStatusMatchesQuote,
+  formattedAmountMatches,
   oneClickQuoteResponseSchema,
   oneClickStatusResponseSchema,
   parseOneClickStatus,
@@ -181,6 +182,27 @@ describe('refundOf', () => {
     expect(refundOf(status)?.refundedAmountFormatted).toBeNull();
   });
 
+  it('with the token decimals known, refuses a formatted refund off by a power of ten', () => {
+    function refunded(formatted: string) {
+      return statusWith(raw => {
+        raw.status = 'REFUNDED';
+        const details = raw.swapDetails;
+        if (typeof details !== 'object' || details === null) throw new Error('no details');
+        raw.swapDetails = {
+          ...details,
+          refundedAmount: '8100',
+          refundedAmountFormatted: formatted,
+        };
+      });
+    }
+    expect(refundOf(refunded('0.000081'), 8)?.refundedAmountFormatted).toBe('0.000081');
+    expect(refundOf(refunded('0.0000810'), 8)?.refundedAmountFormatted).toBe('0.0000810');
+    expect(refundOf(refunded('0.00081'), 8)?.refundedAmountFormatted).toBeNull();
+    expect(refundOf(refunded('0.0000081'), 8)?.refundedAmountFormatted).toBeNull();
+    expect(refundOf(refunded('8100'), 8)?.refundedAmountFormatted).toBeNull();
+    expect(refundOf(refunded('0.00081'), null)?.refundedAmountFormatted).toBe('0.00081');
+  });
+
   it('is null without a status and ignores amounts that are not whole numbers', () => {
     expect(refundOf(null)).toBeNull();
     const status = statusWith(raw => {
@@ -193,6 +215,30 @@ describe('refundOf', () => {
       refundedAmount: null,
       refundFee: null,
     });
+  });
+});
+
+describe('formattedAmountMatches', () => {
+  it.each([
+    ['25000000', '25.0', 6, true],
+    ['25000000', '25', 6, true],
+    ['25000000', '25.000000', 6, true],
+    ['25000000', '25.0000000', 6, true],
+    ['25000000', '2.5', 6, false],
+    ['25000000', '250.0', 6, false],
+    ['25000001', '25.0', 6, false],
+    ['1', '0.000001', 6, true],
+    ['1', '0.0000001', 6, false],
+    ['0', '0', 18, true],
+    ['25000000', '25.0 USDC', 6, false],
+    ['25000000', '', 6, false],
+    ['25000000', '.5', 6, false],
+  ] as const)('%s base units as %j with %i decimals -> %s', (base, formatted, decimals, ok) => {
+    expect(formattedAmountMatches(base, formatted, decimals)).toBe(ok);
+  });
+
+  it('refuses when the base units are not a whole number', () => {
+    expect(formattedAmountMatches('25.0', '25.0', 0)).toBe(false);
   });
 });
 

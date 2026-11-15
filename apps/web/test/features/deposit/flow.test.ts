@@ -29,6 +29,7 @@ import {
   receiptFileName,
   receiptId,
   rememberReceipt,
+  sendAmountOf,
   verifyReceipt,
 } from '../../../src/shared/receipt.js';
 import {
@@ -1258,6 +1259,22 @@ describe('verifyReceipt', () => {
     }
   );
 
+  it('stores the token decimals in new receipts and still loads receipts without them', async () => {
+    const receipt = await receiptFor(world());
+    expect(receipt.origin.decimals).toBe(6);
+    expect(verifyReceipt(JSON.parse(JSON.stringify(receipt))).origin.decimals).toBe(6);
+    const old = structuredClone(receipt);
+    delete old.origin.decimals;
+    expect(verifyReceipt(JSON.parse(JSON.stringify(old))).origin.decimals).toBeUndefined();
+  });
+
+  it.each([-1, 2.5, 100, '6'])('rejects a receipt with token decimals %j', async decimals => {
+    const receipt = await receiptFor(world());
+    expect(() => verifyReceipt({ ...receipt, origin: { ...receipt.origin, decimals } })).toThrow(
+      /receipt file: origin\.decimals/
+    );
+  });
+
   it('rejects a receipt whose stored quote is malformed', async () => {
     const receipt = await receiptFor(world());
     const broken = {
@@ -1268,6 +1285,42 @@ describe('verifyReceipt', () => {
       },
     };
     expect(() => verifyReceipt(broken)).toThrow(/receipt file: quoteResponse\.quote\.amountIn/);
+  });
+});
+
+describe('sendAmountOf', () => {
+  async function tampered(formatted: string): Promise<Receipt> {
+    const receipt = await receiptFor(world());
+    receipt.quoteResponse.quote.amountInFormatted = formatted;
+    return receipt;
+  }
+
+  it('shows the verified amount from the base units and the stored decimals, not the provider text', async () => {
+    const receipt = await tampered('250.0');
+    expect(receipt.quoteResponse.quote.amountIn).toBe('25000000');
+    expect(sendAmountOf(receipt, null)).toEqual({ kind: 'verified', text: '25.0' });
+  });
+
+  it('uses the token list decimals for an old receipt without them', async () => {
+    const receipt = await tampered('2.5');
+    delete receipt.origin.decimals;
+    expect(sendAmountOf(receipt, 6)).toEqual({ kind: 'verified', text: '25.0' });
+  });
+
+  it('falls back to base units when no decimals are known at all', async () => {
+    const receipt = await tampered('25.0');
+    delete receipt.origin.decimals;
+    expect(sendAmountOf(receipt, null)).toEqual({ kind: 'base-units', units: '25000000' });
+  });
+
+  it('formats an owed remainder the same way', async () => {
+    const receipt = await receiptFor(world());
+    expect(sendAmountOf(receipt, null, 1_500_000n)).toEqual({ kind: 'verified', text: '1.5' });
+    delete receipt.origin.decimals;
+    expect(sendAmountOf(receipt, null, 1_500_000n)).toEqual({
+      kind: 'base-units',
+      units: '1500000',
+    });
   });
 });
 

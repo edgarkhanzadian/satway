@@ -4,6 +4,7 @@ import {
   type OneClickQuoteResponse,
   type OneClickStatusResponse,
 } from './oneclick.js';
+import { formattedAmountMatches } from './status-reading.js';
 
 export interface StatusQuoteEcho {
   timestamp?: string;
@@ -172,7 +173,16 @@ function sameDigits(baseUnits: string, formatted: string): boolean {
   );
 }
 
-export function refundOf(status: OneClickStatusResponse | null): SwapRefund | null {
+function formattedMatches(baseUnits: string, formatted: string, decimals: number | null): boolean {
+  return decimals === null
+    ? sameDigits(baseUnits, formatted)
+    : formattedAmountMatches(baseUnits, formatted, decimals);
+}
+
+export function refundOf(
+  status: OneClickStatusResponse | null,
+  decimals: number | null = null
+): SwapRefund | null {
   if (!status) return null;
   const details = parseWith(refundSchema, status, '1Click status').swapDetails;
   const amount =
@@ -185,7 +195,9 @@ export function refundOf(status: OneClickStatusResponse | null): SwapRefund | nu
     refunded,
     refundedAmount: amount,
     refundedAmountFormatted:
-      amount !== null && formatted && sameDigits(amount, formatted) ? formatted : null,
+      amount !== null && formatted && formattedMatches(amount, formatted, decimals)
+        ? formatted
+        : null,
     refundReason: details.refundReason ?? null,
     refundFee: details.refundFee && BASE_UNITS.test(details.refundFee) ? details.refundFee : null,
   };

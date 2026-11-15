@@ -30,6 +30,8 @@ import {
   latestRequests,
   loadReceipts,
   receiptId,
+  sendAmountOf,
+  sendAmountText,
   verifyReceipt,
 } from '../../shared/index.js';
 import { PayoutDetails, PayoutNotices, RefundNote, type RouteUpdate } from '../../ui/index.js';
@@ -246,7 +248,7 @@ export function Recover(props: {
             </option>
             {saved.map((r, i) => (
               <option key={receiptId(r)} value={i}>
-                {r.quoteResponse.quote.amountInFormatted} {r.origin.symbol}, started{' '}
+                {sendAmountText(sendAmountOf(r, null), r.origin.symbol)}, started{' '}
                 {new Date(r.createdAt).toLocaleString()}
               </option>
             ))}

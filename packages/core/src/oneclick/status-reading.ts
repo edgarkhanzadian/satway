@@ -40,6 +40,21 @@ export function remainingDepositOf(
   return BigInt(deposited) > 0n && owed > 0n ? owed : null;
 }
 
+const DECIMAL_TEXT = /^(\d+)(?:\.(\d+))?$/;
+
+export function formattedAmountMatches(
+  baseUnits: string,
+  formatted: string,
+  decimals: number
+): boolean {
+  const match = DECIMAL_TEXT.exec(formatted);
+  if (!match || !BASE_UNITS.test(baseUnits)) return false;
+  const whole = match[1] ?? '';
+  const fraction = (match[2] ?? '').replace(/0+$/, '');
+  if (fraction.length > decimals) return false;
+  return BigInt(whole + fraction.padEnd(decimals, '0')) === BigInt(baseUnits);
+}
+
 export function formatBaseUnits(units: bigint, decimals: number): string {
   const digits = units.toString().padStart(decimals + 1, '0');
   const whole = digits.slice(0, digits.length - decimals);

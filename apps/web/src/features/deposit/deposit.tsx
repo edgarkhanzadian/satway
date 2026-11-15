@@ -33,12 +33,7 @@ import {
   walletCovers,
   watchSendRecords,
 } from '@satway/chains';
-import {
-  type OneClickToken,
-  MAINNET_CONFIG as config,
-  errorMessage,
-  formatBaseUnits,
-} from '@satway/core';
+import { type OneClickToken, MAINNET_CONFIG as config, errorMessage } from '@satway/core';
 
 import {
   type ActiveDeposit,
@@ -50,6 +45,8 @@ import {
   downloadReceipt,
   latestRequests,
   rememberReceipt,
+  sendAmountOf,
+  sendAmountText,
   sendRecords,
 } from '../../shared/index.js';
 import {
@@ -538,10 +535,13 @@ function Tracking(props: {
 
   const waitingForFunds = !snapshot || progress?.stage === 'awaiting-funds';
   const shortDeposit = snapshot?.swap === 'INCOMPLETE_DEPOSIT';
+  const tokenDecimals =
+    token !== undefined && token.assetId === receipt.origin.assetId ? token.decimals : null;
   const owed =
-    shortDeposit && snapshot.remaining !== null && token !== undefined
-      ? formatBaseUnits(snapshot.remaining, token.decimals)
+    shortDeposit && snapshot.remaining !== null
+      ? sendAmountOf(receipt, tokenDecimals, snapshot.remaining)
       : null;
+  const sendAmount = owed ?? sendAmountOf(receipt, tokenDecimals);
   const walletCanSend =
     family === 'evm' ? source?.kind === 'evm' : family === 'solana' && solanaAccount !== null;
   const walletReady =
@@ -700,8 +700,15 @@ function Tracking(props: {
                 </p>
               )}
               <p className={sendFigure}>
-                {owed ?? quote.amountInFormatted} {receipt.origin.symbol} on {receipt.origin.chain}
+                {sendAmountText(sendAmount, receipt.origin.symbol)} on {receipt.origin.chain}
               </p>
+              {sendAmount.kind === 'base-units' && (
+                <p className={sendNote}>
+                  This page does not know how many decimal places {receipt.origin.symbol} has, so
+                  the amount is shown in its smallest unit, exactly as the swap was quoted. Check
+                  that your wallet shows the same amount before you send.
+                </p>
+              )}
               <p className={sendLine}>to</p>
               <p className={sendFigure}>
                 <code>{quote.depositAddress}</code>

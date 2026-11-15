@@ -115,6 +115,6 @@ export async function checkProgress(
     registrationError: registrationErrors.map(e => e.message).join(' ') || null,
     registrationErrors,
     remaining: remainingDepositOf(status, receipt.quoteResponse.quote.amountIn),
-    refund: refundOf(status),
+    refund: refundOf(status, receipt.origin.decimals ?? null),
   };
 }
