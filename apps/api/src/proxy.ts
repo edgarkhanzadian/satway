@@ -7,7 +7,12 @@ import {
 
 export class BadRequest extends Error {}
 
-type FeeConfig = Pick<NetworkConfig, 'btcAssetId' | 'appFeeBps' | 'appFeeRecipient'>;
+type FeeConfig = Pick<
+  NetworkConfig,
+  'btcAssetId' | 'appFeeBps' | 'appFeeRecipient' | 'quoteDeadlineMinutes'
+>;
+
+export const DEADLINE_MARGIN_MINUTES = 60;
 
 function str(value: unknown, name: string, max = 200): string {
   if (typeof value !== 'string' || value.length === 0 || value.length > max) {
@@ -16,7 +21,11 @@ function str(value: unknown, name: string, max = 200): string {
   return value;
 }
 
-export function sanitizeQuoteRequest(body: unknown, config: FeeConfig): OneClickQuoteRequest {
+export function sanitizeQuoteRequest(
+  body: unknown,
+  config: FeeConfig,
+  now: Date = new Date()
+): OneClickQuoteRequest {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) {
     throw new BadRequest('Body must be a JSON object');
   }
@@ -43,11 +52,25 @@ export function sanitizeQuoteRequest(body: unknown, config: FeeConfig): OneClick
     throw new BadRequest('"amount" must be a positive integer string');
   if (typeof b.dry !== 'boolean') throw new BadRequest('"dry" must be a boolean');
   const slippage = b.slippageTolerance;
-  if (typeof slippage !== 'number' || !(slippage >= 0 && slippage <= 500)) {
-    throw new BadRequest('"slippageTolerance" must be between 0 and 500 basis points');
+  if (
+    typeof slippage !== 'number' ||
+    !Number.isInteger(slippage) ||
+    slippage < 0 ||
+    slippage > 500
+  ) {
+    throw new BadRequest(
+      '"slippageTolerance" must be a whole number between 0 and 500 basis points'
+    );
   }
   const deadline = str(b.deadline, 'deadline', 40);
-  if (Number.isNaN(Date.parse(deadline))) throw new BadRequest('"deadline" must be an ISO date');
+  const deadlineMs = Date.parse(deadline);
+  if (Number.isNaN(deadlineMs)) throw new BadRequest('"deadline" must be an ISO date');
+  const latestMs = now.getTime() + (config.quoteDeadlineMinutes + DEADLINE_MARGIN_MINUTES) * 60_000;
+  if (deadlineMs <= now.getTime() || deadlineMs > latestMs) {
+    throw new BadRequest(
+      `"deadline" must be in the future and at most ${config.quoteDeadlineMinutes + DEADLINE_MARGIN_MINUTES} minutes away`
+    );
+  }
 
   const request: OneClickQuoteRequest = {
     dry: b.dry,

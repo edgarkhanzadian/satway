@@ -121,13 +121,57 @@ export function receiptId(receipt: Receipt): string {
   return `${receipt.quoteResponse.quote.depositAddress ?? receipt.depositAddress}|${receipt.createdAt}`;
 }
 
-export function rememberReceipt(receipt: Receipt): void {
+export const UNREADABLE_RECEIPTS_PREFIX = `${RECEIPTS_KEY}.unreadable.`;
+export const MAX_UNREADABLE_BACKUPS = 100;
+
+type ReceiptStore = Pick<Storage, 'getItem' | 'setItem'>;
+
+function backUpUnreadable(store: ReceiptStore, raw: string): boolean {
+  for (let slot = 0; slot < MAX_UNREADABLE_BACKUPS; slot++) {
+    const key = `${UNREADABLE_RECEIPTS_PREFIX}${slot}`;
+    const existing = store.getItem(key);
+    if (existing === raw) return true;
+    if (existing === null) {
+      store.setItem(key, raw);
+      return store.getItem(key) === raw;
+    }
+  }
+  return false;
+}
+
+function storedItems(store: ReceiptStore): unknown[] | null {
+  const raw = store.getItem(RECEIPTS_KEY);
+  if (raw === null || raw === '') return [];
+  let parsed: unknown = null;
+  let readable = true;
   try {
-    const id = receiptId(receipt);
-    const rest = loadReceipts().filter(r => receiptId(r) !== id);
-    localStorage.setItem(RECEIPTS_KEY, JSON.stringify([receipt, ...rest].slice(0, 20)));
+    parsed = JSON.parse(raw);
   } catch {
-    return;
+    readable = false;
+  }
+  if (readable && Array.isArray(parsed)) return parsed.map((item: unknown) => item);
+  return backUpUnreadable(store, raw) ? [] : null;
+}
+
+function isSavedCopyOf(item: unknown, id: string): boolean {
+  try {
+    return receiptId(verifyReceipt(item)) === id;
+  } catch {
+    return false;
+  }
+}
+
+export function rememberReceipt(receipt: Receipt): boolean {
+  try {
+    const store = globalThis.localStorage;
+    const items = storedItems(store);
+    if (items === null) return false;
+    const id = receiptId(receipt);
+    const json = JSON.stringify([receipt, ...items.filter(item => !isSavedCopyOf(item, id))]);
+    store.setItem(RECEIPTS_KEY, json);
+    return store.getItem(RECEIPTS_KEY) === json;
+  } catch {
+    return false;
   }
 }
 
@@ -135,12 +179,19 @@ export function receiptFileName(receipt: Receipt): string {
   return `portage-deposit-${receipt.createdAt.slice(0, 10)}-${receipt.depositAddress.slice(-8)}.json`;
 }
 
+export const REVOKE_DOWNLOAD_URL_AFTER_MS = 60_000;
+
 export function downloadReceipt(receipt: Receipt): void {
   const blob = new Blob([JSON.stringify(receipt, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
   a.download = receiptFileName(receipt);
-  a.click();
-  URL.revokeObjectURL(url);
+  document.body.append(a);
+  try {
+    a.click();
+  } finally {
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), REVOKE_DOWNLOAD_URL_AFTER_MS);
+  }
 }

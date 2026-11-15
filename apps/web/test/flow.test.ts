@@ -6,14 +6,19 @@ import {
   type OneClickSwapStatus,
   type OneClickToken,
   MAINNET_CONFIG as config,
+  largestPayoutSats,
   planReclaim,
 } from '@portage/core';
 
 import { createBackend } from '../src/backend.js';
 import { type Backend, checkProgress, prepareDeposit, toBaseUnits } from '../src/flow.js';
 import {
+  MAX_UNREADABLE_BACKUPS,
   RECEIPTS_KEY,
+  REVOKE_DOWNLOAD_URL_AFTER_MS,
   type Receipt,
+  UNREADABLE_RECEIPTS_PREFIX,
+  downloadReceipt,
   loadReceipts,
   receiptFileName,
   receiptId,
@@ -103,6 +108,8 @@ interface Out {
 
 interface World {
   minOut?: string;
+  amountOut?: string;
+  perDepositCap?: number | null;
   rewrite?: Partial<OneClickQuoteRequest>;
   swap?: OneClickSwapStatus;
   hashes?: string[];
@@ -199,7 +206,11 @@ function world(w: World = {}) {
     if (url.includes('/outspend/'))
       return jsonRes({ spent: true, status: { confirmed: true, block_height: TIP - 1 } });
     if (url.endsWith('/limits'))
-      return jsonRes({ pegCap: null, perDepositMinimum: 10_000, perDepositCap: null });
+      return jsonRes({
+        pegCap: null,
+        perDepositMinimum: 10_000,
+        perDepositCap: w.perDepositCap ?? null,
+      });
     const addr = `https://mempool.space/api/address/${D.address}`;
     if (url === `${addr}/utxo`) {
       return jsonRes(
@@ -294,7 +305,7 @@ function world(w: World = {}) {
         amountInFormatted: '25.0',
         amountInUsd: '25',
         minAmountIn: request.amount,
-        amountOut: '35617',
+        amountOut: w.amountOut ?? '35617',
         amountOutFormatted: '0.00035617',
         amountOutUsd: '23.6',
         minAmountOut: w.minOut ?? '35260',
@@ -378,10 +389,26 @@ describe('prepareDeposit', () => {
   });
 
   it('refuses when the swap could deliver less than sBTC accepts', async () => {
-    const w = world({ minOut: '9999' });
+    const w = world({ amountOut: '10099', minOut: '9999' });
     await expect(
       prepareDeposit(config, w.backend, input, { dry: true, fetchFn: w.fetchFn })
     ).rejects.toThrow(/too small/);
+  });
+
+  it('refuses when the payout could exceed the per-deposit cap, even if the minimum is under it', async () => {
+    const w = world({ perDepositCap: 36_000 });
+    await expect(
+      prepareDeposit(config, w.backend, input, { dry: true, fetchFn: w.fetchFn })
+    ).rejects.toThrow(/per-deposit cap/);
+  });
+
+  it('accepts a payout whose expected output plus margin stays under the cap', async () => {
+    const w = world({
+      perDepositCap: largestPayoutSats({ amountOut: '35617', minAmountOut: '0' }),
+    });
+    await expect(
+      prepareDeposit(config, w.backend, input, { dry: true, fetchFn: w.fetchFn })
+    ).resolves.toMatchObject({ expectedSats: 35_617, minimumSats: 35_260 });
   });
 
   it('never asks for a quote if the signer key cannot be verified', async () => {
@@ -785,6 +812,192 @@ describe('rememberReceipt', () => {
     expect(stored).toHaveLength(2);
     expect(new Set(stored.map(receiptId)).size).toBe(2);
     expect(stored.every(r => r.depositAddress === D.address)).toBe(true);
+  });
+
+  function memory(entries: [string, string][] = []) {
+    const data = new Map(entries);
+    const store = {
+      data,
+      failWrites: false,
+      getItem: (k: string) => data.get(k) ?? null,
+      setItem(k: string, v: string) {
+        if (store.failWrites) throw new DOMException('quota', 'QuotaExceededError');
+        data.set(k, v);
+      },
+    };
+    vi.stubGlobal('localStorage', store);
+    return store;
+  }
+
+  function storedList(store: { data: Map<string, string> }): unknown[] {
+    const parsed: unknown = JSON.parse(store.data.get(RECEIPTS_KEY) ?? 'null');
+    if (!Array.isArray(parsed)) throw new Error('expected a stored list');
+    return parsed.map((item: unknown) => item);
+  }
+
+  async function receiptAt(createdAt: string): Promise<Receipt> {
+    const receipt = structuredClone(await receiptFor(world()));
+    receipt.createdAt = createdAt;
+    return receipt;
+  }
+
+  it('keeps items it cannot read or verify, in place, and returns only verified ones', async () => {
+    const old = await receiptAt('2026-11-10T00:00:00.000Z');
+    const tampered = { ...old, createdAt: '2026-11-11T00:00:00.000Z', reclaimLockBlocks: 10 };
+    const future = { version: 2, note: 'written by a newer app' };
+    const store = memory([[RECEIPTS_KEY, JSON.stringify([future, old, 'junk', tampered])]]);
+    const next = await receiptAt('2026-11-15T00:00:00.000Z');
+    expect(rememberReceipt(next)).toBe(true);
+    expect(storedList(store)).toEqual([
+      JSON.parse(JSON.stringify(next)),
+      future,
+      JSON.parse(JSON.stringify(old)),
+      'junk',
+      JSON.parse(JSON.stringify(tampered)),
+    ]);
+    expect(loadReceipts().map(r => r.createdAt)).toEqual([next.createdAt, old.createdAt]);
+  });
+
+  it('replaces only a verified copy with the same id', async () => {
+    const receipt = await receiptAt('2026-11-10T00:00:00.000Z');
+    const unverifiedTwin = { ...receipt, reclaimLockBlocks: 10 };
+    const store = memory([[RECEIPTS_KEY, JSON.stringify([unverifiedTwin, receipt])]]);
+    expect(rememberReceipt(receipt)).toBe(true);
+    expect(storedList(store)).toEqual([
+      JSON.parse(JSON.stringify(receipt)),
+      JSON.parse(JSON.stringify(unverifiedTwin)),
+    ]);
+  });
+
+  it.each(['{not json', '{"a":1}', '"text"'])(
+    'backs up a stored value it cannot read (%s) instead of overwriting it',
+    async raw => {
+      const store = memory([[RECEIPTS_KEY, raw]]);
+      const receipt = await receiptAt('2026-11-15T00:00:00.000Z');
+      expect(rememberReceipt(receipt)).toBe(true);
+      expect(store.data.get(`${UNREADABLE_RECEIPTS_PREFIX}0`)).toBe(raw);
+      expect(loadReceipts().map(receiptId)).toEqual([receiptId(receipt)]);
+    }
+  );
+
+  it('uses the next free backup slot and does not back up the same value twice', async () => {
+    const store = memory([
+      [`${UNREADABLE_RECEIPTS_PREFIX}0`, 'older'],
+      [RECEIPTS_KEY, '{broken'],
+    ]);
+    expect(rememberReceipt(await receiptAt('2026-11-15T00:00:00.000Z'))).toBe(true);
+    expect(store.data.get(`${UNREADABLE_RECEIPTS_PREFIX}0`)).toBe('older');
+    expect(store.data.get(`${UNREADABLE_RECEIPTS_PREFIX}1`)).toBe('{broken');
+    store.data.set(RECEIPTS_KEY, '{broken');
+    expect(rememberReceipt(await receiptAt('2026-11-16T00:00:00.000Z'))).toBe(true);
+    expect(store.data.has(`${UNREADABLE_RECEIPTS_PREFIX}2`)).toBe(false);
+  });
+
+  it('reports failure and leaves an unreadable value alone when it cannot be backed up', async () => {
+    const store = memory([[RECEIPTS_KEY, '{broken']]);
+    store.failWrites = true;
+    expect(rememberReceipt(await receiptAt('2026-11-15T00:00:00.000Z'))).toBe(false);
+    expect(store.data.get(RECEIPTS_KEY)).toBe('{broken');
+    const full = memory([[RECEIPTS_KEY, '{broken']]);
+    for (let slot = 0; slot < MAX_UNREADABLE_BACKUPS; slot++)
+      full.data.set(`${UNREADABLE_RECEIPTS_PREFIX}${slot}`, `other ${slot}`);
+    expect(rememberReceipt(await receiptAt('2026-11-15T00:00:00.000Z'))).toBe(false);
+    expect(full.data.get(RECEIPTS_KEY)).toBe('{broken');
+  });
+
+  it('never evicts older receipts to make room', async () => {
+    const store = memory();
+    const first = await receiptAt('2026-01-01T00:00:00.000Z');
+    rememberReceipt(first);
+    for (let day = 1; day <= 25; day++) {
+      const r = structuredClone(first);
+      r.createdAt = new Date(Date.UTC(2026, 1, day)).toISOString();
+      expect(rememberReceipt(r)).toBe(true);
+    }
+    expect(storedList(store)).toHaveLength(26);
+    expect(loadReceipts().at(-1)?.createdAt).toBe(first.createdAt);
+  });
+
+  it('reports a full storage quota so the caller can warn that the download is the only copy', async () => {
+    const existing = await receiptAt('2026-11-10T00:00:00.000Z');
+    const store = memory([[RECEIPTS_KEY, JSON.stringify([existing])]]);
+    store.failWrites = true;
+    expect(rememberReceipt(await receiptAt('2026-11-15T00:00:00.000Z'))).toBe(false);
+    expect(storedList(store)).toEqual([JSON.parse(JSON.stringify(existing))]);
+    vi.stubGlobal('localStorage', undefined);
+    expect(rememberReceipt(existing)).toBe(false);
+  });
+});
+
+describe('downloadReceipt', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('attaches the link, clicks it, removes it, and revokes the URL only after a delay', async () => {
+    const receipt = await receiptFor(world());
+    vi.useFakeTimers();
+    const log: string[] = [];
+    const anchor = {
+      href: '',
+      download: '',
+      click: () => log.push(`click ${anchor.href} ${anchor.download}`),
+      remove: () => log.push('remove'),
+    };
+    vi.stubGlobal('document', {
+      createElement(tag: string) {
+        log.push(`create ${tag}`);
+        return anchor;
+      },
+      body: { append: (node: unknown) => log.push(node === anchor ? 'append' : 'append ?') },
+    });
+    const blobs: Blob[] = [];
+    vi.stubGlobal('URL', {
+      createObjectURL(blob: Blob) {
+        blobs.push(blob);
+        return 'blob:receipt';
+      },
+      revokeObjectURL: (url: string) => log.push(`revoke ${url}`),
+    });
+    downloadReceipt(receipt);
+    expect(log).toEqual([
+      'create a',
+      'append',
+      `click blob:receipt ${receiptFileName(receipt)}`,
+      'remove',
+    ]);
+    vi.advanceTimersByTime(REVOKE_DOWNLOAD_URL_AFTER_MS - 1);
+    expect(log).not.toContain('revoke blob:receipt');
+    vi.advanceTimersByTime(1);
+    expect(log.at(-1)).toBe('revoke blob:receipt');
+    expect(REVOKE_DOWNLOAD_URL_AFTER_MS).toBeGreaterThanOrEqual(5_000);
+    expect(blobs[0]?.type).toBe('application/json');
+    expect(JSON.parse(await (blobs[0] ?? new Blob()).text())).toEqual(
+      JSON.parse(JSON.stringify(receipt))
+    );
+  });
+
+  it('still removes the link and revokes the URL when the click throws', async () => {
+    const receipt = await receiptFor(world());
+    vi.useFakeTimers();
+    const log: string[] = [];
+    vi.stubGlobal('document', {
+      createElement: () => ({
+        click() {
+          throw new Error('blocked');
+        },
+        remove: () => log.push('remove'),
+      }),
+      body: { append: () => log.push('append') },
+    });
+    vi.stubGlobal('URL', {
+      createObjectURL: () => 'blob:x',
+      revokeObjectURL: (url: string) => log.push(`revoke ${url}`),
+    });
+    expect(() => downloadReceipt(receipt)).toThrow(/blocked/);
+    vi.runAllTimers();
+    expect(log).toEqual(['append', 'remove', 'revoke blob:x']);
   });
 });
 

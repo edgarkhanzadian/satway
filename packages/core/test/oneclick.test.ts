@@ -7,9 +7,11 @@ import {
   type OneClickQuoteResponse,
   assertQuoteMatchesRequest,
   buildQuoteRequest,
+  oneClickQuoteResponseSchema,
   providerFeesOf,
 } from '../src/index.js';
 import { REAL_DEPOSIT as D, jsonBody, jsonResponse } from './fixtures.js';
+import { LIVE_PROBE_QUOTE, REAL_DRY_QUOTE, REAL_LIVE_QUOTE } from './real-responses.js';
 
 const USDC_BASE = 'nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near';
 const REFUND = '0x2527D02599Ba641c19FEa793cD0F167589a0f10D';
@@ -151,6 +153,84 @@ describe('assertQuoteMatchesRequest', () => {
     const res = respond(sent);
     delete res.quote.depositAddress;
     expect(() => assertQuoteMatchesRequest(sent, res)).toThrow(/deposit address/);
+  });
+
+  it.each([
+    ['slippageTolerance', { slippageTolerance: 500 }],
+    ['slippageTolerance', { slippageTolerance: undefined }],
+    ['dry', { dry: true }],
+    ['deadline', { deadline: '2026-11-21T14:00:00.000Z' }],
+    ['deadline', { deadline: '2026-11-14T14:00:01.000Z' }],
+    ['deadline', { deadline: 'soon' }],
+    ['deadline', { deadline: undefined }],
+  ])('rejects a response whose %s echo differs: %j', (field, change) => {
+    expect(() => assertQuoteMatchesRequest(sent, respond(sent, change))).toThrow(new RegExp(field));
+  });
+
+  it.each([
+    ['without milliseconds', '2026-11-14T14:00:00Z'],
+    ['truncated to the second', '2026-11-14T13:59:59.001Z'],
+    ['in another time zone', '2026-11-14T16:00:00.000+02:00'],
+  ])('accepts a deadline echoed %s', (_name, deadline) => {
+    expect(() => assertQuoteMatchesRequest(sent, respond(sent, { deadline }))).not.toThrow();
+  });
+
+  function withAmounts(amountOut: string, minAmountOut: string): OneClickQuoteResponse {
+    const res = respond(sent);
+    res.quote.amountOut = amountOut;
+    res.quote.minAmountOut = minAmountOut;
+    return res;
+  }
+
+  it.each([
+    ['exactly the slippage floor', '37000', '36630'],
+    ['one unit of rounding below the floor', '36031', '35669'],
+    ['a tighter minimum', '37000', '36900'],
+    ['a minimum equal to the expected output', '37000', '37000'],
+  ])('accepts %s', (_name, amountOut, minAmountOut) => {
+    expect(() =>
+      assertQuoteMatchesRequest(sent, withAmounts(amountOut, minAmountOut))
+    ).not.toThrow();
+  });
+
+  it.each([
+    ['a minimum looser than the slippage', '37000', '36628', /slippage/],
+    ['a minimum of zero', '37000', '0', /slippage/],
+    ['a minimum above the expected output', '37000', '37001', /above its expected/],
+    ['a non-numeric amount', '37000.5', '36630', /whole numbers/],
+  ])('rejects %s', (_name, amountOut, minAmountOut, message) => {
+    expect(() => assertQuoteMatchesRequest(sent, withAmounts(amountOut, minAmountOut))).toThrow(
+      message
+    );
+  });
+
+  it.each([
+    ['the recorded dry quote', REAL_DRY_QUOTE, '2026-11-14T19:50:54.640Z'],
+    ['a live probe with milliseconds echoed', LIVE_PROBE_QUOTE, '2026-11-15T10:15:02.350Z'],
+    ['a recorded live quote', REAL_LIVE_QUOTE, '2026-11-14T17:26:56.298Z'],
+  ])('accepts %s, echoed by 1Click', (_name, raw, requestedDeadline) => {
+    const real = oneClickQuoteResponseSchema.parse(raw);
+    const echoed = real.quoteRequest;
+    const ours: OneClickQuoteRequest = {
+      dry: echoed.dry,
+      swapType: 'EXACT_INPUT',
+      slippageTolerance: 100,
+      originAsset: echoed.originAsset,
+      depositType: 'ORIGIN_CHAIN',
+      destinationAsset: MAINNET_CONFIG.btcAssetId,
+      amount: echoed.amount,
+      refundTo: echoed.refundTo,
+      refundType: 'ORIGIN_CHAIN',
+      recipient: echoed.recipient,
+      recipientType: 'DESTINATION_CHAIN',
+      deadline: requestedDeadline,
+      referral: 'portage',
+    };
+    expect(() => assertQuoteMatchesRequest(ours, real)).not.toThrow();
+    expect(() => assertQuoteMatchesRequest({ ...ours, dry: !ours.dry }, real)).toThrow(/dry/);
+    expect(() => assertQuoteMatchesRequest({ ...ours, slippageTolerance: 50 }, real)).toThrow(
+      /slippageTolerance/
+    );
   });
 });
 

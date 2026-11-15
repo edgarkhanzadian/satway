@@ -11,6 +11,7 @@ import {
   errorMessage,
   fetchLimits,
   fetchVerifiedSigners,
+  largestPayoutSats,
 } from '@portage/core';
 
 import { loadEnv, optional } from './lib/env.js';
@@ -95,7 +96,12 @@ async function main() {
         dry: true,
       });
       const { quote } = await client.quote(request);
-      const check = checkDepositAmount(Number(quote.minAmountOut), limits, config.maxSignerFeeSats);
+      const check = checkDepositAmount(
+        Number(quote.minAmountOut),
+        limits,
+        config.maxSignerFeeSats,
+        largestPayoutSats(quote)
+      );
       const costPct = (1 - Number(quote.amountOutUsd) / Number(quote.amountInUsd)) * 100;
       console.log(
         `   ${label}   ${quote.amountOut.padStart(8)}   ${quote.minAmountOut.padStart(8)}   ${costPct.toFixed(2).padStart(5)}%  ${String(quote.timeEstimate).padStart(4)}s   ${check.ok ? 'yes' : 'NO: ' + check.problems.join(',')}`

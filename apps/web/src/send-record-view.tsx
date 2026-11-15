@@ -1,7 +1,12 @@
 import { css, cx } from 'portage-styles/css';
 import { actions, button, notice } from 'portage-styles/recipes';
 
-import { canResendSigned, needsConfirmation } from './send-attempt.js';
+import {
+  WALLET_PROMPT_WINDOW_MS,
+  canResendSigned,
+  needsConfirmation,
+  promptWaitMs,
+} from './send-attempt.js';
 import { type SendRecord, recordTx } from './send-record.js';
 
 const sendStatus = cx(notice({ tone: 'status' }), css({ marginBlock: 'space.06' }));
@@ -19,11 +24,14 @@ export function SendRecordView(props: {
   record: SendRecord;
   note: string | null;
   resending: boolean;
+  now: Date;
   onResend(): void;
   onConfirmNothingSent(): void;
 }) {
   const { record } = props;
   const tx = recordTx(record);
+  const promptOpen = promptWaitMs(record, props.now) > 0;
+  const confirmable = needsConfirmation(record) && !promptOpen;
   if (record.state === 'sent') {
     return (
       <p className={sendStatus} role="status">
@@ -53,14 +61,21 @@ export function SendRecordView(props: {
         or any other, unless you are sure nothing left your wallet.
       </p>
       {props.note && <p className={uncertainLine}>{props.note}</p>}
-      {(canResendSigned(record) || needsConfirmation(record)) && (
+      {promptOpen && needsConfirmation(record) && (
+        <p className={uncertainLine}>
+          The request may still be open in your wallet, in this browser or on your phone. Approve or
+          reject it there. If your wallet shows no request, this page lets you start again{' '}
+          {WALLET_PROMPT_WINDOW_MS / 60_000} minutes after the payment was started.
+        </p>
+      )}
+      {(canResendSigned(record) || confirmable) && (
         <div className={uncertainActions}>
           {canResendSigned(record) && (
             <button className={button()} disabled={props.resending} onClick={props.onResend}>
               {props.resending ? 'Sending…' : 'Send the same signed transaction again'}
             </button>
           )}
-          {needsConfirmation(record) && (
+          {confirmable && (
             <button className={button()} onClick={props.onConfirmNothingSent}>
               I checked my wallet and nothing was sent. Let me try again
             </button>

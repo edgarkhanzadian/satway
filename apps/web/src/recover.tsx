@@ -21,6 +21,7 @@ import {
 } from '@portage/core';
 
 import { type Backend, type Snapshot, checkProgress } from './flow.js';
+import { latestRequests } from './latest-request.js';
 import { PayoutDetails, PayoutNotices } from './payout-notes.js';
 import { type Receipt, loadReceipts, receiptId, verifyReceipt } from './receipt.js';
 import type { RouteUpdate } from './route.js';
@@ -58,18 +59,26 @@ export function Recover(props: {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [requests] = useState(latestRequests);
   const saved = loadReceipts();
 
-  async function open(value: unknown) {
+  function clearSelection() {
     setError(null);
     setMessage(null);
+    setReceipt(null);
     setSnapshot(null);
     setChosen(null);
+  }
+
+  async function open(value: unknown, isLatest: () => boolean = requests.begin()) {
+    clearSelection();
     try {
       const verified = verifyReceipt(value);
       setReceipt(verified);
-      setSnapshot(await checkProgress(config, props.backend, verified));
+      const next = await checkProgress(config, props.backend, verified);
+      if (isLatest()) setSnapshot(next);
     } catch (err) {
+      if (!isLatest()) return;
       setReceipt(null);
       setError(errorMessage(err) ?? null);
     }
@@ -77,11 +86,16 @@ export function Recover(props: {
 
   async function onFile(file: File | undefined) {
     if (!file) return;
+    const isLatest = requests.begin();
+    clearSelection();
+    let value: unknown;
     try {
-      await open(JSON.parse(await file.text()));
+      value = JSON.parse(await file.text());
     } catch {
-      setError('That file is not a deposit receipt.');
+      if (isLatest()) setError('That file is not a deposit receipt.');
+      return;
     }
+    if (isLatest()) await open(value, isLatest);
   }
 
   const plan = snapshot
@@ -97,6 +111,7 @@ export function Recover(props: {
   async function reclaim() {
     if (!receipt || !choice || !props.account) return;
     const output = choice.output;
+    const isCurrent = requests.current();
     setBusy(true);
     setError(null);
     try {
@@ -134,8 +149,10 @@ export function Recover(props: {
       if (!res.ok)
         throw new Error(`The Bitcoin network rejected the transaction: ${await res.text()}`);
       setMessage(`Reclaim sent for ${outpointOf(output)}. Transaction ${txid}.`);
+      if (!isCurrent()) return;
       setChosen(null);
-      setSnapshot(await checkProgress(config, props.backend, receipt));
+      const next = await checkProgress(config, props.backend, receipt);
+      if (isCurrent()) setSnapshot(next);
     } catch (err) {
       setError(errorMessage(err) ?? null);
     } finally {

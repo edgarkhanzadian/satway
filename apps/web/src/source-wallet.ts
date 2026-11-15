@@ -155,26 +155,81 @@ export interface EvmTransfer {
   tx: { from: string; to: string; value: string; data?: string };
 }
 
+const HOT_OMNI_NATIVE_SUFFIX = '_11111111111111111111';
+
+function hotOmniNative(chainId: number): string {
+  return `nep245:v2_1.omni.hot.tg:${chainId}${HOT_OMNI_NATIVE_SUFFIX}`;
+}
+
+export const EVM_NATIVE_ASSETS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  eth: ['nep141:eth.omft.near'],
+  op: [hotOmniNative(10)],
+  bsc: ['nep141:bnb.omdep.near', hotOmniNative(56)],
+  gnosis: ['nep141:gnosis.omft.near'],
+  pol: ['nep141:pol.omdep.near', hotOmniNative(137)],
+  base: ['nep141:base.omft.near'],
+  arb: ['nep141:arb.omft.near'],
+  avax: ['nep141:avax.omdep.near', hotOmniNative(43114)],
+  bera: ['nep141:bera.omft.near'],
+  scroll: [hotOmniNative(534352)],
+});
+
+export const EVM_NATIVE_DECIMALS = 18;
+
+const SEND_MANUALLY = 'Send the funds from your wallet yourself instead.';
+
+export function isKnownEvmNative(token: Pick<OneClickToken, 'assetId' | 'blockchain'>): boolean {
+  return (EVM_NATIVE_ASSETS[token.blockchain] ?? []).includes(token.assetId);
+}
+
+function checkTokenListing(token: OneClickToken, chainId: number, contract: string): void {
+  const embedded = token.assetId.match(/0x[0-9a-fA-F]+/g) ?? [];
+  if (embedded.some(hex => hex.toLowerCase() !== contract.toLowerCase()))
+    throw new Error(
+      `The token list gives two different contract addresses for ${token.symbol}. ${SEND_MANUALLY}`
+    );
+  const omniChain = /^nep245:v2_1\.omni\.hot\.tg:(\d+)_/.exec(token.assetId)?.[1];
+  if (omniChain !== undefined && Number(omniChain) !== chainId)
+    throw new Error(
+      `The token list puts ${token.symbol} on a different network than ${token.blockchain}. ${SEND_MANUALLY}`
+    );
+}
+
 export function buildEvmTransfer(input: {
   token: OneClickToken;
   from: string;
   to: string;
   amount: string;
 }): EvmTransfer {
-  const chainId = EVM_CHAIN_IDS[input.token.blockchain];
+  const { token } = input;
+  const chainId = EVM_CHAIN_IDS[token.blockchain];
   if (chainId === undefined)
-    throw new Error(`Sending from a wallet is not supported on ${input.token.blockchain}`);
+    throw new Error(`Sending from a wallet is not supported on ${token.blockchain}`);
   if (!EVM_ADDRESS.test(input.from)) throw new Error('Sender is not an EVM address');
   if (!EVM_ADDRESS.test(input.to))
     throw new Error('The swap deposit address is not an EVM address');
   if (!/^[1-9][0-9]*$/.test(input.amount)) throw new Error('Amount must be a positive integer');
   const amount = BigInt(input.amount);
 
-  const contract = input.token.contractAddress;
+  const contract = token.contractAddress;
+  const native = isKnownEvmNative(token);
   if (contract === undefined || contract === '') {
+    if (!native)
+      throw new Error(
+        `The token list has no contract address for ${token.symbol} on ${token.blockchain}, and it is not a known native coin. ${SEND_MANUALLY}`
+      );
+    if (token.decimals !== EVM_NATIVE_DECIMALS)
+      throw new Error(
+        `The token list gives ${token.symbol} the wrong number of decimals for a native coin. ${SEND_MANUALLY}`
+      );
     return { chainId, tx: { from: input.from, to: input.to, value: `0x${amount.toString(16)}` } };
   }
+  if (native)
+    throw new Error(
+      `The token list gives a contract address for the native coin ${token.symbol}. ${SEND_MANUALLY}`
+    );
   if (!EVM_ADDRESS.test(contract)) throw new Error('Token contract address is not valid');
+  checkTokenListing(token, chainId, contract);
   return {
     chainId,
     tx: {

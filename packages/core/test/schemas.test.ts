@@ -48,6 +48,7 @@ const sent = buildQuoteRequest(MAINNET_CONFIG, {
   refundTo: real.quoteRequest.refundTo,
   depositAddress: D.address,
   dry: true,
+  now: new Date('2026-11-14T17:50:54.640Z'),
 });
 
 describe('zod configuration', () => {

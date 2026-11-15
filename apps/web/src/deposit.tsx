@@ -13,6 +13,7 @@ import {
   checkProgress,
   prepareDeposit,
 } from './flow.js';
+import { latestRequests } from './latest-request.js';
 import { PayoutDetails, PayoutNotices } from './payout-notes.js';
 import { type Receipt, downloadReceipt, rememberReceipt } from './receipt.js';
 import type { RouteUpdate } from './route.js';
@@ -22,6 +23,7 @@ import {
   attemptSend,
   confirmNothingSent,
   latestSwap,
+  promptWaitMs,
   resendRecord,
   resolveRecord,
   sendPanel,
@@ -109,6 +111,8 @@ export function Deposit(props: {
   const [active, setActive] = useState<Receipt | null>(props.resume);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [receiptUnsaved, setReceiptUnsaved] = useState(false);
+  const [previews] = useState(latestRequests);
 
   useEffect(() => {
     async function loadTokens() {
@@ -167,9 +171,10 @@ export function Deposit(props: {
     autofilledRefund.current = next.autofilled;
     if (next.value !== refundRef.current) {
       setRefundTo(next.value);
+      previews.cancel();
       setPreview(null);
     }
-  }, [walletRefund]);
+  }, [walletRefund, previews]);
 
   useEffect(() => {
     if (active) return;
@@ -179,6 +184,7 @@ export function Deposit(props: {
 
   async function run(dry: boolean) {
     if (!token) return;
+    const isLatest = previews.begin();
     setBusy(true);
     setError(null);
     try {
@@ -189,11 +195,12 @@ export function Deposit(props: {
         { dry }
       );
       if (dry) {
-        setPreview(prepared);
+        if (isLatest()) setPreview(prepared);
         return;
       }
-      rememberReceipt(prepared.receipt);
+      const remembered = rememberReceipt(prepared.receipt);
       downloadReceipt(prepared.receipt);
+      setReceiptUnsaved(!remembered);
       await backend
         .register(
           prepared.receipt.depositScript,
@@ -204,10 +211,15 @@ export function Deposit(props: {
       setPreview(prepared);
       setActive(prepared.receipt);
     } catch (err) {
-      setError(errorMessage(err) ?? null);
+      if (!dry || isLatest()) setError(errorMessage(err) ?? null);
     } finally {
       setBusy(false);
     }
+  }
+
+  function inputsChanged() {
+    previews.cancel();
+    setPreview(null);
   }
 
   if (active) {
@@ -215,12 +227,14 @@ export function Deposit(props: {
       <Tracking
         backend={backend}
         receipt={active}
+        receiptUnsaved={receiptUnsaved}
         source={source}
         token={tokens.find(t => t.assetId === active.origin.assetId)}
         onRoute={onRoute}
         onDone={() => {
           setActive(null);
           setPreview(null);
+          setReceiptUnsaved(false);
         }}
       />
     );
@@ -242,7 +256,7 @@ export function Deposit(props: {
           value={assetId}
           onChange={e => {
             setAssetId(e.target.value);
-            setPreview(null);
+            inputsChanged();
           }}
         >
           {tokens.map(t => (
@@ -262,7 +276,7 @@ export function Deposit(props: {
           placeholder="25"
           onChange={e => {
             setAmount(e.target.value);
-            setPreview(null);
+            inputsChanged();
           }}
         />
       </label>
@@ -277,7 +291,7 @@ export function Deposit(props: {
           onChange={e => {
             autofilledRefund.current = null;
             setRefundTo(e.target.value);
-            setPreview(null);
+            inputsChanged();
           }}
         />
         <small className={fields.hint}>
@@ -353,6 +367,7 @@ export function Deposit(props: {
 function Tracking(props: {
   backend: Backend;
   receipt: Receipt;
+  receiptUnsaved: boolean;
   source: SourceWallet | null;
   token: OneClickToken | undefined;
   onRoute(route: RouteUpdate | null): void;
@@ -381,7 +396,6 @@ function Tracking(props: {
   const [sendInfo, setSendInfo] = useState<string | null>(null);
   const [checkNote, setCheckNote] = useState<string | null>(null);
   const [resending, setResending] = useState(false);
-  const stopped = useRef(false);
   const solanaAccount = family === 'solana' ? solanaSenderOf(source) : null;
 
   useEffect(() => {
@@ -393,6 +407,17 @@ function Tracking(props: {
     if (!snapshot || sendingRef.current) return;
     setRecord(settleFromProvider(sendRecords, readRecord(), snapshot.swap));
   }, [snapshot, readRecord]);
+
+  const [promptTick, setPromptTick] = useState(0);
+  const promptOpen = record !== null && promptWaitMs(record, new Date()) > 0;
+  useEffect(() => {
+    if (record === null || !promptOpen) return;
+    const timer = setTimeout(
+      () => setPromptTick(tick => tick + 1),
+      promptWaitMs(record, new Date()) + 100
+    );
+    return () => clearTimeout(timer);
+  }, [record, promptOpen, promptTick]);
 
   const recordStamp = record ? `${record.state}|${record.startedAt}|${recordTx(record) ?? ''}` : '';
   const checkable = record !== null && record.state !== 'sent' && recordTx(record) !== null;
@@ -438,27 +463,29 @@ function Tracking(props: {
   }, [checkable, recordStamp, sending, readRecord, evmProvider]);
 
   useEffect(() => {
-    stopped.current = false;
-    let timer: ReturnType<typeof setTimeout>;
+    let live = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    setSnapshot(null);
+    setStale(false);
+    setProblem(null);
     async function tick() {
       try {
         const next = await checkProgress(config, backend, receipt);
-        if (stopped.current) return;
+        if (!live) return;
         setSnapshot(next);
         setStale(false);
         setProblem(null);
         if (next.progress.terminal) return;
       } catch (err) {
-        if (!stopped.current) {
-          setStale(true);
-          setProblem(`Could not refresh: ${errorMessage(err)}. Retrying.`);
-        }
+        if (!live) return;
+        setStale(true);
+        setProblem(`Could not refresh: ${errorMessage(err)}. Retrying.`);
       }
       timer = setTimeout(() => void tick(), 20_000);
     }
     void tick();
     return () => {
-      stopped.current = true;
+      live = false;
       clearTimeout(timer);
     };
   }, [backend, receipt]);
@@ -581,6 +608,13 @@ function Tracking(props: {
         {progress?.stage === 'done' ? 'Deposit complete' : 'Deposit in progress'}
       </styled.h2>
 
+      {props.receiptUnsaved && (
+        <p className={notice({ tone: 'warn' })} role="alert">
+          This browser could not keep a copy of the receipt, so the file that was just downloaded is
+          the only copy. Keep it: it is what lets you recover your BTC if anything goes wrong.
+        </p>
+      )}
+
       {waitingForFunds && quote.depositAddress && (
         <div className={send}>
           <p className={sendLine}>
@@ -638,6 +672,7 @@ function Tracking(props: {
               record={panel.record}
               note={checkNote}
               resending={resending}
+              now={new Date()}
               onResend={() => void resendSame(panel.record)}
               onConfirmNothingSent={() => confirmNothing(panel.record)}
             />

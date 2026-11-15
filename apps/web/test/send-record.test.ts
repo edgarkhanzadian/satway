@@ -1,5 +1,5 @@
 import { base58, base64 } from '@scure/base';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { OneClickToken } from '@portage/core';
 
@@ -8,10 +8,12 @@ import {
   CANNOT_SAVE_MESSAGE,
   EXPIRED_MESSAGE,
   type ResolveDeps,
+  WALLET_PROMPT_WINDOW_MS,
   attemptSend,
   confirmNothingSent,
   latestSwap,
   needsConfirmation,
+  promptWaitMs,
   resendRecord,
   resolveRecord,
   sendPanel,
@@ -22,9 +24,11 @@ import {
   type SendRecord,
   type SwapTarget,
   UNREADABLE_RECORD_MESSAGE,
+  attemptingRecord,
   createSendRecords,
   sendRecordKey,
   swapTargetOf,
+  uncertainRecord,
   watchSendRecords,
 } from '../src/send-record.js';
 import type { SimulationResult, SolanaRpc } from '../src/solana-rpc.js';
@@ -556,5 +560,56 @@ describe('Solana sign-only sends', () => {
       sendSolanaDeposit(input, signer, expired.rpc, hooks)
     );
     expect(fresh.kind).toBe('sent');
+  });
+});
+
+describe('a wallet request that may still be open', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function recordInProgress() {
+    const records = freshRecords();
+    const record = attemptingRecord(start(ONE));
+    records.write(record);
+    return { records, record };
+  }
+
+  it('waits out the WalletConnect request expiry before an attempt can be cleared', () => {
+    const { record } = recordInProgress();
+    expect(WALLET_PROMPT_WINDOW_MS).toBe(15 * 60_000);
+    expect(promptWaitMs(record, NOW)).toBe(WALLET_PROMPT_WINDOW_MS);
+    expect(promptWaitMs(record, new Date(NOW.getTime() + 5_000))).toBe(
+      WALLET_PROMPT_WINDOW_MS - 5_000
+    );
+    expect(promptWaitMs(record, new Date(NOW.getTime() + WALLET_PROMPT_WINDOW_MS))).toBe(0);
+  });
+
+  it('refuses to clear a seconds-old attempt, and clears it after the window', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW.getTime() + 3_000));
+    const { records, record } = recordInProgress();
+    expect(confirmNothingSent(records, record)).toBe(false);
+    expect(records.read(ONE, 'evm')?.state).toBe('attempting');
+    vi.setSystemTime(new Date(NOW.getTime() + WALLET_PROMPT_WINDOW_MS - 1));
+    expect(confirmNothingSent(records, record)).toBe(false);
+    vi.setSystemTime(new Date(NOW.getTime() + WALLET_PROMPT_WINDOW_MS));
+    expect(confirmNothingSent(records, record)).toBe(true);
+    expect(records.read(ONE, 'evm')).toBeNull();
+  });
+
+  it('never holds back an uncertain or unreadable record', () => {
+    const { record } = recordInProgress();
+    const uncertain = uncertainRecord(record, 'Request expired', null);
+    expect(promptWaitMs(uncertain, NOW)).toBe(0);
+    expect(promptWaitMs({ ...record, startedAt: '' }, NOW)).toBe(0);
+  });
+
+  it('does not hide the control for ever when the start time is far in the future', () => {
+    const { record } = recordInProgress();
+    const before = new Date(NOW.getTime() - WALLET_PROMPT_WINDOW_MS - 1);
+    expect(promptWaitMs(record, before)).toBe(0);
+    const slightlyBefore = new Date(NOW.getTime() - 60_000);
+    expect(promptWaitMs(record, slightlyBefore)).toBe(WALLET_PROMPT_WINDOW_MS + 60_000);
   });
 });

@@ -6,6 +6,7 @@ import type { AddressOutput } from '@portage/core';
 
 import type { RegistrationErrorNote, Snapshot } from '../src/flow.js';
 import { RegistrationNotices, registrationNoticeGroups } from '../src/payout-notes.js';
+import { WALLET_PROMPT_WINDOW_MS } from '../src/send-attempt.js';
 import { SendRecordView } from '../src/send-record-view.js';
 import type { SendRecord } from '../src/send-record.js';
 
@@ -89,17 +90,50 @@ describe('SendRecordView', () => {
     startedAt: '2026-11-15T10:00:00.000Z',
   };
 
-  function view(record: SendRecord): string {
+  const STARTED = Date.parse(base.startedAt);
+
+  function view(record: SendRecord, now = new Date(STARTED + WALLET_PROMPT_WINDOW_MS)): string {
     return renderToStaticMarkup(
       <SendRecordView
         record={record}
         note={null}
         resending={false}
+        now={now}
         onResend={() => undefined}
         onConfirmNothingSent={() => undefined}
       />
     );
   }
+
+  const attempting: SendRecord = { ...base, state: 'attempting', family: 'evm', signed: null };
+  const CONFIRM = 'I checked my wallet and nothing was sent. Let me try again';
+
+  it.each([
+    ['seconds old', 5_000],
+    ['just under the window', WALLET_PROMPT_WINDOW_MS - 1],
+  ])(
+    'hides the confirmation for an attempt %s, while the wallet may still be asking',
+    (_n, age) => {
+      const out = view(attempting, new Date(STARTED + age));
+      expect(out).not.toContain(CONFIRM);
+      expect(out).not.toContain('<button');
+      expect(out).toContain('The request may still be open in your wallet');
+    }
+  );
+
+  it('shows the confirmation once the wallet request window has passed', () => {
+    const out = view(attempting, new Date(STARTED + WALLET_PROMPT_WINDOW_MS));
+    expect(out).toContain(CONFIRM);
+    expect(out).not.toContain('The request may still be open in your wallet');
+  });
+
+  it('does not hold back the confirmation for an uncertain record, whatever its age', () => {
+    const out = view(
+      { ...base, state: 'uncertain', family: 'evm', tx: null, message: 'x', signed: null },
+      new Date(STARTED + 1_000)
+    );
+    expect(out).toContain(CONFIRM);
+  });
 
   it('tells the user not to send again once sent', () => {
     const out = view({

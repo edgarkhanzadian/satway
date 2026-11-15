@@ -22,6 +22,7 @@ import {
   errorMessage,
   fetchLimits,
   fetchVerifiedSigners,
+  largestPayoutSats,
   observeDeposit,
   outpointOf,
   providerFeesOf,
@@ -122,7 +123,12 @@ export async function prepareDeposit(
   assertQuoteMatchesRequest(request, response);
 
   const minimumSats = Number(response.quote.minAmountOut);
-  const check = checkDepositAmount(minimumSats, limits, config.maxSignerFeeSats);
+  const check = checkDepositAmount(
+    minimumSats,
+    limits,
+    config.maxSignerFeeSats,
+    largestPayoutSats(response.quote)
+  );
   if (!check.ok) {
     throw new Error(check.problems.map(p => describeAmountProblem(p, check)).join(' '));
   }

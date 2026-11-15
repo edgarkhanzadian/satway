@@ -243,9 +243,57 @@ export function assertQuoteMatchesRequest(
       throw new Error(`Quote does not match the request: "${field}" was changed`);
     }
   }
+  if (echoed?.slippageTolerance !== sent.slippageTolerance) {
+    throw new Error('Quote does not match the request: "slippageTolerance" was changed');
+  }
+  if (echoed?.dry !== sent.dry) {
+    throw new Error('Quote does not match the request: "dry" was changed');
+  }
+  if (!sameInstant(sent.deadline, echoed?.deadline)) {
+    throw new Error('Quote does not match the request: "deadline" was changed');
+  }
   providerFeesOf(sent, response);
+  assertMinimumMatchesSlippage(response.quote, sent.slippageTolerance);
   if (!sent.dry && !response.quote.depositAddress) {
     throw new Error('Quote has no deposit address');
+  }
+}
+
+export const DEADLINE_ECHO_TOLERANCE_MS = 1000;
+
+function sameInstant(sent: string, echoed: string | undefined): boolean {
+  if (echoed === undefined) return false;
+  const a = Date.parse(sent);
+  const b = Date.parse(echoed);
+  return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) < DEADLINE_ECHO_TOLERANCE_MS;
+}
+
+export const MIN_AMOUNT_OUT_ROUNDING_UNITS = 1n;
+
+function baseUnits(text: string): bigint | null {
+  return /^\d+$/.test(text) ? BigInt(text) : null;
+}
+
+function assertMinimumMatchesSlippage(
+  quote: Pick<OneClickQuote, 'amountOut' | 'minAmountOut'>,
+  slippageBps: number
+): void {
+  const amountOut = baseUnits(quote.amountOut);
+  const minAmountOut = baseUnits(quote.minAmountOut);
+  if (amountOut === null || minAmountOut === null) {
+    throw new Error('Quote amounts are not whole numbers');
+  }
+  if (!Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps > 10_000) {
+    throw new Error('Slippage must be a whole number of basis points');
+  }
+  if (minAmountOut > amountOut) {
+    throw new Error('Quote does not add up: its minimum output is above its expected output');
+  }
+  const floor = (amountOut * BigInt(10_000 - slippageBps)) / 10_000n;
+  if (minAmountOut + MIN_AMOUNT_OUT_ROUNDING_UNITS < floor) {
+    throw new Error(
+      'Quote does not add up: its minimum output allows more than the requested slippage'
+    );
   }
 }
 

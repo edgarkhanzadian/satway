@@ -1,5 +1,6 @@
 import { P2TR_DUST_SATS } from './config.js';
 import type { SbtcLimits } from './emily.js';
+import { PAYOUT_AMOUNT_TOLERANCE_BPS } from './payout-selection.js';
 
 export type AmountProblem =
   | 'not-an-integer'
@@ -14,21 +15,32 @@ export interface AmountCheck {
   feeCapCoversWholeAmount: boolean;
 }
 
+export function largestPayoutSats(quote: { amountOut: string; minAmountOut: string }): number {
+  const largest = Math.max(Number(quote.amountOut), Number(quote.minAmountOut));
+  return Math.ceil((largest * (10_000 + PAYOUT_AMOUNT_TOLERANCE_BPS)) / 10_000);
+}
+
 export function checkDepositAmount(
   amountSats: number,
   limits: SbtcLimits,
-  maxSignerFeeSats: number
+  maxSignerFeeSats: number,
+  largestSats: number = amountSats
 ): AmountCheck {
   const problems: AmountProblem[] = [];
   const depositMinimum = limits.perDepositMinimum ?? 0;
   const minimumSats = Math.max(depositMinimum, P2TR_DUST_SATS);
 
-  if (!Number.isSafeInteger(amountSats) || amountSats <= 0) {
+  if (
+    !Number.isSafeInteger(amountSats) ||
+    amountSats <= 0 ||
+    !Number.isSafeInteger(largestSats) ||
+    largestSats < amountSats
+  ) {
     return { ok: false, problems: ['not-an-integer'], minimumSats, feeCapCoversWholeAmount: false };
   }
   if (amountSats < P2TR_DUST_SATS) problems.push('below-dust');
   if (amountSats < depositMinimum) problems.push('below-deposit-minimum');
-  if (limits.perDepositCap !== null && amountSats > limits.perDepositCap) {
+  if (limits.perDepositCap !== null && largestSats > limits.perDepositCap) {
     problems.push('above-deposit-cap');
   }
 
@@ -49,7 +61,7 @@ export function describeAmountProblem(problem: AmountProblem, check: AmountCheck
     case 'below-deposit-minimum':
       return `Amount is too small. The swap must deliver at least ${check.minimumSats} sats.`;
     case 'above-deposit-cap':
-      return 'Amount is above the sBTC per-deposit cap.';
+      return 'The swap could deliver more than the sBTC per-deposit cap, and a deposit above the cap is not minted. Send a smaller amount.';
     default:
       throw new Error(`Unknown amount problem: ${String(problem satisfies never)}`);
   }

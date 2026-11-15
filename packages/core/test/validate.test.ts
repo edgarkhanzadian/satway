@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { checkDepositAmount, describeAmountProblem } from '../src/index.js';
+import {
+  PAYOUT_AMOUNT_TOLERANCE_BPS,
+  checkDepositAmount,
+  describeAmountProblem,
+  largestPayoutSats,
+} from '../src/index.js';
 import { LIMITS } from './fixtures.js';
 
 describe('checkDepositAmount', () => {
@@ -24,6 +29,36 @@ describe('checkDepositAmount', () => {
       80_000
     );
     expect(check.problems).toEqual(['above-deposit-cap']);
+  });
+
+  it('checks the cap against the largest payout and the minimum against the smallest', () => {
+    const limits = { ...LIMITS, perDepositMinimum: 10_000, perDepositCap: 50_000 };
+    expect(checkDepositAmount(40_000, limits, 80_000, 50_000).ok).toBe(true);
+    expect(checkDepositAmount(40_000, limits, 80_000, 50_001).problems).toEqual([
+      'above-deposit-cap',
+    ]);
+    expect(checkDepositAmount(9_000, limits, 80_000, 60_000).problems).toEqual([
+      'below-deposit-minimum',
+      'above-deposit-cap',
+    ]);
+    expect(describeAmountProblem('above-deposit-cap', checkDepositAmount(1, limits, 1))).toMatch(
+      /cap/
+    );
+  });
+
+  it.each([Number.NaN, 39_999, 1.5])('rejects an invalid largest payout %s', largest => {
+    expect(checkDepositAmount(40_000, LIMITS, 80_000, largest).problems).toEqual([
+      'not-an-integer',
+    ]);
+  });
+
+  it('allows a margin above the quoted output for the payout to come in higher', () => {
+    expect(largestPayoutSats({ amountOut: '35617', minAmountOut: '35260' })).toBe(
+      Math.ceil((35_617 * (10_000 + PAYOUT_AMOUNT_TOLERANCE_BPS)) / 10_000)
+    );
+    expect(largestPayoutSats({ amountOut: '100', minAmountOut: '200' })).toBe(204);
+    expect(largestPayoutSats({ amountOut: '10000', minAmountOut: '9900' })).toBe(10_200);
+    expect(largestPayoutSats({ amountOut: 'x', minAmountOut: '9900' })).toBeNaN();
   });
 
   it('rejects dust even when the API reports no minimum', () => {

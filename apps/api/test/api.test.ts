@@ -4,7 +4,7 @@ import { buildQuoteRequest, MAINNET_CONFIG as config } from '@portage/core';
 
 import { type Env, handle } from '../src/index.js';
 import { registerDeposit, runNotifier } from '../src/notifier.js';
-import { BadRequest, sanitizeQuoteRequest } from '../src/proxy.js';
+import { BadRequest, DEADLINE_MARGIN_MINUTES, sanitizeQuoteRequest } from '../src/proxy.js';
 import { type KV, listWatched } from '../src/store.js';
 
 const D = {
@@ -49,14 +49,14 @@ function memoryKv(): KV & { data: Map<string, string> } {
 }
 
 const NOW = new Date('2026-11-14T12:00:00.000Z');
-function goodQuote() {
+function goodQuote(now: Date = new Date()) {
   return buildQuoteRequest(config, {
     originAsset: USDC_BASE,
     amount: '25000000',
     refundTo: REFUND,
     depositAddress: D.address,
     dry: true,
-    now: NOW,
+    now,
   });
 }
 
@@ -91,19 +91,59 @@ describe('sanitizeQuoteRequest', () => {
   it('passes a request built by core unchanged', () => {
     const req = goodQuote();
     expect(sanitizeQuoteRequest(req, config)).toEqual(req);
+    expect(sanitizeQuoteRequest(goodQuote(NOW), config, NOW)).toEqual(goodQuote(NOW));
   });
 
   it('drops fields it does not know', () => {
     const clean = sanitizeQuoteRequest(
       {
-        ...goodQuote(),
+        ...goodQuote(NOW),
         customRecipientMsg: 'x',
         rebates: [{ recipient: 'a', share: 100 }],
         virtualChainRecipient: '0x1',
       },
-      config
+      config,
+      NOW
     );
-    expect(clean).toEqual(goodQuote());
+    expect(clean).toEqual(goodQuote(NOW));
+  });
+
+  it('accepts the deadline the web app asks for, and a client clock up to the margin ahead', () => {
+    expect(sanitizeQuoteRequest(goodQuote(NOW), config, NOW).deadline).toBe(
+      '2026-11-14T14:00:00.000Z'
+    );
+    const fast = new Date(NOW.getTime() + DEADLINE_MARGIN_MINUTES * 60_000);
+    expect(() => sanitizeQuoteRequest(goodQuote(fast), config, NOW)).not.toThrow();
+    const slow = new Date(NOW.getTime() - 119 * 60_000);
+    expect(() => sanitizeQuoteRequest(goodQuote(slow), config, NOW)).not.toThrow();
+  });
+
+  it.each([
+    ['in the past', '2026-11-14T11:59:59.000Z'],
+    ['exactly now', '2026-11-14T12:00:00.000Z'],
+    ['past the window', '2026-11-14T15:00:00.001Z'],
+    ['a week away', '2026-11-21T12:00:00.000Z'],
+  ])('rejects a deadline %s', (_name, deadline) => {
+    expect(() => sanitizeQuoteRequest({ ...goodQuote(NOW), deadline }, config, NOW)).toThrow(
+      /deadline/
+    );
+  });
+
+  it('accepts the far edge of the deadline window', () => {
+    const deadline = '2026-11-14T15:00:00.000Z';
+    expect(sanitizeQuoteRequest({ ...goodQuote(NOW), deadline }, config, NOW).deadline).toBe(
+      deadline
+    );
+  });
+
+  it.each([
+    ['fractional slippage', { slippageTolerance: 100.5 }],
+    ['negative slippage', { slippageTolerance: -1 }],
+    ['slippage as text', { slippageTolerance: '100' }],
+  ])('rejects %s', (_name, change) => {
+    expect(() => sanitizeQuoteRequest({ ...goodQuote(NOW), ...change }, config, NOW)).toThrow(
+      /slippageTolerance/
+    );
   });
 
   it.each([
@@ -119,7 +159,9 @@ describe('sanitizeQuoteRequest', () => {
     ['a bad deadline', { deadline: 'tomorrow' }],
     ['BTC as origin', { originAsset: config.btcAssetId }],
   ])('rejects %s', (_name, change) => {
-    expect(() => sanitizeQuoteRequest({ ...goodQuote(), ...change }, config)).toThrow(BadRequest);
+    expect(() => sanitizeQuoteRequest({ ...goodQuote(NOW), ...change }, config, NOW)).toThrow(
+      BadRequest
+    );
   });
 
   it('requires exactly the configured fee when one is set', () => {
@@ -162,20 +204,21 @@ describe('HTTP handler', () => {
   }
 
   it('forwards a clean quote with the API key, which never reaches the client', async () => {
+    const quote = goodQuote();
     let upstream: { url: string; init?: RequestInit } | undefined;
     function fetchFn(url: string, init?: RequestInit): Promise<Response> {
       upstream = { url, init };
       return Promise.resolve(jsonRes({ quote: { amountOut: '35000' } }));
     }
     const res = await handle(
-      post('/quote', { ...goodQuote(), extra: 1 }),
+      post('/quote', { ...quote, extra: 1 }),
       env({ ONECLICK_JWT: 'secret' }),
       fetchFn
     );
     expect(res.status).toBe(200);
     expect(upstream?.url).toBe('https://1click.chaindefuser.com/v0/quote');
     expect(new Headers(upstream?.init?.headers).get('authorization')).toBe('Bearer secret');
-    expect(bodyJson(upstream?.init)).toEqual(goodQuote());
+    expect(bodyJson(upstream?.init)).toEqual(quote);
     const text = await res.text();
     expect(text).not.toContain('secret');
     expect(res.headers.get('authorization')).toBeNull();

@@ -163,8 +163,22 @@ export function settleFromProvider(
   return sent;
 }
 
-export function confirmNothingSent(records: SendRecords, record: SendRecord): boolean {
+export const WALLET_PROMPT_WINDOW_MS = 15 * 60_000;
+
+export function promptWaitMs(record: SendRecord, now: Date): number {
+  if (record.state !== 'attempting') return 0;
+  const started = Date.parse(record.startedAt);
+  if (!Number.isFinite(started) || started > now.getTime() + WALLET_PROMPT_WINDOW_MS) return 0;
+  return Math.max(0, started + WALLET_PROMPT_WINDOW_MS - now.getTime());
+}
+
+export function confirmNothingSent(
+  records: SendRecords,
+  record: SendRecord,
+  now: Date = new Date()
+): boolean {
   if (record.state === 'sent') return false;
+  if (promptWaitMs(record, now) > 0) return false;
   const current = records.read(record.swap, record.family);
   if (!sameAttempt(current, record)) return false;
   return records.clear(record.swap);

@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import type { OneClickToken } from '@portage/core';
 
 import {
+  EVM_CHAIN_IDS,
+  EVM_NATIVE_ASSETS,
   type Eip1193Provider,
   SendError,
   type SourceWallet,
@@ -22,6 +24,7 @@ import {
   walletCovers,
   walletFailure,
 } from '../src/source-wallet.js';
+import { LIVE_EVM_TOKENS } from './evm-tokens.js';
 
 const SIG =
   '4QMdVtgtZcuygfB7RnGhZvrPxVDjXU7WgaKCaYEd2XSeQYMGKSrthoiV4GmL6pq2fu5gHaoiHofNEYTNSJuryyr';
@@ -102,6 +105,107 @@ describe('buildEvmTransfer', () => {
     expect(() =>
       buildEvmTransfer({ token: USDC_BASE, from: FROM, to: SWAP, amount: '1000', ...change })
     ).toThrow();
+  });
+
+  const evmLive = LIVE_EVM_TOKENS.filter(t => t.blockchain in EVM_CHAIN_IDS);
+  const liveNatives = evmLive.filter(t => t.contractAddress === undefined);
+
+  it('knows every native coin the live token list has on a supported chain, and no other', () => {
+    expect(evmLive).toHaveLength(LIVE_EVM_TOKENS.length);
+    expect(liveNatives.map(t => t.assetId).sort()).toEqual(
+      Object.values(EVM_NATIVE_ASSETS).flat().sort()
+    );
+    expect(Object.keys(EVM_NATIVE_ASSETS).sort()).toEqual(Object.keys(EVM_CHAIN_IDS).sort());
+  });
+
+  it.each(liveNatives.map(t => [`${t.symbol} on ${t.blockchain}`, t] as const))(
+    'sends the live native %s as value',
+    (_name, token) => {
+      const t = buildEvmTransfer({ token, from: FROM, to: SWAP, amount: '1000' });
+      expect(t).toEqual({
+        chainId: EVM_CHAIN_IDS[token.blockchain],
+        tx: { from: FROM, to: SWAP, value: '0x3e8' },
+      });
+    }
+  );
+
+  it('sends every live ERC-20 through its own contract', () => {
+    const tokens = evmLive.filter(t => t.contractAddress !== undefined);
+    expect(tokens.length).toBeGreaterThan(80);
+    for (const token of tokens) {
+      const t = buildEvmTransfer({ token, from: FROM, to: SWAP, amount: '1000' });
+      expect(t.tx.to).toBe(token.contractAddress);
+      expect(t.tx.value).toBe('0x0');
+    }
+  });
+
+  it.each([
+    [
+      'an 18-decimal ERC-20 listed without a contract',
+      {
+        assetId: 'nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near',
+        decimals: 18,
+        blockchain: 'base',
+        symbol: 'FAKE',
+        price: 1,
+      },
+      /not a known native coin/,
+    ],
+    [
+      'an unlisted asset id without a contract',
+      { ...ETH, assetId: 'nep141:eth-new.omft.near' },
+      /not a known native coin/,
+    ],
+    [
+      'a native asset id placed on another chain',
+      { ...ETH, blockchain: 'base' },
+      /not a known native coin/,
+    ],
+    ['a native coin with the wrong decimals', { ...ETH, decimals: 6 }, /decimals/],
+    [
+      'a native asset id that also has a contract',
+      { ...ETH, contractAddress: '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2' },
+      /contract address for the native coin/,
+    ],
+    [
+      'a contract that differs from the one in the asset id',
+      { ...USDC_BASE, contractAddress: '0x4200000000000000000000000000000000000006' },
+      /two different contract addresses/,
+    ],
+    [
+      'a 1Click asset id with a different contract',
+      {
+        ...USDC_BASE,
+        assetId: '1cs_v1:base:erc20:0x0382e3fee4a420bd446367d468a6f00225853420',
+      },
+      /two different contract addresses/,
+    ],
+    [
+      'an omni asset id for another network',
+      {
+        assetId: 'nep245:v2_1.omni.hot.tg:56_2w93GqMcEmQFDru84j3HZZWt557r',
+        decimals: 18,
+        blockchain: 'pol',
+        symbol: 'USDC',
+        price: 1,
+        contractAddress: '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d',
+      },
+      /different network/,
+    ],
+  ])('refuses %s and says to send manually', (_name, token: OneClickToken, message) => {
+    expect(() => buildEvmTransfer({ token, from: FROM, to: SWAP, amount: '1000' })).toThrow(
+      message
+    );
+    expect(() => buildEvmTransfer({ token, from: FROM, to: SWAP, amount: '1000' })).toThrow(
+      /yourself/
+    );
+  });
+
+  it('accepts a contract whose case differs from the asset id', () => {
+    const token = { ...USDC_BASE, contractAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' };
+    expect(buildEvmTransfer({ token, from: FROM, to: SWAP, amount: '1000' }).tx.to).toBe(
+      token.contractAddress
+    );
   });
 });
 
