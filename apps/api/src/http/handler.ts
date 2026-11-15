@@ -1,6 +1,7 @@
 import {
   type FetchLike,
   HttpError,
+  MAINNET_WITHDRAWAL_FLOW_CONFIG,
   type RequestOptions,
   RequestTimeoutError,
   SLOW_REQUEST_TIMEOUT_MS,
@@ -21,6 +22,7 @@ import {
 } from './rate-limit.js';
 import { registerDeposit } from './register-deposit.js';
 import { type SignerKeyState, newSignerKeyState } from './signer-key.js';
+import { sanitizeWithdrawalQuoteRequest } from './withdrawal-proxy.js';
 
 export interface Env {
   DEPOSITS: KV;
@@ -164,6 +166,26 @@ export async function handle(
 
     if (request.method === 'POST' && url.pathname === '/quote') {
       const clean = sanitizeQuoteRequest(await readJson(request), config);
+      await limit(PROXY_RATE, env.PROXY_RATE_LIMITER);
+      return await relay(
+        fetchFn,
+        `${config.oneClickBaseUrl}/v0/quote`,
+        {
+          method: 'POST',
+          headers: upstreamHeaders(env, true),
+          body: JSON.stringify(clean),
+          timeoutMs: SLOW_REQUEST_TIMEOUT_MS,
+        },
+        cors
+      );
+    }
+
+    if (request.method === 'POST' && url.pathname === '/withdrawal-quote') {
+      const clean = sanitizeWithdrawalQuoteRequest(
+        await readJson(request),
+        MAINNET_WITHDRAWAL_FLOW_CONFIG,
+        options.now?.() ?? new Date()
+      );
       await limit(PROXY_RATE, env.PROXY_RATE_LIMITER);
       return await relay(
         fetchFn,
