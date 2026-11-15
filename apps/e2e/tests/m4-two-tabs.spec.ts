@@ -103,7 +103,14 @@ test.describe('M4. two tabs on the same awaiting deposit', () => {
     expect(wallets.evm.behaviour.calls('eth_chainId')).toHaveLength(1 + switches);
     expect(wallets.evm.behaviour.calls('eth_accounts')).toHaveLength(1);
     expect(world.evm.transactions.size).toBe(1);
-    if (second) await expect(other.sendError).toHaveText(SEND_COPY.alreadyRecorded);
+    if (second) {
+      await expect
+        .poll(async () => [
+          ...(await app.sendError.allInnerTexts()),
+          ...(await other.sendError.allInnerTexts()),
+        ])
+        .toEqual([SEND_COPY.alreadyRecorded]);
+    }
     await expect(app.sendButton).toHaveCount(0);
     await expect(other.sendButton).toHaveCount(0);
     await expect(other.progress('Sent from your wallet.')).toBeVisible();
