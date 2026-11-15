@@ -16,6 +16,7 @@ export const TEST_ONECLICK_JWT = 'e2e-test-oneclick-jwt';
 
 export const UPSTREAM = {
   hiro: 'https://api.hiro.so',
+  alex: 'https://stacks-node.alexlab.co',
   mempool: 'https://mempool.space',
   emily: 'https://sbtc-emily.com',
   oneClick: 'https://1click.chaindefuser.com',
@@ -26,6 +27,7 @@ export const SOLANA_MAINNET_CAIP2 = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
 
 export const PAGE_REACHABLE_UPSTREAMS: readonly string[] = [
   UPSTREAM.hiro,
+  UPSTREAM.alex,
   UPSTREAM.mempool,
   UPSTREAM.emily,
   UPSTREAM.solanaRpc,

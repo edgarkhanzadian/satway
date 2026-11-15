@@ -129,7 +129,9 @@ test.describe('R3. registering the payout with Emily', () => {
     const { receipt } = await startAwaitingFunds(app);
     world.reportDeposit();
     await app.waitForProgress(PROGRESS.swapping);
-    const decoy = world.bitcoin.transaction(world.evidence.deposit.txid);
+    const [evidence] = world.evidence;
+    if (!evidence) throw new Error('No evidence deposit');
+    const decoy = world.bitcoin.transaction(evidence.deposit.txid);
     if (!decoy) throw new Error('No evidence transaction');
     const payout = world.completeSwap();
     world.bitcoin.hexOverrides.set(payout.outpoint.txid, decoy.hex);

@@ -7,6 +7,7 @@ function contentSecurityPolicy(apiUrl: string): Plugin {
     "'self'",
     new URL(apiUrl).origin,
     'https://api.hiro.so',
+    'https://stacks-node.alexlab.co',
     'https://mempool.space',
     'https://sbtc-emily.com',
     'https://*.walletconnect.com',

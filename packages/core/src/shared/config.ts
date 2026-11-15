@@ -2,6 +2,7 @@ export interface NetworkConfig {
   readonly name: 'mainnet';
   readonly sbtcContract: string;
   readonly stxApiUrl: string;
+  readonly stxSecondaryApiUrl: string;
   readonly btcApiUrl: string;
   readonly sbtcApiUrl: string;
   readonly oneClickBaseUrl: string;
@@ -18,6 +19,7 @@ export const MAINNET_CONFIG: NetworkConfig = Object.freeze({
   name: 'mainnet',
   sbtcContract: 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4',
   stxApiUrl: 'https://api.hiro.so',
+  stxSecondaryApiUrl: 'https://stacks-node.alexlab.co',
   btcApiUrl: 'https://mempool.space/api',
   sbtcApiUrl: 'https://sbtc-emily.com',
   oneClickBaseUrl: 'https://1click.chaindefuser.com',

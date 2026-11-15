@@ -54,6 +54,51 @@ const CHAIN: Record<number, { txid: string; hex: string }> = {
   },
 };
 const TIP = 975_805;
+const SIGNER_DEPOSIT_SCRIPT =
+  '2400000000000138800616000000000000000000000000000000000000000005706f782d357520d99ad0f0111a7e9aaa2ed22940efec98db0ece9b9475e61e1eec65a6e7f3af69ac';
+const SIGNER_CONTROL_BLOCK =
+  'c050929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d547bfee9ace803ac0a43373806cf7c76f82968115a55c47f37665808522e789db8d80f07eb3953614';
+const SIGNER_SWEEP_TXID = 'abc3e21b4028dd3a3a3f0aaebb7da2ab4a6331107608a0c28d0bb062dbf0927c';
+const PEG_SPK = '51208056b53d7e41f8f80b4a2daa457b07f81b1b5f42036152c7d055cd9c7fcdf753';
+const EVIDENCE_SPK = '5120df59a36d0b1f2ffb3f68a37ad4a3f8457a21a4191a75821214eadc7f839495cc';
+const EVIDENCE = [
+  {
+    txid: 'b2965a1d76c7e71729aabad38549b733cf3e00e9c174260acf33157c8f687135',
+    value: 80_000,
+    signature:
+      'b07e22eb9bdfce9568e42f40d2141eab9e68d4a469ac1809e9d0c94a4abc01fed78b0206697e9d5c8a899088fcf6efa04d477ff5e4c8274791076ddf970b0d8001',
+    hex: '01000000000101e4ec668a51d5bef17910a183dbdbfbf90a0f9254d3822c66fb1af20e9fcad7620200000000fdffffff030000000000000000536a4c5058325b22fccb460558d404079bf07161dc6eb76565c7ce597009da6d73e2f16381d94d6c9ed8ea144644e95ba490bb55dea54f49d04d676d82f0e205a9263768b91a53000ee4470105000ee388001a8b8038010000000000225120df59a36d0b1f2ffb3f68a37ad4a3f8457a21a4191a75821214eadc7f839495cc850dc2100000000016001463ec8808122d5913aede7aa5572c2ffb7171726602483045022100edbcc2c50fe4d3cc154510e98dbc1b89573897870da7b44e93d5f8ffb7df9079022038304a48f6eb253a027f472884f93153331febaf16ca271d789b7568bed8370b012102d2ce43867f5b8fdd1246b1535717aac9b73147b05eba7ff8698c39d42701fc9300000000',
+  },
+  {
+    txid: 'fe3f3e74468d89e087d03064e389abb932c68ce448ffa6940aa013168ddb9168',
+    value: 10_000,
+    signature:
+      'c068b01c082023ccb9f4f1a19a092332828ee8afb177560fce40188c90eb10c631b4a2def0e13a87e16990bf59cdf140803e56303bda3e1ab4a8099d3ccb6e8401',
+    hex: '01000000000101ac47ef284e3b01c5fa435533ab615140ceaff1324de80c62c39b707b0688d7500200000000fdffffff030000000000000000536a4c5058325b22fccb460558d404079bf07161dc6eb76565c7ce597009da6d73e2f16381d94d6c9ed8ea144644e95ba490bb55dea54f49d04d676d82f0e205a9263768b91a53000ee4470105000ee2a900048b1027000000000000225120df59a36d0b1f2ffb3f68a37ad4a3f8457a21a4191a75821214eadc7f839495cc721b0001000000001600142d27111a8deaaac9ddb2259b1f12f0e0b71eed9b0248304502210089d70d1b409ed4f6dfa3757ae9c6659b465e0f61a786591bc7a4ae9f9370f99a022001aa95a72df9dd35b5706e6b964feefc4180a96296831b1fb93a775b2637baf80121037864e29fbd01dadb255f29c54c78ab4592db292afc1c057edb7662b305095b2200000000',
+  },
+];
+const SIGNER_SWEEP = {
+  txid: SIGNER_SWEEP_TXID,
+  vin: [
+    {
+      txid: '13722963457daa096f6bcb73314bb9c8eb9db7db04192714cced9a46c9217c67',
+      vout: 0,
+      witness: [],
+      prevout: { scriptpubkey: PEG_SPK, value: 248_335_120_296 },
+    },
+    ...EVIDENCE.map(e => ({
+      txid: e.txid,
+      vout: 1,
+      witness: [e.signature, SIGNER_DEPOSIT_SCRIPT, SIGNER_CONTROL_BLOCK],
+      prevout: { scriptpubkey: EVIDENCE_SPK, value: e.value },
+    })),
+  ],
+  vout: [
+    { scriptpubkey: PEG_SPK, value: 248_335_327_083 },
+    { scriptpubkey: '6a03543301', value: 0 },
+  ],
+  status: { confirmed: true, block_height: TIP - 1 },
+};
 const NOW = new Date('2026-11-14T12:00:00.000Z');
 const USDC: OneClickToken = {
   assetId: 'nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near',
@@ -125,6 +170,8 @@ interface World {
   mint?: string | null;
   mints?: Record<string, string>;
   signerKey?: string;
+  secondaryKey?: string;
+  secondaryDown?: boolean;
   txHex?: string;
   notifyStatus?: number;
   failPostFor?: string;
@@ -200,16 +247,34 @@ function world(w: World = {}) {
         result: '0x020000002102' + (w.signerKey ?? D.signersPublicKey),
       });
     }
+    if (url.startsWith(`${config.stxSecondaryApiUrl}/v2/data_var/`)) {
+      if (w.secondaryDown) return new Response('Bad gateway', { status: 502 });
+      return jsonRes({
+        data: '0x020000002102' + (w.secondaryKey ?? w.signerKey ?? D.signersPublicKey),
+      });
+    }
     if (url.includes('/deposit?status=confirmed')) {
       return jsonRes({
-        deposits: [
-          { bitcoinTxid: 'aa'.repeat(32), bitcoinTxOutputIndex: 1, depositScript: D.depositScript },
-        ],
+        deposits: EVIDENCE.map(e => ({
+          bitcoinTxid: e.txid,
+          bitcoinTxOutputIndex: 1,
+          depositScript: SIGNER_DEPOSIT_SCRIPT,
+          reclaimScript: '03ffff00b26a',
+        })),
       });
     }
     if (url.endsWith('/blocks/tip/height')) return new Response(String(state.tip));
-    if (url.includes('/outspend/'))
-      return jsonRes({ spent: true, status: { confirmed: true, block_height: TIP - 1 } });
+    const evidence = EVIDENCE.findIndex(e => url.endsWith(`/tx/${e.txid}/outspend/1`));
+    if (evidence >= 0)
+      return jsonRes({
+        spent: true,
+        txid: SIGNER_SWEEP_TXID,
+        vin: evidence + 1,
+        status: { confirmed: true, block_height: TIP - 1 },
+      });
+    if (url.endsWith(`/tx/${SIGNER_SWEEP_TXID}`)) return jsonRes(SIGNER_SWEEP);
+    const funding = EVIDENCE.find(e => url.endsWith(`/tx/${e.txid}/hex`));
+    if (funding) return new Response(funding.hex);
     if (url.endsWith('/limits'))
       return jsonRes({
         pegCap: null,
@@ -422,6 +487,31 @@ describe('prepareDeposit', () => {
     await expect(
       prepareDeposit(config, w.backend, input, { dry: true, fetchFn: w.fetchFn })
     ).rejects.toThrow(/refusing/);
+    expect(w.quotes).toHaveLength(0);
+  });
+
+  it('reads the signer key from two Stacks sources and checks the sweep on Bitcoin', async () => {
+    const w = world();
+    await prepareDeposit(config, w.backend, input, { dry: true, fetchFn: w.fetchFn });
+    expect(w.urls).toContain(
+      `${config.stxSecondaryApiUrl}/v2/data_var/${config.sbtcContract}/sbtc-registry/current-aggregate-pubkey?proof=0`
+    );
+    expect(w.urls).toContain(`${config.btcApiUrl}/tx/${SIGNER_SWEEP_TXID}`);
+  });
+
+  it('never asks for a quote when the second Stacks source disagrees', async () => {
+    const w = world({ secondaryKey: 'ab'.repeat(32) });
+    await expect(
+      prepareDeposit(config, w.backend, input, { dry: true, fetchFn: w.fetchFn })
+    ).rejects.toThrow(/mismatch between Stacks APIs/);
+    expect(w.quotes).toHaveLength(0);
+  });
+
+  it('never asks for a quote when the second Stacks source is down', async () => {
+    const w = world({ secondaryDown: true });
+    await expect(
+      prepareDeposit(config, w.backend, input, { dry: true, fetchFn: w.fetchFn })
+    ).rejects.toThrow(/second Stacks source stacks-node\.alexlab\.co.*refusing/);
     expect(w.quotes).toHaveLength(0);
   });
 

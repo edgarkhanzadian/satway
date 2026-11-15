@@ -33,6 +33,7 @@ import {
   REAL_OUTSPEND,
   REAL_TOKENS,
 } from '../real-responses.js';
+import { realDeposits, signerWorld } from '../sbtc/signer-world.js';
 
 const ONECLICK = 'https://1click.example';
 
@@ -259,66 +260,45 @@ describe('malformed sBTC and Bitcoin responses are rejected', () => {
     );
   });
 
-  function signerWorld(over: {
-    registry?: unknown;
-    deposits?: unknown;
-    outspend?: unknown;
-  }): FetchLike {
-    return url => {
-      if (url.includes('/v2/contracts/call-read/'))
-        return Promise.resolve(
-          jsonResponse(over.registry ?? { okay: true, result: REGISTRY_RESULT })
-        );
-      if (url.includes('/deposit?status=confirmed'))
-        return Promise.resolve(
-          jsonResponse(
-            over.deposits ?? {
-              deposits: [
-                {
-                  bitcoinTxid: 'aa'.repeat(32),
-                  bitcoinTxOutputIndex: 1,
-                  depositScript: D.depositScript,
-                },
-              ],
-            }
-          )
-        );
-      if (url.endsWith('/blocks/tip/height')) return Promise.resolve(new Response('975805'));
-      return Promise.resolve(
-        jsonResponse(
-          over.outspend ?? { spent: true, status: { confirmed: true, block_height: 975800 } }
-        )
-      );
-    };
-  }
-
   it('signer verification passes with well-formed answers', async () => {
-    const res = await fetchVerifiedSigners(MAINNET_CONFIG, { fetchFn: signerWorld({}) });
+    const res = await fetchVerifiedSigners(MAINNET_CONFIG, { fetchFn: signerWorld().fetchFn });
     expect(res.signersPublicKey).toBe(D.signersPublicKey);
   });
 
   it.each([
-    ['a registry answer with no okay flag', { registry: { result: REGISTRY_RESULT } }],
-    ['a registry result that is not text', { registry: { okay: true, result: 42 } }],
+    ['a registry answer with no okay flag', { primary: { result: REGISTRY_RESULT } }],
+    ['a registry result that is not text', { primary: { okay: true, result: 42 } }],
     ['a deposit list that is not a list', { deposits: { deposits: 'none' } }],
     [
       'a deposit with a text output index',
       {
         deposits: {
           deposits: [
-            { bitcoinTxid: 'aa', bitcoinTxOutputIndex: '1', depositScript: D.depositScript },
+            {
+              bitcoinTxid: 'aa',
+              bitcoinTxOutputIndex: '1',
+              depositScript: D.depositScript,
+              reclaimScript: D.reclaimScript,
+            },
           ],
         },
       },
     ],
-    [
-      'an outspend flag given as text',
-      { outspend: { spent: 'yes', status: { confirmed: true, block_height: 1 } } },
-    ],
   ])('signer verification refuses %s', async (_name, over) => {
     await expect(
-      fetchVerifiedSigners(MAINNET_CONFIG, { fetchFn: signerWorld(over) })
+      fetchVerifiedSigners(MAINNET_CONFIG, { fetchFn: signerWorld(over).fetchFn })
     ).rejects.toBeInstanceOf(ResponseShapeError);
+  });
+
+  it('signer verification discards evidence whose outspend flag is text', async () => {
+    const [first] = realDeposits().deposits;
+    const outspends = { [first?.bitcoinTxid ?? '']: { spent: 'yes' } };
+    await expect(
+      fetchVerifiedSigners(MAINNET_CONFIG, {
+        fetchFn: signerWorld({ outspends, deposits: { deposits: [first] } }).fetchFn,
+        minEvidence: 1,
+      })
+    ).rejects.toThrow(/Unexpected data from .*outspend/);
   });
 });
 

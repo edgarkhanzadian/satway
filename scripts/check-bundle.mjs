@@ -64,9 +64,12 @@ if (!csp) {
   if (/(?:^|;)\s*child-src/.test(csp)) problems.push('CSP must not set child-src');
 
   // Connections go to a fixed list, plus the backend API origin from VITE_API_URL.
+  // stacks-node.alexlab.co is the second Stacks node (run by ALEX, not Hiro) that
+  // must agree with api.hiro.so on the sBTC signer key before an address is built.
   const allowedConnect = new Set([
     "'self'",
     'https://api.hiro.so',
+    'https://stacks-node.alexlab.co',
     'https://mempool.space',
     'https://sbtc-emily.com',
     'https://*.walletconnect.com',

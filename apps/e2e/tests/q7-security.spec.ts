@@ -18,6 +18,7 @@ const EXPECTED_CSP: Record<string, string[]> = {
     "'self'",
     API_ORIGIN,
     'https://api.hiro.so',
+    'https://stacks-node.alexlab.co',
     'https://mempool.space',
     'https://sbtc-emily.com',
     'https://*.walletconnect.com',
@@ -103,7 +104,14 @@ test.describe('Q7. security posture of the production build', () => {
 
     const origins = [...new Set(harness.network.map(e => new URL(e.url).origin))].sort();
     expect(origins).toEqual(
-      [APP_ORIGIN, API_ORIGIN, UPSTREAM.hiro, UPSTREAM.mempool, UPSTREAM.emily].sort()
+      [
+        APP_ORIGIN,
+        API_ORIGIN,
+        UPSTREAM.hiro,
+        UPSTREAM.alex,
+        UPSTREAM.mempool,
+        UPSTREAM.emily,
+      ].sort()
     );
 
     const offOrigin = seen.filter(r => new URL(r.url).origin !== APP_ORIGIN);

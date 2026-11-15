@@ -2,7 +2,7 @@ import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
 import { type Reply, json, notFound, text } from './http.js';
-import { type BitcoinKey, p2wpkhOf } from './keys.js';
+import { type BitcoinKey, p2trOf, p2wpkhOf } from './keys.js';
 import type { Rng } from './random.js';
 import { checkSpend } from './script-check.js';
 
@@ -436,18 +436,47 @@ export function depositOutputScript(depositScript: string, reclaimScript: string
   return hex.encode(out.script);
 }
 
+export interface SignerCoin {
+  txid: string;
+  vout: number;
+  value: number;
+}
+
+export function fundSignerCoin(input: {
+  chain: BitcoinChain;
+  signerKey: BitcoinKey;
+  rng: Rng;
+  sats: number;
+  confirmedAt: number;
+}): SignerCoin {
+  const genesis = new btc.Transaction({ allowUnknownInputs: true, allowUnknownOutputs: true });
+  genesis.addOutput({
+    script: hex.decode(p2trOf(input.signerKey).script),
+    amount: BigInt(input.sats),
+  });
+  genesis.addInput({
+    txid: input.rng.bytes(32),
+    index: 0,
+    finalScriptSig: hex.decode('51'),
+    sequence: 0xfffffffd,
+  });
+  const funded = input.chain.add(genesis.hex, { confirmedAt: input.confirmedAt, unchecked: true });
+  return { txid: funded.txid, vout: 0, value: input.sats };
+}
+
 export function sweepDeposit(input: {
   chain: BitcoinChain;
   outpoint: Outpoint;
   depositScript: string;
   reclaimScript: string;
   signerKey: BitcoinKey;
-  toScript: string;
+  signerCoin: SignerCoin | null;
   feeSats: number;
   confirmedAt?: number;
-}): ChainTx {
+}): { tx: ChainTx; signerCoin: SignerCoin } {
   const prev = input.chain.output(input.outpoint);
   if (!prev) throw new Error(`Unknown outpoint ${outpointKey(input.outpoint)}`);
+  const signerScript = p2trOf(input.signerKey).script;
   const tree = btc.p2tr(
     hex.decode(SBTC_UNSPENDABLE_KEY),
     [{ script: hex.decode(input.depositScript) }, { script: hex.decode(input.reclaimScript) }],
@@ -459,6 +488,16 @@ export function sweepDeposit(input: {
   );
   if (!leaf) throw new Error('The deposit script is not a leaf of the deposit address');
   const tx = new btc.Transaction({ allowUnknownInputs: true, allowUnknownOutputs: true });
+  const coin = input.signerCoin;
+  if (coin) {
+    tx.addInput({
+      txid: coin.txid,
+      index: coin.vout,
+      witnessUtxo: { script: hex.decode(signerScript), amount: BigInt(coin.value) },
+      tapInternalKey: hex.decode(input.signerKey.xOnly),
+      sequence: 0xfffffffd,
+    });
+  }
   tx.addInput({
     txid: input.outpoint.txid,
     index: input.outpoint.vout,
@@ -466,8 +505,10 @@ export function sweepDeposit(input: {
     tapLeafScript: [leaf],
     sequence: 0xfffffffd,
   });
-  tx.addOutput({ script: hex.decode(input.toScript), amount: BigInt(prev.value - input.feeSats) });
-  tx.signIdx(input.signerKey.privateKey, 0);
+  const carried = (coin?.value ?? 0) + prev.value - input.feeSats;
+  tx.addOutput({ script: hex.decode(signerScript), amount: BigInt(carried) });
+  for (let i = 0; i < tx.inputsLength; i++) tx.signIdx(input.signerKey.privateKey, i);
   tx.finalize();
-  return input.chain.add(tx.hex, { confirmedAt: input.confirmedAt });
+  const added = input.chain.add(tx.hex, { confirmedAt: input.confirmedAt });
+  return { tx: added, signerCoin: { txid: added.txid, vout: 0, value: carried } };
 }

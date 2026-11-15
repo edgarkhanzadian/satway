@@ -96,6 +96,7 @@ function requestProblem(
 
 const ALLOWED_PAGE_ORIGINS: readonly string[] = [
   UPSTREAM.hiro,
+  UPSTREAM.alex,
   UPSTREAM.mempool,
   UPSTREAM.emily,
   UPSTREAM.solanaRpc,

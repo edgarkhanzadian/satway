@@ -57,6 +57,8 @@ test.describe('live canary: real public services, read-only, no funds', () => {
   test('upstreams answer in the shapes the app expects', async () => {
     const signers = await fetchVerifiedSigners(MAINNET_CONFIG);
     expect(signers.signersPublicKey).toMatch(/^[0-9a-f]{64}$/);
+    expect(signers.stacksSources).toEqual([UPSTREAM.hiro, UPSTREAM.alex]);
+    expect(signers.evidenceItems.length).toBeGreaterThanOrEqual(2);
     const limits = await fetchLimits(MAINNET_CONFIG.sbtcApiUrl);
     expect(limits.perDepositMinimum).toBeGreaterThan(0);
     const tip = await fetchTipHeight(MAINNET_CONFIG.btcApiUrl);

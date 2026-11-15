@@ -1,11 +1,14 @@
 import { buildDepositAddress } from '@portage/core';
 
 import { SOLANA_MAINNET_CAIP2, UPSTREAM } from '../config.js';
+import { AlexStacksNode } from './alex.js';
 import {
   BitcoinChain,
   type ChainTx,
   type Outpoint,
+  type SignerCoin,
   Wallet,
+  fundSignerCoin,
   outpointKey,
   scriptOfAddress,
   sweepDeposit,
@@ -15,7 +18,7 @@ import { Emily, type EmilyDeposit } from './emily.js';
 import { EvmChains, type EvmTransfer } from './evm.js';
 import { Hiro } from './hiro.js';
 import { type Reply, field, parseJson, text } from './http.js';
-import { type BitcoinKey, bitcoinKey, p2trOf, stacksAddressOf } from './keys.js';
+import { type BitcoinKey, bitcoinKey, stacksAddressOf } from './keys.js';
 import { BTC_ASSET_ID, OneClick, type Swap, TOKENS } from './oneclick.js';
 import { Rng } from './random.js';
 import { parseDepositScript } from './sbtc-scripts.js';
@@ -23,7 +26,7 @@ import { type Credit, NATIVE_SOL_ASSET, SolanaChain } from './solana.js';
 import { FakeRelay } from './walletconnect-relay.js';
 
 export type Caller = 'page' | 'worker' | 'notifier' | 'wallet' | 'test';
-export type Service = 'hiro' | 'mempool' | 'emily' | 'oneclick' | 'solana';
+export type Service = 'hiro' | 'alex' | 'mempool' | 'emily' | 'oneclick' | 'solana';
 
 export interface WorldRequest {
   method: string;
@@ -72,7 +75,13 @@ export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
 
 export type WorldReply = Reply | 'network-error' | 'hang';
 
-const BROWSER_SERVICES: ReadonlySet<Service> = new Set(['hiro', 'mempool', 'emily', 'solana']);
+const BROWSER_SERVICES: ReadonlySet<Service> = new Set([
+  'hiro',
+  'alex',
+  'mempool',
+  'emily',
+  'solana',
+]);
 
 export const START_HEIGHT = 975_800;
 export const EVIDENCE_AMOUNT_SATS = 20_000_774;
@@ -88,6 +97,8 @@ function serviceOf(url: URL): Service | null {
       return 'emily';
     case UPSTREAM.oneClick:
       return 'oneclick';
+    case UPSTREAM.alex:
+      return 'alex';
     case UPSTREAM.solanaRpc:
       return 'solana';
     default:
@@ -112,7 +123,19 @@ export interface PayoutResult {
   amountSats: number;
 }
 
-export type EvidenceVariant = 'unswept' | 'other-signer-key';
+export type EvidenceVariant =
+  | 'unswept'
+  | 'only-one-swept'
+  | 'other-signer-key'
+  | 'without-signer-utxo';
+
+export interface EvidenceItem {
+  deposit: Outpoint;
+  sweep: string | null;
+}
+
+export const EVIDENCE_COUNT = 2;
+export const SIGNER_UTXO_SATS = 12_000_000_000;
 
 export class World {
   readonly rng: Rng;
@@ -121,6 +144,7 @@ export class World {
   readonly signer: BitcoinKey;
   readonly emily: Emily;
   readonly hiro: Hiro;
+  readonly alex: AlexStacksNode;
   readonly oneClick: OneClick;
   readonly solana: SolanaChain;
   readonly evm: EvmChains;
@@ -133,7 +157,10 @@ export class World {
     url: string;
     value: string;
   }[] = [];
-  evidence: { deposit: Outpoint; sweep: string | null };
+  evidence: EvidenceItem[];
+  private readonly signerCoins = new Map<string, SignerCoin>();
+  private readonly evidenceRng: Rng;
+  private evidenceWallet: Wallet | null = null;
   private readonly faults: ActiveFault[] = [];
   private clockOffsetMs = 0;
   private solanaClockRemainderMs = 0;
@@ -145,16 +172,18 @@ export class World {
   constructor(seed: string, options: { frozenAt?: number } = {}) {
     this.frozenAt = options.frozenAt ?? null;
     this.rng = new Rng(seed);
+    this.evidenceRng = new Rng(`${seed}#signer-evidence`);
     this.bitcoin = new BitcoinChain(this.rng, START_HEIGHT, Math.floor(this.baseNow() / 1000));
     this.relay = new FakeRelay(this.rng, () => this.now().getTime());
     this.treasury = new Wallet(this.bitcoin, bitcoinKey(this.rng), this.rng, 5_000_000_000);
     this.signer = bitcoinKey(this.rng);
     this.emily = new Emily(this.bitcoin, () => this.signer.xOnly);
     this.hiro = new Hiro(() => this.signer.publicKey);
+    this.alex = new AlexStacksNode(() => this.signer.publicKey);
     this.oneClick = new OneClick(this.rng, () => this.now());
     this.solana = new SolanaChain(this.rng, credit => this.solanaCredit(credit));
     this.evm = new EvmChains(this.rng, (transfer, hash) => this.evmTransfer(transfer, hash));
-    this.evidence = this.seedEvidence({ signerKey: this.signer, swept: true });
+    this.evidence = this.seedEvidenceSet('valid');
     this.solana.createMint(
       TOKENS.usdcSol.contractAddress,
       TOKENS.usdcSol.decimals,
@@ -186,11 +215,74 @@ export class World {
     return this.parkedCount;
   }
 
-  private seedEvidence(input: { signerKey: BitcoinKey; swept: boolean }): {
-    deposit: Outpoint;
-    sweep: string | null;
-  } {
-    const other = bitcoinKey(this.rng);
+  private evidenceFunder(): Wallet {
+    this.evidenceWallet ??= new Wallet(
+      this.bitcoin,
+      bitcoinKey(this.evidenceRng),
+      this.evidenceRng,
+      1_000_000_000
+    );
+    return this.evidenceWallet;
+  }
+
+  private signerCoinFor(key: BitcoinKey): SignerCoin {
+    const known = this.signerCoins.get(key.xOnly);
+    if (known) return known;
+    const funded = fundSignerCoin({
+      chain: this.bitcoin,
+      signerKey: key,
+      rng: this.evidenceRng,
+      sats: SIGNER_UTXO_SATS,
+      confirmedAt: this.bitcoin.tip.height - 150,
+    });
+    this.signerCoins.set(key.xOnly, funded);
+    return funded;
+  }
+
+  private sweepAsSigners(input: {
+    outpoint: Outpoint;
+    depositScript: string;
+    reclaimScript: string;
+    signerKey: BitcoinKey;
+    withSignerUtxo: boolean;
+    confirmedAt?: number;
+  }): ChainTx {
+    const swept = sweepDeposit({
+      chain: this.bitcoin,
+      outpoint: input.outpoint,
+      depositScript: input.depositScript,
+      reclaimScript: input.reclaimScript,
+      signerKey: input.signerKey,
+      signerCoin: input.withSignerUtxo ? this.signerCoinFor(input.signerKey) : null,
+      feeSats: 1_502,
+      ...(input.confirmedAt === undefined ? {} : { confirmedAt: input.confirmedAt }),
+    });
+    if (input.withSignerUtxo) this.signerCoins.set(input.signerKey.xOnly, swept.signerCoin);
+    return swept.tx;
+  }
+
+  private seedEvidenceSet(variant: EvidenceVariant | 'valid'): EvidenceItem[] {
+    const signerKey = variant === 'other-signer-key' ? bitcoinKey(this.rng) : this.signer;
+    return Array.from({ length: EVIDENCE_COUNT }, (_, i) => {
+      const swept =
+        variant !== 'unswept' && !(variant === 'only-one-swept' && i === EVIDENCE_COUNT - 1);
+      return this.seedEvidence({
+        signerKey,
+        swept,
+        withSignerUtxo: variant !== 'without-signer-utxo',
+        offset: i,
+      });
+    });
+  }
+
+  private seedEvidence(input: {
+    signerKey: BitcoinKey;
+    swept: boolean;
+    withSignerUtxo: boolean;
+    offset: number;
+  }): EvidenceItem {
+    const first = input.offset === 0;
+    const other = bitcoinKey(first ? this.rng : this.evidenceRng);
     const deposit = buildDepositAddress({
       stacksAddress: stacksAddressOf(other),
       reclaimPublicKey: other.xOnly,
@@ -199,31 +291,30 @@ export class World {
       reclaimLockBlocks: 950,
     });
     const tip = this.bitcoin.tip.height;
-    const payout = this.treasury.pay(
+    const sweptAt = tip - 12 - input.offset;
+    const payout = (first ? this.treasury : this.evidenceFunder()).pay(
       [{ script: deposit.scriptPubKey, value: EVIDENCE_AMOUNT_SATS }],
-      { confirmedAt: tip - 30 }
+      { confirmedAt: tip - 30 - input.offset }
     );
     const sweep = input.swept
-      ? sweepDeposit({
-          chain: this.bitcoin,
+      ? this.sweepAsSigners({
           outpoint: { txid: payout.txid, vout: 0 },
           depositScript: deposit.depositScript,
           reclaimScript: deposit.reclaimScript,
           signerKey: input.signerKey,
-          toScript: p2trOf(input.signerKey).script,
-          feeSats: 1_502,
-          confirmedAt: tip - 12,
+          withSignerUtxo: input.withSignerUtxo,
+          confirmedAt: sweptAt,
         })
       : null;
     const parsed = parseDepositScript(deposit.depositScript);
-    const block = this.bitcoin.blockAt(tip - 12);
+    const block = this.bitcoin.blockAt(sweptAt);
     if (!parsed || !block) throw new Error('Could not seed the signer evidence');
     const seeded: EmilyDeposit = {
       bitcoinTxid: payout.txid,
       bitcoinTxOutputIndex: 0,
       recipient: parsed.recipient,
       amount: EVIDENCE_AMOUNT_SATS,
-      lastUpdateHeight: tip - 12,
+      lastUpdateHeight: sweptAt,
       lastUpdateBlockHash: block.hash,
       status: 'confirmed',
       statusMessage: `Included in block ${block.hash}`,
@@ -231,7 +322,13 @@ export class World {
       reclaimScript: deposit.reclaimScript,
       depositScript: deposit.depositScript,
       ...(sweep
-        ? { fulfillment: { BitcoinTxid: sweep.txid, BitcoinTxIndex: 0, BtcFee: 1_502 } }
+        ? {
+            fulfillment: {
+              BitcoinTxid: sweep.txid,
+              BitcoinTxIndex: input.withSignerUtxo ? 1 : 0,
+              BtcFee: 1_502,
+            },
+          }
         : {}),
     };
     this.emily.seed(seeded);
@@ -239,11 +336,8 @@ export class World {
   }
 
   replaceEvidence(variant: EvidenceVariant): void {
-    this.emily.remove(this.evidence.deposit.txid, this.evidence.deposit.vout);
-    this.evidence = this.seedEvidence({
-      signerKey: variant === 'other-signer-key' ? bitcoinKey(this.rng) : this.signer,
-      swept: variant !== 'unswept',
-    });
+    for (const item of this.evidence) this.emily.remove(item.deposit.txid, item.deposit.vout);
+    this.evidence = this.seedEvidenceSet(variant);
   }
 
   private solanaCredit(credit: Credit): void {
@@ -434,6 +528,8 @@ export class World {
     switch (service) {
       case 'hiro':
         return this.hiro.serve(request.method, url.pathname, request.body);
+      case 'alex':
+        return this.alex.serve(request.method, url.pathname, url.searchParams);
       case 'mempool':
         return this.bitcoin.serve(request.method, url.pathname, request.body);
       case 'emily':
@@ -574,14 +670,12 @@ export class World {
     sweep: (o: Outpoint): ChainTx => {
       const deposit = this.emily.get(o.txid, o.vout);
       if (!deposit) throw new Error(`The signers cannot sweep ${outpointKey(o)}: not registered`);
-      return sweepDeposit({
-        chain: this.bitcoin,
+      return this.sweepAsSigners({
         outpoint: o,
         depositScript: deposit.depositScript,
         reclaimScript: deposit.reclaimScript,
         signerKey: this.signer,
-        toScript: p2trOf(this.signer).script,
-        feeSats: 1_502,
+        withSignerUtxo: true,
       });
     },
     confirm: (o: Outpoint): EmilyDeposit => {

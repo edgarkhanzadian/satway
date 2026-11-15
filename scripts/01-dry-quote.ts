@@ -44,9 +44,16 @@ async function main() {
   console.log('1. Signer key');
   const signers = await fetchVerifiedSigners(config);
   console.log(`   key          ${signers.signersPublicKey}`);
-  console.log(
-    `   evidence     a deposit locked to this key was swept on Bitcoin ${signers.evidence.blocksAgo} blocks ago (height ${signers.evidence.sweptAtHeight})`
-  );
+  console.log(`   sources      ${signers.stacksSources.join(' and ')} agree`);
+  for (const e of signers.evidenceItems) {
+    console.log(
+      `   evidence     deposit ${e.txid}:${e.vout} swept through its deposit leaf by ${e.sweepTxid} (input ${e.sweepInput}), ${e.blocksAgo} blocks ago at height ${e.sweptAtHeight}, carrying a ${e.signerUtxoSats}-sat signer UTXO`
+    );
+  }
+  for (const r of signers.rejectedEvidence) {
+    console.log(`   skipped      ${r.txid}:${r.vout}: ${r.reason}`);
+  }
+  console.log(`   requests     ${signers.requests}`);
 
   console.log('\n2. sBTC deposit limits');
   const limits = await fetchLimits(config.sbtcApiUrl);
