@@ -38,6 +38,7 @@ import {
   attemptingRecord,
   createSendRecords,
   needsChainCheck,
+  releaseIfCleared,
   sendConfirmed,
   sendLockName,
   sendRecordKey,
@@ -365,6 +366,25 @@ describe('attemptSend across tabs', () => {
     expect(locks.owners.size).toBe(1);
     expect(confirmNothingSent(tabA, record)).toBe(true);
     expect(locks.owners.size).toBe(0);
+  });
+
+  it('a tab that holds the lock lets go once another tab cleared the record, so that tab can send', async () => {
+    const storage = fakeStorage();
+    const locks = browserLocks();
+    const tabA = createSendRecords(() => storage, locks.tab());
+    const tabB = createSendRecords(() => storage, locks.tab());
+    await attemptSend(tabA, start(ONE), () => Promise.reject(new Error('socket closed')));
+    expect(releaseIfCleared(tabA, ONE, 'evm')).toBe(false);
+    expect(locks.owners.size).toBe(1);
+    const record = tabB.read(ONE, 'evm');
+    if (!record) throw new Error('expected a record');
+    expect(confirmNothingSent(tabB, record)).toBe(true);
+    expect(locks.owners.size).toBe(1);
+
+    expect(releaseIfCleared(tabA, ONE, 'evm')).toBe(true);
+    expect(locks.owners.size).toBe(0);
+    const outcome = await attemptSend(tabB, start(ONE), () => Promise.resolve(HASH));
+    expect(outcome.kind).toBe('sent');
   });
 
   it.each([

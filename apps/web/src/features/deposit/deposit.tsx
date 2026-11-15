@@ -22,6 +22,7 @@ import {
   promptWaitMs,
   quoteExpired,
   recordTx,
+  releaseIfCleared,
   resendRecord,
   resolveRecord,
   sendFromEvm,
@@ -540,6 +541,11 @@ function Tracking(props: {
     setRecord(readRecord());
     return watchSendRecords(window, () => setRecord(readRecord()));
   }, [readRecord]);
+
+  useEffect(() => {
+    if (record !== null || sending || !target || !sendFamily) return;
+    releaseIfCleared(sendRecords, target, sendFamily);
+  }, [record, sending, target, sendFamily]);
 
   useEffect(() => {
     if (!reading || sendingRef.current) return;

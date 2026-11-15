@@ -13,6 +13,36 @@ async function clickSendInPage(app: SatwayApp): Promise<boolean> {
 }
 
 test.describe('M4. two tabs on the same awaiting deposit', () => {
+  test('clearing an uncertain send in one tab lets that tab send, although the other tab held the lock', async ({
+    app,
+    world,
+    wallets,
+    harness,
+  }) => {
+    harness.allowConsoleErrors(/Internal JSON-RPC error/);
+    const started = await startAwaitingFunds(app);
+    wallets.evm.behaviour.reject('eth_sendTransaction', {
+      code: -32603,
+      message: 'Internal JSON-RPC error.',
+      times: 1,
+    });
+    await app.clickSend();
+    await expect(app.page.getByText(SEND_COPY.uncertainHeadline, { exact: true })).toBeVisible();
+    expect(world.evm.transactions.size).toBe(0);
+
+    const other = await app.newTab();
+    await resumeIn(other, started);
+    await expect(other.page.getByText(SEND_COPY.uncertainHeadline, { exact: true })).toBeVisible();
+    await other.confirmNothingSentButton.click();
+    await expect(other.sendButton).toHaveText('Send from Test EVM Wallet');
+    await expect(app.sendButton).toHaveText('Send from Test EVM Wallet');
+
+    await other.sendFromWallet();
+    await expect(other.sendError).toHaveCount(0);
+    expect(wallets.evm.behaviour.calls('eth_sendTransaction')).toHaveLength(2);
+    expect(world.evm.transactions.size).toBe(1);
+  });
+
   test('sending in one tab removes the button in the other without a reload', async ({
     app,
     world,

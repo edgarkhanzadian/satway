@@ -397,6 +397,16 @@ export function createSendRecords(
   };
 }
 
+export function releaseIfCleared(
+  records: SendRecords,
+  target: SwapTarget,
+  family: SendFamily
+): boolean {
+  if (records.read(target, family) !== null) return false;
+  records.release(target);
+  return true;
+}
+
 export function watchSendRecords(target: EventTarget, onChange: () => void): () => void {
   function listener() {
     onChange();
