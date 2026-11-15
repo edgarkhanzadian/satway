@@ -358,9 +358,10 @@ describe('planReclaim', () => {
   });
 
   it('refuses an output that cannot cover the fee', () => {
-    expect(reclaimFeeSats(5)).toBe(630);
-    expect(reclaimAmountProblem(546, 5)).toMatch(/cannot cover the reclaim fee/);
-    expect(reclaimAmountProblem(2_000, 5)).toBeNull();
-    expect(reclaimAmountProblem(2_000, 20)).toMatch(/2000 sats/);
+    expect(reclaimFeeSats(5, 126)).toBe(630);
+    expect(reclaimFeeSats(5, 138)).toBe(690);
+    expect(reclaimAmountProblem(546, 5, 126)).toMatch(/cannot cover the reclaim fee/);
+    expect(reclaimAmountProblem(2_000, 5, 126)).toBeNull();
+    expect(reclaimAmountProblem(2_000, 20, 126)).toMatch(/2000 sats/);
   });
 });

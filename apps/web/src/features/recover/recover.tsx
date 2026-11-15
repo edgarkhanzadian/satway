@@ -19,8 +19,6 @@ import {
   isOutputSpent,
   outpointOf,
   planReclaim,
-  reclaimAmountProblem,
-  reclaimFeeQuote,
 } from '@satway/core';
 
 import {
@@ -156,9 +154,7 @@ export function Recover(props: {
         );
       }
       const feeRate = await fetchReclaimFeeRate(config.btcApiUrl);
-      const tooSmall = reclaimAmountProblem(output.amountSats, feeRate);
-      if (tooSmall) throw new Error(tooSmall);
-      const { psbtHex } = buildReclaimPsbt({
+      const { psbtHex, fee } = buildReclaimPsbt({
         payout: output,
         bitcoinAddress: destination,
         stacksAddress: receipt.stacksAddress,
@@ -169,12 +165,7 @@ export function Recover(props: {
         feeRate,
       });
       if (!isCurrent()) return;
-      setReview({
-        output,
-        to: destination,
-        psbtHex,
-        fee: reclaimFeeQuote(output.amountSats, feeRate),
-      });
+      setReview({ output, to: destination, psbtHex, fee });
     } catch (err) {
       setError(errorMessage(err) ?? null);
     } finally {

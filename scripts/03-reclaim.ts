@@ -20,7 +20,7 @@ import {
   priorOutputsOf,
   quotedSatsOf,
   reclaimAmountProblem,
-  reclaimFeeQuote,
+  reclaimTxVsize,
   reportedAmountOutOf,
   selectPayout,
   signReclaimPsbt,
@@ -83,12 +83,16 @@ async function main() {
   const feeRate =
     (feeRateFlag === undefined ? 0 : Number(feeRateFlag)) ||
     (await fetchReclaimFeeRate(config.btcApiUrl));
-  const tooSmall = reclaimAmountProblem(payout.amountSats, feeRate);
+  const tooSmall = reclaimAmountProblem(
+    payout.amountSats,
+    feeRate,
+    reclaimTxVsize(to, record.reclaimLockBlocks)
+  );
   if (tooSmall) {
     console.error(tooSmall);
     process.exit(1);
   }
-  const { psbtHex } = buildReclaimPsbt({
+  const { psbtHex, fee } = buildReclaimPsbt({
     payout,
     bitcoinAddress: to,
     stacksAddress: record.stacksAddress,
@@ -99,8 +103,7 @@ async function main() {
     feeRate,
   });
   const { txHex, txid } = signReclaimPsbt(psbtHex, privateKey);
-  const fee = reclaimFeeQuote(payout.amountSats, feeRate);
-  console.log(`Fee rate ${fee.feeRate} sat/vB`);
+  console.log(`Fee rate ${fee.feeRate} sat/vB, ${fee.vsize} vB`);
   console.log(`Fee      ${fee.feeSats} sats, ${fee.netSats} sats to ${to}`);
   console.log(`Reclaim  ${txid}`);
   console.log(`\n${txHex}\n`);

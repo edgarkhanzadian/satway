@@ -254,6 +254,31 @@ test.describe('R4. the mint never happens, so the user reclaims after the timelo
     });
   });
 
+  test('a reclaim to a taproot address pays the fee for its larger size', async ({
+    app,
+    world,
+    wallets,
+  }) => {
+    const { started, payout } = await toReclaimable(app, world);
+    await openInRecover(app, started);
+    const to = started.receipt.depositAddress;
+    const taprootFee = Math.ceil(138 * 4);
+    const review = await reviewReclaim(app, to);
+    expect(review?.fee).toBe(`${taprootFee} sats`);
+    await reclaimControls(app).confirm.click();
+    await expect(app.progress(/^Reclaim sent for /)).toBeVisible();
+    expectReclaimPsbt(wallets.stacks, {
+      outpoint: payout.outpoint,
+      amountSats: payout.amountSats,
+      to,
+      feeSats: taprootFee,
+    });
+    const reclaimTx = world.bitcoin
+      .allTransactions()
+      .find(t => t.hex === world.bitcoin.broadcasts[0]);
+    expect(reclaimTx?.vsize).toBe(138);
+  });
+
   test('a fee rate above the cap is refused before anything is built or signed', async ({
     app,
     world,

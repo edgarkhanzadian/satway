@@ -3,10 +3,13 @@ import * as btc from '@scure/btc-signer';
 import { describe, expect, it } from 'vitest';
 
 import {
+  type ReclaimFeeQuote,
   buildDepositAddress,
   buildReclaimPsbt,
   finalizeSignedReclaim,
+  reclaimAmountProblem,
   reclaimFeeQuote,
+  reclaimTxVsize,
   signReclaimPsbt,
 } from '../../src/index.js';
 import { REAL_DEPOSIT as D, defined } from '../fixtures.js';
@@ -74,9 +77,10 @@ describe('buildReclaimPsbt', () => {
   });
 
   it('quotes the fee it will pay and what is left, matching the built transaction', () => {
-    const quote = reclaimFeeQuote(200_000, 5);
-    expect(quote).toEqual({ feeRate: 5, vsize: 126, feeSats: 630, netSats: 199_370 });
-    expect(tx.getOutput(0).amount).toBe(BigInt(quote.netSats));
+    const built = buildReclaimPsbt(input);
+    expect(built.fee).toEqual({ feeRate: 5, vsize: 126, feeSats: 630, netSats: 199_370 });
+    expect(reclaimFeeQuote(200_000, 5, 126)).toEqual(built.fee);
+    expect(tx.getOutput(0).amount).toBe(BigInt(built.fee.netSats));
   });
 
   it('rejects a non-positive fee rate and a bad recipient', () => {
@@ -84,6 +88,80 @@ describe('buildReclaimPsbt', () => {
     expect(() =>
       buildReclaimPsbt({ ...input, stacksAddress: 'ST000000000000000000002AMW42H' })
     ).toThrow();
+  });
+});
+
+describe('reclaim fee for each destination type', () => {
+  const priv = hex.decode('11'.repeat(32));
+  const reclaimPublicKey = hex.encode(btc.utils.pubSchnorr(priv));
+  const DESTINATIONS = [
+    ['P2WPKH', 'bc1q9hmqr6dldku4nqhlg4ulrr9pr8czcpf323csys', 126],
+    ['P2SH', '3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy', 127],
+    ['P2PKH', '1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2', 129],
+    ['P2TR', D.address, 138],
+    ['P2WSH', 'bc1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qccfmv3', 138],
+  ] as const;
+
+  function signed(
+    bitcoinAddress: string,
+    feeRate: number,
+    sighash?: number
+  ): { tx: btc.Transaction; fee: ReclaimFeeQuote } {
+    const built = buildReclaimPsbt({ ...input, reclaimPublicKey, bitcoinAddress, feeRate });
+    const tx = btc.Transaction.fromPSBT(hex.decode(built.psbtHex), {
+      allowUnknownOutputs: true,
+      allowUnknownInputs: true,
+    });
+    if (sighash !== undefined) tx.updateInput(0, { sighashType: sighash });
+    tx.sign(priv, sighash === undefined ? undefined : [sighash]);
+    tx.finalize();
+    return { tx, fee: built.fee };
+  }
+
+  it.each(DESTINATIONS)(
+    '%s: the fee paid meets the requested rate for the real signed size',
+    (_type, address, vsize) => {
+      for (const feeRate of [1, 4, 7.5, 33, 500]) {
+        const { tx, fee } = signed(address, feeRate);
+        expect(tx.vsize).toBe(vsize);
+        expect(fee.vsize).toBe(vsize);
+        expect(reclaimTxVsize(address, D.reclaimLockBlocks)).toBe(vsize);
+        const paid = 200_000 - Number(defined(tx.getOutput(0).amount));
+        expect(paid).toBe(fee.feeSats);
+        expect(paid).toBe(Math.ceil(vsize * feeRate));
+        expect(paid / tx.vsize).toBeGreaterThanOrEqual(feeRate);
+        expect(fee.netSats).toBe(200_000 - paid);
+      }
+    }
+  );
+
+  it.each(DESTINATIONS)(
+    '%s: a signature with an explicit sighash byte still meets the rate',
+    (_type, address) => {
+      const { tx, fee } = signed(address, 9, btc.SigHash.ALL);
+      expect(tx.vsize).toBeLessThanOrEqual(fee.vsize);
+      expect(fee.feeSats / tx.vsize).toBeGreaterThanOrEqual(9);
+    }
+  );
+
+  it('checks that the output still covers the fee at the real size', () => {
+    const p2tr = Math.ceil(138 * 5);
+    const amountSats = p2tr + 545;
+    expect(reclaimAmountProblem(amountSats, 5, reclaimTxVsize(DEST, 950))).toBeNull();
+    expect(reclaimAmountProblem(amountSats, 5, reclaimTxVsize(D.address, 950))).toMatch(
+      new RegExp(`cannot cover the reclaim fee of about ${p2tr} sats`)
+    );
+    expect(() =>
+      buildReclaimPsbt({
+        ...input,
+        bitcoinAddress: D.address,
+        payout: { ...input.payout, amountSats },
+      })
+    ).toThrow(/cannot cover the reclaim fee/);
+  });
+
+  it('refuses a destination that is not a mainnet Bitcoin address', () => {
+    expect(() => reclaimTxVsize('tb1q9hmqr6dldku4nqhlg4ulrr9pr8czcpf3vk9wn6', 950)).toThrow();
   });
 });
 

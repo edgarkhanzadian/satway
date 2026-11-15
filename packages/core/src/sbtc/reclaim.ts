@@ -27,11 +27,43 @@ export function blocksUntilReclaimFor(
   return Math.max(0, reclaimLockBlocks - confirmations);
 }
 
-export const RECLAIM_TX_VSIZE = 126;
 export const RECLAIM_MIN_OUTPUT_SATS = 546;
 
-export function reclaimFeeSats(feeRate: number): number {
-  return Math.ceil(RECLAIM_TX_VSIZE * feeRate);
+const RECLAIM_CONTROL_BLOCK_BYTES = 65;
+const SCHNORR_SIGNATURE_MAX_BYTES = 65;
+
+function compactSizeBytes(n: number): number {
+  if (n < 0xfd) return 1;
+  return n <= 0xffff ? 3 : 5;
+}
+
+function pushedBytes(n: number): number {
+  return compactSizeBytes(n) + n;
+}
+
+export function reclaimTxVsize(bitcoinAddress: string, reclaimLockBlocks: number): number {
+  const outputScript = btc.OutScript.encode(btc.Address(btc.NETWORK).decode(bitcoinAddress));
+  const reclaimScript = btc.Script.encode([
+    reclaimLockBlocks,
+    'CHECKSEQUENCEVERIFY',
+    'DROP',
+    new Uint8Array(32),
+    'CHECKSIG',
+  ]);
+  const input = 32 + 4 + 1 + 4;
+  const output = 8 + pushedBytes(outputScript.length);
+  const base = 4 + 1 + input + 1 + output + 4;
+  const witness =
+    2 +
+    1 +
+    pushedBytes(SCHNORR_SIGNATURE_MAX_BYTES) +
+    pushedBytes(reclaimScript.length) +
+    pushedBytes(RECLAIM_CONTROL_BLOCK_BYTES);
+  return Math.ceil((base * 4 + witness) / 4);
+}
+
+export function reclaimFeeSats(feeRate: number, vsize: number): number {
+  return Math.ceil(vsize * feeRate);
 }
 
 export interface ReclaimFeeQuote {
@@ -41,13 +73,21 @@ export interface ReclaimFeeQuote {
   netSats: number;
 }
 
-export function reclaimFeeQuote(amountSats: number, feeRate: number): ReclaimFeeQuote {
-  const feeSats = reclaimFeeSats(feeRate);
-  return { feeRate, vsize: RECLAIM_TX_VSIZE, feeSats, netSats: amountSats - feeSats };
+export function reclaimFeeQuote(
+  amountSats: number,
+  feeRate: number,
+  vsize: number
+): ReclaimFeeQuote {
+  const feeSats = reclaimFeeSats(feeRate, vsize);
+  return { feeRate, vsize, feeSats, netSats: amountSats - feeSats };
 }
 
-export function reclaimAmountProblem(amountSats: number, feeRate: number): string | null {
-  const fee = reclaimFeeSats(feeRate);
+export function reclaimAmountProblem(
+  amountSats: number,
+  feeRate: number,
+  vsize: number
+): string | null {
+  const fee = reclaimFeeSats(feeRate, vsize);
   if (amountSats - fee >= RECLAIM_MIN_OUTPUT_SATS) return null;
   return `This output holds ${amountSats} sats, which cannot cover the reclaim fee of about ${fee} sats at ${feeRate} sat/vB and still leave a spendable amount. It is not worth reclaiming at this fee rate.`;
 }
@@ -94,13 +134,19 @@ export function findReclaimOption(plan: ReclaimPlan, outpoint: string): ReclaimO
   return plan.options.find(o => outpointOf(o.output) === wanted) ?? null;
 }
 
-export function buildReclaimPsbt(input: ReclaimInput): { psbtHex: string; depositAddress: string } {
+export function buildReclaimPsbt(input: ReclaimInput): {
+  psbtHex: string;
+  depositAddress: string;
+  fee: ReclaimFeeQuote;
+} {
   assertMainnetStandardAddress(input.stacksAddress);
   if (!(input.feeRate > 0)) throw new Error('Fee rate must be positive');
   if (input.feeRate > MAX_FEE_RATE_SATS_PER_VBYTE)
     throw new Error(feeRateAboveCapMessage(input.feeRate));
-  const problem = reclaimAmountProblem(input.payout.amountSats, input.feeRate);
+  const vsize = reclaimTxVsize(input.bitcoinAddress, input.reclaimLockBlocks);
+  const problem = reclaimAmountProblem(input.payout.amountSats, input.feeRate, vsize);
   if (problem) throw new Error(problem);
+  const fee = reclaimFeeQuote(input.payout.amountSats, input.feeRate, vsize);
 
   const deposit = buildDepositAddress({
     stacksAddress: input.stacksAddress,
@@ -123,8 +169,9 @@ export function buildReclaimPsbt(input: ReclaimInput): { psbtHex: string; deposi
     vout: input.payout.vout,
     feeRate: input.feeRate,
   });
+  tx.updateOutput(0, { amount: BigInt(fee.netSats) });
 
-  return { psbtHex: hex.encode(tx.toPSBT()), depositAddress: deposit.address };
+  return { psbtHex: hex.encode(tx.toPSBT()), depositAddress: deposit.address, fee };
 }
 
 export function signReclaimPsbt(
