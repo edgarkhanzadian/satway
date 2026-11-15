@@ -1,5 +1,6 @@
 import {
   type AddressOutput,
+  type DepositObservation,
   type FetchLike,
   type MintStatus,
   type NetworkConfig,
@@ -8,9 +9,11 @@ import {
   type PayoutBasis,
   type Progress,
   type RegistrationFailureKind,
+  type Stage,
   type SwapRefund,
   type WatchedDepositContext,
   applyRegistrations,
+  errorMessage,
   mintStatusUnknown,
   observeDeposit,
   outpointOf,
@@ -64,6 +67,35 @@ export function depositContextOf(receipt: Receipt): WatchedDepositContext {
   };
 }
 
+export interface SwapReading {
+  swap: OneClickSwapStatus | null;
+  remaining: bigint | null;
+}
+
+export class ProgressReadError extends Error {
+  readonly reading: SwapReading;
+
+  constructor(reading: SwapReading, cause: unknown) {
+    super(errorMessage(cause) ?? String(cause), { cause });
+    this.name = 'ProgressReadError';
+    this.reading = reading;
+  }
+}
+
+export type PaymentView = 'checking' | 'unknown' | 'pay' | 'none';
+
+export function paymentView(
+  reading: SwapReading | undefined,
+  freshStage: Stage | null
+): PaymentView {
+  if (freshStage !== null && freshStage !== 'awaiting-funds') return 'none';
+  if (reading === undefined) return 'checking';
+  if (reading.swap === null) return 'unknown';
+  return reading.swap === 'PENDING_DEPOSIT' || reading.swap === 'INCOMPLETE_DEPOSIT'
+    ? 'pay'
+    : 'none';
+}
+
 export async function checkProgress(
   config: NetworkConfig,
   backend: Backend,
@@ -80,7 +112,18 @@ export async function checkProgress(
     }
   }
 
-  const observed = await observeDeposit(config, depositContextOf(receipt), status, { fetchFn });
+  let observed: DepositObservation;
+  try {
+    observed = await observeDeposit(config, depositContextOf(receipt), status, { fetchFn });
+  } catch (err) {
+    throw new ProgressReadError(
+      {
+        swap: status?.status ?? null,
+        remaining: remainingDepositOf(status, receipt.quoteResponse.quote.amountIn),
+      },
+      err
+    );
+  }
   const results = await registerOutputs(config, receipt, observed.toRegister, fetchFn);
   const o = applyRegistrations(observed, results, receipt.reclaimLockBlocks);
   const { selection } = o;

@@ -17,7 +17,6 @@ import {
   chainFamily,
   confirmNothingSent,
   evmTransactionState,
-  latestSwap,
   nextRefundField,
   promptWaitMs,
   quoteExpired,
@@ -38,12 +37,15 @@ import { type OneClickToken, MAINNET_CONFIG as config, errorMessage } from '@sat
 import {
   type ActiveDeposit,
   type Backend,
+  ProgressReadError,
   type Receipt,
   type Snapshot,
+  type SwapReading,
   type WalletAccount,
   checkProgress,
   downloadReceipt,
   latestRequests,
+  paymentView,
   rememberReceipt,
   sendAmountOf,
   sendAmountText,
@@ -403,6 +405,7 @@ function Tracking(props: {
 }) {
   const { backend, receipt, source, token, onRoute } = props;
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [reading, setReading] = useState<SwapReading | undefined>(undefined);
   const [problem, setProblem] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
   const [sending, setSending] = useState(false);
@@ -443,9 +446,9 @@ function Tracking(props: {
   }, [readRecord]);
 
   useEffect(() => {
-    if (!snapshot || sendingRef.current) return;
-    setRecord(settleFromProvider(sendRecords, readRecord(), snapshot.swap));
-  }, [snapshot, readRecord]);
+    if (!reading || sendingRef.current) return;
+    setRecord(settleFromProvider(sendRecords, readRecord(), reading.swap));
+  }, [reading, readRecord]);
 
   const [promptTick, setPromptTick] = useState(0);
   const promptOpen = record !== null && promptWaitMs(record, new Date()) > 0;
@@ -505,6 +508,7 @@ function Tracking(props: {
     let live = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     setSnapshot(null);
+    setReading(undefined);
     setStale(false);
     setProblem(null);
     async function tick() {
@@ -512,11 +516,15 @@ function Tracking(props: {
         const next = await checkProgress(config, backend, receipt);
         if (!live) return;
         setSnapshot(next);
+        setReading({ swap: next.swap, remaining: next.remaining });
         setStale(false);
         setProblem(null);
         if (next.progress.terminal) return;
       } catch (err) {
         if (!live) return;
+        setReading(
+          err instanceof ProgressReadError ? err.reading : { swap: null, remaining: null }
+        );
         setStale(true);
         setProblem(`Could not refresh: ${errorMessage(err)}. Retrying.`);
       }
@@ -535,13 +543,16 @@ function Tracking(props: {
     onRoute({ origin: `${receipt.origin.symbol} on ${receipt.origin.chain}`, deposit: { stage } });
   }, [onRoute, receipt, stage]);
 
-  const waitingForFunds = !snapshot || progress?.stage === 'awaiting-funds';
-  const shortDeposit = snapshot?.swap === 'INCOMPLETE_DEPOSIT';
+  const payment = paymentView(
+    reading,
+    snapshot !== null && !stale ? snapshot.progress.stage : null
+  );
+  const shortDeposit = reading?.swap === 'INCOMPLETE_DEPOSIT';
   const tokenDecimals =
     token !== undefined && token.assetId === receipt.origin.assetId ? token.decimals : null;
   const owed =
-    shortDeposit && snapshot.remaining !== null
-      ? sendAmountOf(receipt, tokenDecimals, snapshot.remaining)
+    shortDeposit && reading.remaining !== null
+      ? sendAmountOf(receipt, tokenDecimals, reading.remaining)
       : null;
   const sendAmount = owed ?? sendAmountOf(receipt, tokenDecimals);
   const walletCanSend =
@@ -561,7 +572,7 @@ function Tracking(props: {
   const now = new Date();
   const expired = quoteExpired(quote.deadline, now);
   const panel = sendPanel({
-    swap: latestSwap(snapshot, stale),
+    swap: stale ? null : reading?.swap,
     record,
     walletCanSend: walletReady || solanaPayReady,
     sending,
@@ -673,8 +684,15 @@ function Tracking(props: {
         </p>
       )}
 
-      {waitingForFunds && quote.depositAddress && (
+      {payment !== 'none' && quote.depositAddress && (
         <div className={send}>
+          {payment !== 'pay' && !expired && (
+            <p className={sendLine}>
+              {payment === 'checking'
+                ? 'Checking whether a payment has already arrived…'
+                : 'Can’t confirm the swap status right now, so the payment details are not shown. If you have already paid, there is nothing more to do here. This page keeps checking.'}
+            </p>
+          )}
           {expired ? (
             <>
               <p className={sendLine}>
@@ -689,76 +707,84 @@ function Tracking(props: {
               </p>
             </>
           ) : (
-            <>
-              {shortDeposit ? (
-                <p className={sendLine}>
-                  {owed === null
-                    ? 'Part of the amount arrived, but the swap provider did not say how much. From your own wallet, send only what is missing from the quoted total:'
-                    : 'Part of the amount arrived. Send exactly the rest, from your own wallet:'}
+            payment === 'pay' && (
+              <>
+                {shortDeposit ? (
+                  <p className={sendLine}>
+                    {owed === null
+                      ? 'Part of the amount arrived, but the swap provider did not say how much. From your own wallet, send only what is missing from the quoted total:'
+                      : 'Part of the amount arrived. Send exactly the rest, from your own wallet:'}
+                  </p>
+                ) : (
+                  <p className={sendLine}>
+                    {walletReady
+                      ? 'Send exactly this:'
+                      : 'Send exactly this, from your own wallet:'}
+                  </p>
+                )}
+                <p className={sendFigure}>
+                  {sendAmountText(sendAmount, receipt.origin.symbol)} on {receipt.origin.chain}
                 </p>
-              ) : (
-                <p className={sendLine}>
-                  {walletReady ? 'Send exactly this:' : 'Send exactly this, from your own wallet:'}
+                {sendAmount.kind === 'base-units' && (
+                  <p className={sendNote}>
+                    This page does not know how many decimal places {receipt.origin.symbol} has, so
+                    the amount is shown in its smallest unit, exactly as the swap was quoted. Check
+                    that your wallet shows the same amount before you send.
+                  </p>
+                )}
+                <p className={sendLine}>to</p>
+                <p className={sendFigure}>
+                  <code>{quote.depositAddress}</code>
                 </p>
-              )}
-              <p className={sendFigure}>
-                {sendAmountText(sendAmount, receipt.origin.symbol)} on {receipt.origin.chain}
-              </p>
-              {sendAmount.kind === 'base-units' && (
-                <p className={sendNote}>
-                  This page does not know how many decimal places {receipt.origin.symbol} has, so
-                  the amount is shown in its smallest unit, exactly as the swap was quoted. Check
-                  that your wallet shows the same amount before you send.
-                </p>
-              )}
-              <p className={sendLine}>to</p>
-              <p className={sendFigure}>
-                <code>{quote.depositAddress}</code>
-              </p>
-              {quote.depositMemo && (
-                <p className={sendLine}>
-                  with memo <code>{quote.depositMemo}</code>
-                </p>
-              )}
-              {quote.deadline && (
-                <p className={sendNote}>before {new Date(quote.deadline).toLocaleString()}</p>
-              )}
-            </>
+                {quote.depositMemo && (
+                  <p className={sendLine}>
+                    with memo <code>{quote.depositMemo}</code>
+                  </p>
+                )}
+                {quote.deadline && (
+                  <p className={sendNote}>before {new Date(quote.deadline).toLocaleString()}</p>
+                )}
+              </>
+            )
           )}
-          {walletReady && (panel.kind === 'offer' || panel.kind === 'sending') && (
-            <div className={sendActions}>
-              <button
-                ref={sendButtonRef}
-                className={button({ variant: 'primary' })}
-                aria-disabled={panel.kind === 'sending'}
-                onClick={() => void sendFromWallet()}
-              >
-                {panel.kind === 'sending'
-                  ? 'Confirm in your wallet…'
-                  : `Send from ${source?.name ?? 'wallet'}`}
-              </button>
-            </div>
-          )}
-          {!walletReady && solanaPayReady && panel.kind === 'offer' && token && target && (
-            <SolanaPayLink token={token} recipient={target.address} amount={quote.amountIn} />
-          )}
-          {panel.kind === 'checking' && (
-            <p className={sendNote}>Checking whether a payment has already arrived…</p>
-          )}
-          {panel.kind === 'unknown' && (
+          {payment === 'pay' &&
+            walletReady &&
+            (panel.kind === 'offer' || panel.kind === 'sending') && (
+              <div className={sendActions}>
+                <button
+                  ref={sendButtonRef}
+                  className={button({ variant: 'primary' })}
+                  aria-disabled={panel.kind === 'sending'}
+                  onClick={() => void sendFromWallet()}
+                >
+                  {panel.kind === 'sending'
+                    ? 'Confirm in your wallet…'
+                    : `Send from ${source?.name ?? 'wallet'}`}
+                </button>
+              </div>
+            )}
+          {payment === 'pay' &&
+            !walletReady &&
+            solanaPayReady &&
+            panel.kind === 'offer' &&
+            token &&
+            target && (
+              <SolanaPayLink token={token} recipient={target.address} amount={quote.amountIn} />
+            )}
+          {payment === 'pay' && panel.kind === 'unknown' && (
             <p className={sendNote}>
-              Can’t confirm the swap status right now. If you have not paid yet you can still send
-              manually using the details above.
+              This page could not refresh, so sending from your wallet is paused until it can. You
+              can still send manually using the details above.
             </p>
           )}
-          {panel.kind === 'no-storage' && (
+          {payment === 'pay' && panel.kind === 'no-storage' && (
             <p className={sendNote}>
               Sending from your wallet is turned off because this browser cannot save a record of
               the payment, which is what stops it being sent twice. Send it manually using the
               details above.
             </p>
           )}
-          {panel.kind === 'no-lock' && (
+          {payment === 'pay' && panel.kind === 'no-lock' && (
             <p className={sendNote}>
               Sending from your wallet is turned off because this browser cannot stop two open tabs
               from sending the same payment. Send it manually using the details above, or use an
@@ -789,10 +815,12 @@ function Tracking(props: {
               )}
             </div>
           )}
-          <p className={refundNote}>
-            A different asset, chain or amount will be refunded to {receipt.refundTo}, minus the
-            provider’s refund fee.
-          </p>
+          {payment === 'pay' && (
+            <p className={refundNote}>
+              A different asset, chain or amount will be refunded to {receipt.refundTo}, minus the
+              provider’s refund fee.
+            </p>
+          )}
         </div>
       )}
 

@@ -68,7 +68,7 @@ test.describe('S2. an upstream is down while a deposit is tracked', () => {
   });
 
   for (const failure of FAILURES) {
-    test(`mempool.space address reads fail (${failure.name}): retry copy, no send offered, recovers on the next poll`, async ({
+    test(`mempool.space address reads fail (${failure.name}): retry copy, the swap status still read, no wallet send offered, recovers on the next poll`, async ({
       app,
       world,
       wallets,
@@ -79,7 +79,8 @@ test.describe('S2. an upstream is down while a deposit is tracked', () => {
       for (let i = 0; i < 2; i++) {
         await app.tick();
         await expect(problem(app)).toBeVisible();
-        await expect(app.page.getByText(SEND_COPY.unknown, { exact: true })).toBeVisible();
+        await expect(app.page.getByText(SEND_COPY.paused, { exact: true })).toBeVisible();
+        await expect(app.page.getByText('Send exactly this:', { exact: true })).toBeVisible();
         await expectNoSendOffered(app);
         await expect(app.progress(PROGRESS.awaitingFunds)).toBeVisible();
         await expectNotTerminal(app);

@@ -3,8 +3,10 @@ import type { Wallets } from '../src/browser/harness.js';
 import { expect, test } from '../src/fixtures.js';
 import {
   FAILED_TO_LOAD,
+  NET_FAILED,
   SEND_COPY,
   expectNoSendOffered,
+  savedLabel,
   startDeposit,
 } from '../src/scenario/journeys.js';
 import { json } from '../src/world/http.js';
@@ -14,11 +16,18 @@ const STATUS = /^\/v0\/status$/;
 
 async function expectManualDetails(app: SatwayApp, started: StartedDeposit): Promise<void> {
   const quote = started.receipt.quoteResponse.quote;
-  await expect(app.page.getByText('Send exactly this:', { exact: true })).toBeVisible();
+  await expect(app.page.getByText(/^Send exactly this(, from your own wallet)?:$/)).toBeVisible();
   await expect(
     app.page.getByText(`${quote.amountInFormatted} USDC on base`, { exact: true })
   ).toBeVisible();
   await expect(app.page.getByText(quote.depositAddress, { exact: true })).toBeVisible();
+}
+
+async function expectNoManualDetails(app: SatwayApp, started: StartedDeposit): Promise<void> {
+  const quote = started.receipt.quoteResponse.quote;
+  await expect(app.page.getByText(/^Send exactly this/)).toHaveCount(0);
+  await expect(app.page.getByText(`${quote.amountInFormatted} USDC on base`)).toHaveCount(0);
+  await expect(app.page.getByText(quote.depositAddress, { exact: true })).toHaveCount(0);
 }
 
 function expectWalletNeverAskedToSend(wallets: Wallets, world: World): void {
@@ -40,7 +49,7 @@ test.describe('M1. the swap status is unknown, so the wallet button is not offer
     await expect(app.page.getByText(SEND_COPY.checking, { exact: true })).toBeVisible();
     await expect(app.progress('Checking…')).toBeVisible();
     await expectNoSendOffered(app);
-    await expectManualDetails(app, started);
+    await expectNoManualDetails(app, started);
     expect(api.depositPosts().map(r => r.status)).toEqual([201]);
     expect(world.requestsTo('oneclick', { path: '/v0/status' }).map(e => e.status)).toEqual([200]);
     expect(world.parked).toBe(1);
@@ -48,12 +57,52 @@ test.describe('M1. the swap status is unknown, so the wallet button is not offer
     held.release();
     await app.waitForProgress(PROGRESS.awaitingFunds);
     await expect(app.sendButton).toHaveText('Send from Test EVM Wallet');
+    await expectManualDetails(app, started);
     await expect(app.page.getByText(SEND_COPY.checking)).toHaveCount(0);
     expect(world.requestsTo('oneclick', { path: '/v0/status' }).map(e => e.status)).toEqual([
       200, 200,
     ]);
     expect(api.requests.filter(r => r.path === '/status').map(r => r.status)).toEqual([200]);
     expectWalletNeverAskedToSend(wallets, world);
+  });
+
+  test('a failed first refresh keeps the 1Click status: an already-funded swap shows no payment details', async ({
+    app,
+    world,
+    harness,
+  }) => {
+    harness.allowConsoleErrors(NET_FAILED);
+    const started = await startDeposit(app, {
+      connectEvm: false,
+      refundTo: world.rng.evmAddress(),
+    });
+    await app.waitForProgress(PROGRESS.awaitingFunds);
+    await expectManualDetails(app, started);
+    world.reportDeposit();
+    await app.waitForProgress(PROGRESS.swapping);
+
+    await app.page.reload();
+    await app.open();
+    await app.openRecover();
+    await app.pickSavedReceipt(savedLabel(started));
+    await expect(app.progress(PROGRESS.swapping)).toBeVisible();
+    world.addFault({
+      service: 'mempool',
+      path: /^\/api\/address\//,
+      outcome: 'network-error',
+      callers: ['page'],
+    });
+    await app.followDeposit();
+    await expect(app.page.getByRole('heading', { name: 'Deposit in progress' })).toBeVisible();
+    await app.harnessIdle();
+    await expect(app.page.getByText(/^Could not refresh: .+\. Retrying\.$/)).toBeVisible();
+    await expectNoManualDetails(app, started);
+    await expect(app.page.getByText(SEND_COPY.unknown)).toHaveCount(0);
+    await expectNoSendOffered(app);
+
+    world.clearFaults();
+    await app.waitForProgress(PROGRESS.swapping);
+    await expectNoManualDetails(app, started);
   });
 
   const failures: { name: string; outcome: FaultOutcome; upstream: number | 'network-error' }[] = [
@@ -85,7 +134,7 @@ test.describe('M1. the swap status is unknown, so the wallet button is not offer
       for (let i = 0; i < 2; i++) {
         await expect(app.page.getByText(SEND_COPY.unknown, { exact: true })).toBeVisible();
         await expectNoSendOffered(app);
-        await expectManualDetails(app, started);
+        await expectNoManualDetails(app, started);
         await app.tick();
       }
       const statusCalls = world.requestsTo('oneclick', { path: '/v0/status' });
@@ -100,6 +149,7 @@ test.describe('M1. the swap status is unknown, so the wallet button is not offer
         expect(app.sendButton).toHaveText('Send from Test EVM Wallet', { timeout: 750 })
       );
       await expect(app.page.getByText(SEND_COPY.unknown)).toHaveCount(0);
+      await expectManualDetails(app, started);
       await expect(app.progress(PROGRESS.awaitingFunds)).toBeVisible();
       expectWalletNeverAskedToSend(wallets, world);
       expect(await app.sendRecords()).toEqual([]);

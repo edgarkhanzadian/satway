@@ -17,7 +17,7 @@ import {
   type BackgroundRegistration,
   createBackend,
 } from '../../../src/shared/backend.js';
-import { checkProgress } from '../../../src/shared/progress.js';
+import { ProgressReadError, checkProgress, paymentView } from '../../../src/shared/progress.js';
 import {
   MAX_UNREADABLE_BACKUPS,
   RECEIPTS_KEY,
@@ -793,6 +793,67 @@ describe('checkProgress: which output is the payout', () => {
     expect(snap.registrationErrors[0]?.message).toMatch(/HTTP 503/);
     expect(snap.registrationErrors[0]).toMatchObject({ kind: 'transient', status: 503 });
     expect(w.emily.get(REAL_OUT)).toBe('pending');
+  });
+});
+
+describe('checkProgress: the swap status survives a failed refresh', () => {
+  function addressReadsFail(w: ReturnType<typeof world>) {
+    return function failing(url: string, init?: RequestInit): Promise<Response> {
+      return url.includes('/address/')
+        ? Promise.reject(new TypeError('Failed to fetch'))
+        : w.fetchFn(url, init);
+    };
+  }
+
+  it('keeps the 1Click status when the Bitcoin address read fails', async () => {
+    const w = world({ swap: 'PROCESSING' });
+    const receipt = await receiptFor(w);
+    const err: unknown = await checkProgress(config, w.backend, receipt, addressReadsFail(w)).catch(
+      (e: unknown) => e
+    );
+    expect(err).toBeInstanceOf(ProgressReadError);
+    expect(err).toMatchObject({ message: 'Failed to fetch', reading: { swap: 'PROCESSING' } });
+  });
+
+  it('reports an unknown status when the 1Click read failed too', async () => {
+    const w = world();
+    const receipt = await receiptFor(w);
+    await expect(
+      checkProgress(config, w.backend, receipt, addressReadsFail(w))
+    ).rejects.toMatchObject({
+      reading: { swap: null, remaining: null },
+    });
+  });
+});
+
+describe('paymentView', () => {
+  it('is checking before anything has been read', () => {
+    expect(paymentView(undefined, null)).toBe('checking');
+  });
+
+  it.each(['PENDING_DEPOSIT', 'INCOMPLETE_DEPOSIT'] as const)(
+    'offers payment details only while 1Click says %s',
+    swap => {
+      expect(paymentView({ swap, remaining: null }, 'awaiting-funds')).toBe('pay');
+      expect(paymentView({ swap, remaining: null }, null)).toBe('pay');
+    }
+  );
+
+  it.each(['KNOWN_DEPOSIT_TX', 'PROCESSING', 'SUCCESS', 'REFUNDED', 'FAILED'] as const)(
+    'shows no payment details once 1Click says %s, even when the rest of the refresh failed',
+    swap => {
+      expect(paymentView({ swap, remaining: null }, null)).toBe('none');
+    }
+  );
+
+  it('is neutral, not payment details, when the status is unknown', () => {
+    expect(paymentView({ swap: null, remaining: null }, 'awaiting-funds')).toBe('unknown');
+    expect(paymentView({ swap: null, remaining: null }, null)).toBe('unknown');
+  });
+
+  it('shows nothing once the chain shows the deposit moving, whatever 1Click says', () => {
+    expect(paymentView({ swap: null, remaining: null }, 'payout-unconfirmed')).toBe('none');
+    expect(paymentView({ swap: 'PENDING_DEPOSIT', remaining: null }, 'minting')).toBe('none');
   });
 });
 

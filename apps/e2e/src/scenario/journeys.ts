@@ -14,8 +14,10 @@ export const SEND_COPY = {
   alreadyRecorded:
     'A payment from your wallet is already recorded for this swap, so the wallet was not asked again.',
   checking: 'Checking whether a payment has already arrived…',
+  paused:
+    'This page could not refresh, so sending from your wallet is paused until it can. You can still send manually using the details above.',
   unknown:
-    'Can’t confirm the swap status right now. If you have not paid yet you can still send manually using the details above.',
+    'Can’t confirm the swap status right now, so the payment details are not shown. If you have already paid, there is nothing more to do here. This page keeps checking.',
   attemptingHeadline:
     'A payment from your wallet was started for this swap, in this tab or another one, and this page has not heard back from the wallet.',
   uncertainHeadline: 'Your wallet may have sent this payment, but this page could not confirm it.',
