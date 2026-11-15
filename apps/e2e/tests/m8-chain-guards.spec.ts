@@ -14,7 +14,7 @@ const CASES: Case[] = [
   {
     name: 'the wallet refuses to switch to Base',
     arrange: wallets => wallets.evm.behaviour.reject('wallet_switchEthereumChain', { code: 4001 }),
-    message: 'User rejected the request.',
+    message: 'The request was rejected in your wallet, so nothing was sent.',
     switchAsked: 1,
   },
   {

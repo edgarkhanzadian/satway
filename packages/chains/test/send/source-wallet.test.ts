@@ -431,6 +431,18 @@ describe('sendFromEvm', () => {
     expect(w.calls.some(c => c.method === 'eth_sendTransaction')).toBe(false);
   });
 
+  it('reports a refused network switch as a rejection, so the page shows its own copy', async () => {
+    const provider: Eip1193Provider = {
+      request(args) {
+        if (args.method === 'eth_chainId') return Promise.resolve('0x1');
+        return Promise.reject(
+          Object.assign(new Error('User rejected the request.'), { code: 4001 })
+        );
+      },
+    };
+    await expect(sendFromEvm(provider, transfer)).rejects.toMatchObject({ phase: 'rejected' });
+  });
+
   it('does not send if the wallet account changed', async () => {
     const w = wallet({ chain: '0x2105', accounts: ['0x000000000000000000000000000000000000dEaD'] });
     await expect(sendFromEvm(w.provider, transfer)).rejects.toThrow(/account changed/);

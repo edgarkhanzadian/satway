@@ -122,7 +122,8 @@ export function signOnlyFailure(err: unknown): SendError {
 
 export function notSent(err: unknown): SendError {
   if (err instanceof SendError) return err;
-  return new SendError(errorMessage(err) || 'Nothing was sent', 'not-sent', null, { cause: err });
+  const phase = isUserRejection(err) ? 'rejected' : 'not-sent';
+  return new SendError(errorMessage(err) || 'Nothing was sent', phase, null, { cause: err });
 }
 
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
