@@ -209,7 +209,7 @@ async function watchAddress(
   }
 
   const next: WatchedDeposit = { ...deposit, registered: [...registered.values()] };
-  if (watchSatisfied(next)) {
+  if (!pending && watchSatisfied(next)) {
     await deleteWatched(kv, address);
     report.finished.push(address);
     return;

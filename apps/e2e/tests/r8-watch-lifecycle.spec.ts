@@ -222,31 +222,32 @@ test.describe('R8. the Worker watch for a deposit whose tab was closed', () => {
     expectRegisteredWithEmily(world, receipt, payout.outpoint, 'notifier');
   });
 
-  test.fail(
-    'APP ISSUE: when one of two fresh outputs on an address fails to register, the notifier still ends the watch, so the failed one is never retried (correct: keep watching until it is registered)',
-    async ({ app, world, api }) => {
-      const { receipt } = await startDeposit(app);
-      await app.page.close();
-      world.reportDeposit();
-      const payout = world.completeSwap();
-      const outsider = world.payTo(receipt.depositAddress, 50_000);
-      world.addFault({
-        service: 'emily',
-        method: 'POST',
-        bodyIncludes: payout.outpoint.txid,
-        outcome: json({ message: 'Service Unavailable' }, 503),
-      });
-      const report = await api.runScheduled();
-      expect(field(report, 'notified')).toEqual([
-        { address: receipt.depositAddress, txid: outsider.outpoint.txid, vout: 0 },
-      ]);
-      expect(field(report, 'errors')).toEqual([
-        expect.objectContaining({ outpoint: outpointKey(payout.outpoint) }),
-      ]);
-      expect(api.watched()).toEqual([receipt.depositAddress]);
-      world.clearFaults();
-      await api.runScheduled();
-      expect(world.emily.get(payout.outpoint.txid, 0)?.status).toBe('pending');
-    }
-  );
+  test('when one of two fresh outputs on an address fails to register, the notifier keeps watching and registers it on the next run', async ({
+    app,
+    world,
+    api,
+  }) => {
+    const { receipt } = await startDeposit(app);
+    await app.page.close();
+    world.reportDeposit();
+    const payout = world.completeSwap();
+    const outsider = world.payTo(receipt.depositAddress, 50_000);
+    world.addFault({
+      service: 'emily',
+      method: 'POST',
+      bodyIncludes: payout.outpoint.txid,
+      outcome: json({ message: 'Service Unavailable' }, 503),
+    });
+    const report = await api.runScheduled();
+    expect(field(report, 'notified')).toEqual([
+      { address: receipt.depositAddress, txid: outsider.outpoint.txid, vout: 0 },
+    ]);
+    expect(field(report, 'errors')).toEqual([
+      expect.objectContaining({ outpoint: outpointKey(payout.outpoint) }),
+    ]);
+    expect(api.watched()).toEqual([receipt.depositAddress]);
+    world.clearFaults();
+    await api.runScheduled();
+    expect(world.emily.get(payout.outpoint.txid, 0)?.status).toBe('pending');
+  });
 });

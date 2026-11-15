@@ -453,6 +453,38 @@ describe('runNotifier', () => {
     expect(report.errors).toMatchObject([{ address: D.address, outpoint: `${D.txid}:0` }]);
   });
 
+  it('keeps watching while an eligible output failed to register, and retries it next run', async () => {
+    const opts = {
+      txs: [payoutTx(0, { value: 60_000 }), payoutTx(3)],
+      failPostFor: `${D.txid}:0`,
+    };
+    const failing = world(opts);
+    const kv = await watching(failing);
+    const first = await runNotifier(kv, endpoints, failing.fetchFn, run);
+    expect(first.notified).toEqual([{ address: D.address, txid: CHAIN[3]?.txid, vout: 3 }]);
+    expect(first.finished).toEqual([]);
+    expect(watchKeys(kv).length).toBe(1);
+    expect(record(kv)).toMatchObject({ registered: [{ outpoint: `${CHAIN[3]?.txid}:3` }] });
+
+    const healthy = world({ txs: opts.txs, knownOutpoints: [`${CHAIN[3]?.txid}:3`] });
+    healthy.arrive();
+    const second = await runNotifier(kv, endpoints, healthy.fetchFn, run);
+    expect(outpointsPosted(healthy)).toEqual([`${D.txid}:0`]);
+    expect(second.finished).toEqual([D.address]);
+    expect(watchKeys(kv).length).toBe(0);
+  });
+
+  it('keeps watching while an eligible output is deferred by the budget', async () => {
+    const w = world({ txs: [payoutTx(0, { value: 60_000 }), payoutTx(3)] });
+    const kv = await watching(w);
+    w.arrive();
+    const report = await runNotifier(kv, endpoints, w.fetchFn, { ...run, budget: 12 });
+    expect(report.deferred).toEqual([D.address]);
+    expect(report.notified).toHaveLength(1);
+    expect(report.finished).toEqual([]);
+    expect(watchKeys(kv).length).toBe(1);
+  });
+
   it('registers nothing and keeps watching when the sBTC minimum cannot be read', async () => {
     const w = world({ txs: [payoutTx(0)], limitsDown: true });
     const kv = await watching(w);
