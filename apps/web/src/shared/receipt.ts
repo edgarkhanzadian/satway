@@ -26,6 +26,11 @@ export interface Receipt {
   priorTruncated?: boolean;
 }
 
+export interface ActiveDeposit {
+  receipt: Receipt;
+  receiptUnsaved: boolean;
+}
+
 const REQUIRED_TEXT = [
   'stacksAddress',
   'reclaimPublicKey',

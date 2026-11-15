@@ -9,7 +9,12 @@ import { SourceWalletPanel } from '../features/chain-wallets/index.js';
 import { Deposit } from '../features/deposit/index.js';
 import { Recover } from '../features/recover/index.js';
 import { StacksWalletPanel, signReclaimWithWallet } from '../features/stacks-wallet/index.js';
-import { type Receipt, type WalletAccount, createBackend } from '../shared/index.js';
+import {
+  type ActiveDeposit,
+  type Receipt,
+  type WalletAccount,
+  createBackend,
+} from '../shared/index.js';
 import { RouteMap, type RouteUpdate, routeState } from '../ui/index.js';
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8787';
@@ -20,6 +25,7 @@ export function App() {
   const [source, setSource] = useState<SourceWallet | null>(null);
   const [tab, setTab] = useState<'deposit' | 'recover'>('deposit');
   const [resume, setResume] = useState<Receipt | null>(null);
+  const [active, setActive] = useState<ActiveDeposit | null>(null);
   const [route, setRoute] = useState<RouteUpdate | null>(null);
 
   const state = routeState({
@@ -117,7 +123,8 @@ export function App() {
                 backend={backend}
                 account={account}
                 source={source}
-                resume={resume}
+                active={active}
+                onActive={setActive}
                 onRoute={setRoute}
               />
             ) : (
@@ -158,6 +165,7 @@ export function App() {
               account={account}
               onTrack={receipt => {
                 setResume(receipt);
+                setActive({ receipt, receiptUnsaved: false });
                 setTab('deposit');
               }}
               onRoute={setRoute}

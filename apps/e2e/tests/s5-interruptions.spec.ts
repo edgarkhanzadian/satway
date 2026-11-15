@@ -173,7 +173,7 @@ test.describe('S5. interruptions', () => {
     expect(sends(wallets)).toBe(1);
   });
 
-  test('switching to Recover and back mid-flow shows a fresh form; the deposit stays in Recover and nothing is duplicated', async ({
+  test('switching to Recover and back mid-flow keeps the deposit in view; it stays in Recover and nothing is duplicated', async ({
     app,
     world,
     wallets,
@@ -182,9 +182,11 @@ test.describe('S5. interruptions', () => {
     await app.sendFromWallet();
     await app.openRecover();
     await app.page.getByRole('button', { name: 'Deposit' }).click();
+    await expect(app.page.getByRole('heading', { name: 'Deposit in progress' })).toBeVisible();
     await expect(
       app.page.getByRole('heading', { name: 'Deposit to sBTC from another chain' })
-    ).toBeVisible();
+    ).toHaveCount(0);
+    await expectNoSendOffered(app);
     await app.openRecover();
     expect(await app.savedReceiptLabels()).toEqual([expect.stringContaining(savedLabel(started))]);
     await app.pickSavedReceipt(savedLabel(started));
@@ -196,17 +198,19 @@ test.describe('S5. interruptions', () => {
     expectRegisteredWithEmily(world, started.receipt, payout.outpoint, 'page');
   });
 
-  test.fail(
-    'APP ISSUE: switching to the Recover tab and back during a deposit drops the deposit from view and shows an empty form (correct: the Deposit tab keeps showing the deposit in progress)',
-    async ({ app }) => {
-      await startAwaitingFunds(app);
-      await app.openRecover();
-      await app.page.getByRole('button', { name: 'Deposit' }).click();
-      await expect(app.page.getByRole('heading', { name: 'Deposit in progress' })).toBeVisible({
-        timeout: 2_000,
-      });
-    }
-  );
+  test('switching to the Recover tab and back during a deposit keeps showing the deposit in progress, with the send still offered once', async ({
+    app,
+    wallets,
+  }) => {
+    await startAwaitingFunds(app);
+    await app.openRecover();
+    await app.page.getByRole('button', { name: 'Deposit' }).click();
+    await expect(app.page.getByRole('heading', { name: 'Deposit in progress' })).toBeVisible({
+      timeout: 2_000,
+    });
+    await expect(app.sendButton).toBeVisible();
+    expect(sends(wallets)).toBe(0);
+  });
 
   test('two deposits followed alternately in one tab never show each other’s data', async ({
     app,

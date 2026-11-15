@@ -40,6 +40,7 @@ import {
 } from '@portage/core';
 
 import {
+  type ActiveDeposit,
   type Backend,
   type Receipt,
   type Snapshot,
@@ -105,19 +106,18 @@ export function Deposit(props: {
   backend: Backend;
   account: WalletAccount;
   source: SourceWallet | null;
-  resume: Receipt | null;
+  active: ActiveDeposit | null;
+  onActive(active: ActiveDeposit | null): void;
   onRoute(route: RouteUpdate | null): void;
 }) {
-  const { backend, account, source, onRoute } = props;
+  const { backend, account, source, active, onActive, onRoute } = props;
   const [tokens, setTokens] = useState<OneClickToken[]>([]);
   const [assetId, setAssetId] = useState('');
   const [amount, setAmount] = useState('');
   const [refundTo, setRefundTo] = useState('');
   const [preview, setPreview] = useState<Prepared | null>(null);
-  const [active, setActive] = useState<Receipt | null>(props.resume);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [receiptUnsaved, setReceiptUnsaved] = useState(false);
   const [previews] = useState(latestRequests);
 
   useEffect(() => {
@@ -206,7 +206,6 @@ export function Deposit(props: {
       }
       const remembered = rememberReceipt(prepared.receipt);
       downloadReceipt(prepared.receipt);
-      setReceiptUnsaved(!remembered);
       const swapAddress = prepared.receipt.quoteResponse.quote.depositAddress;
       if (swapAddress) {
         const { depositScript, reclaimScript } = prepared.receipt;
@@ -215,7 +214,7 @@ export function Deposit(props: {
         );
       }
       setPreview(prepared);
-      setActive(prepared.receipt);
+      onActive({ receipt: prepared.receipt, receiptUnsaved: !remembered });
     } catch (err) {
       if (!dry || isLatest()) setError(errorMessage(err) ?? null);
     } finally {
@@ -232,15 +231,14 @@ export function Deposit(props: {
     return (
       <Tracking
         backend={backend}
-        receipt={active}
-        receiptUnsaved={receiptUnsaved}
+        receipt={active.receipt}
+        receiptUnsaved={active.receiptUnsaved}
         source={source}
-        token={tokens.find(t => t.assetId === active.origin.assetId)}
+        token={tokens.find(t => t.assetId === active.receipt.origin.assetId)}
         onRoute={onRoute}
         onDone={() => {
-          setActive(null);
+          onActive(null);
           setPreview(null);
-          setReceiptUnsaved(false);
         }}
       />
     );
