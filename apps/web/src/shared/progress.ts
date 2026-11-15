@@ -1,7 +1,7 @@
 import {
   type AddressOutput,
-  type EmilyDepositStatus,
   type FetchLike,
+  type MintStatus,
   type NetworkConfig,
   type OneClickStatusResponse,
   type OneClickSwapStatus,
@@ -11,6 +11,7 @@ import {
   type SwapRefund,
   type WatchedDepositContext,
   applyRegistrations,
+  mintStatusUnknown,
   observeDeposit,
   outpointOf,
   refundOf,
@@ -26,12 +27,13 @@ export interface Snapshot {
   swap: OneClickSwapStatus | null;
   payout: AddressOutput | null;
   basis: PayoutBasis | null;
-  mint: EmilyDepositStatus | null;
+  mint: MintStatus;
   candidates: AddressOutput[];
   otherOutputs: AddressOutput[];
   belowMinimum: AddressOutput[];
   outputs: AddressOutput[];
-  mints: ReadonlyMap<string, EmilyDepositStatus | null>;
+  mints: ReadonlyMap<string, MintStatus>;
+  mintUnknown: boolean;
   tipHeight: number | null;
   truncated: boolean;
   registrationError: string | null;
@@ -107,6 +109,7 @@ export async function checkProgress(
     belowMinimum: selection.belowMinimum,
     outputs: o.outputs,
     mints: o.mints,
+    mintUnknown: mintStatusUnknown(o.mints),
     tipHeight: o.tipHeight,
     truncated: o.truncated,
     registrationError: registrationErrors.map(e => e.message).join(' ') || null,

@@ -8,8 +8,13 @@ import {
   finishJourney,
   startAwaitingFunds,
 } from '../src/scenario/journeys.js';
-import { expectNoReclaimOffered, reclaimControls } from '../src/scenario/reclaim.js';
+import {
+  expectNoReclaimOffered,
+  reclaimControls,
+  reclaimFromRecover,
+} from '../src/scenario/reclaim.js';
 import { openReceiptInRecover, toMinting, toReclaimable } from '../src/scenario/states.js';
+import { outpointKey } from '../src/world/bitcoin.js';
 import { json } from '../src/world/http.js';
 import { TOKENS } from '../src/world/oneclick.js';
 import type { FaultOutcome, Service, World } from '../src/world/world.js';
@@ -18,6 +23,10 @@ const MARKER = 'MALFORMED-PAYLOAD-MARKER-7f3a';
 const COULD_NOT_REFRESH = /^Could not refresh: .+\. Retrying\.$/;
 const ADDRESS = /^\/api\/address\//;
 const EMILY_DEPOSIT = /^\/deposit\/[0-9a-f]{64}\/\d+$/;
+const MINT_UNKNOWN_SPENT =
+  'The BTC from this payout has been moved out of the deposit address. The sBTC signers’ API could not be reached, so whether they minted it is not known yet. Check again in a few minutes.';
+const MINT_UNKNOWN_NOTICE =
+  /^The sBTC signers’ API could not be reached, so this page cannot tell whether your Bitcoin payment has been registered or minted\./;
 
 interface Failure {
   name: string;
@@ -86,7 +95,7 @@ test.describe('S2. an upstream is down while a deposit is tracked', () => {
       await finishJourney(app, world);
     });
 
-    test(`Emily deposit lookups fail while minting (${failure.name}): retry copy, never Done or reclaimable, recovers`, async ({
+    test(`Emily deposit lookups fail while minting (${failure.name}): mint status unknown, never Done or reclaimable, recovers`, async ({
       app,
       world,
     }) => {
@@ -95,8 +104,10 @@ test.describe('S2. an upstream is down while a deposit is tracked', () => {
       world.signers.mint(payout.outpoint);
       for (let i = 0; i < 2; i++) {
         await app.tick();
-        await expect(problem(app)).toBeVisible();
-        await expect(app.progress(PROGRESS.minting)).toBeVisible();
+        await expect(problem(app)).toHaveCount(0);
+        await expect(app.progress(MINT_UNKNOWN_SPENT)).toBeVisible();
+        await expect(app.progress(MINT_UNKNOWN_NOTICE)).toBeVisible();
+        await expect(app.definition('Bitcoin payout')).toContainText(payout.outpoint.txid);
         await expectNotTerminal(app);
         await expectStillUsable(app);
         await expectNoPayload(app);
@@ -105,6 +116,27 @@ test.describe('S2. an upstream is down while a deposit is tracked', () => {
       world.clearFaults();
       await app.waitForProgress(PROGRESS.done);
       await app.expectComplete();
+    });
+
+    test(`Emily deposit lookups fail at the timelock (${failure.name}): Recover still shows the output and the reclaim, and never says it was never processed`, async ({
+      app,
+      world,
+      wallets,
+    }) => {
+      const { started, payout } = await toReclaimable(app, world);
+      world.addFault({ service: 'emily', path: EMILY_DEPOSIT, outcome: failure.outcome });
+      await openReceiptInRecover(app, started);
+      await expect(app.page.getByRole('alert')).toHaveCount(0);
+      await expect(app.progress(MINT_UNKNOWN_NOTICE)).toBeVisible();
+      await expect(app.progress(/could not be reached/).first()).toBeVisible();
+      await expect(app.page.getByText(/never processed/)).toHaveCount(0);
+      await expect(app.definition('Bitcoin payout')).toContainText(payout.outpoint.txid);
+      const controls = reclaimControls(app);
+      await expect(controls.output).toHaveValue(outpointKey(payout.outpoint));
+      await reclaimFromRecover(app, wallets.stacks.account.paymentAddress);
+      await expect(app.progress(/^Reclaim sent for /)).toBeVisible();
+      expect(world.bitcoin.isSpent(payout.outpoint)).toBe(true);
+      await expectNoPayload(app);
     });
 
     test(`the mempool.space tip fails at the timelock (${failure.name}): reclaim is not offered until the tip is known`, async ({
@@ -176,7 +208,10 @@ test.describe('S2. an upstream is down while a deposit is tracked', () => {
     await app.tick();
     world.signers.mint(payout.outpoint);
     await app.tick();
-    await expect(app.progress(PROGRESS.minting)).toBeVisible();
+    await expect(
+      app.progress(PROGRESS.minting).or(app.progress(MINT_UNKNOWN_NOTICE)).first()
+    ).toBeVisible();
+    await expect(app.progress(PROGRESS.done)).toHaveCount(0);
     await expectNotTerminal(app);
     held.release();
     await app.waitForProgress(PROGRESS.done);

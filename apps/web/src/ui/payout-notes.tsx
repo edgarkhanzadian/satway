@@ -1,6 +1,6 @@
 import { notice } from 'satway-styles/recipes';
 
-import { type AddressOutput, type EmilyDepositStatus, outpointOf } from '@satway/core';
+import { type AddressOutput, MINT_UNKNOWN, type MintStatus, outpointOf } from '@satway/core';
 
 import type { RegistrationErrorNote, Snapshot } from '../shared/index.js';
 
@@ -8,9 +8,11 @@ function sats(n: number): string {
   return `${n.toLocaleString('en-US')} sats`;
 }
 
-function otherNote(output: AddressOutput, mint: EmilyDepositStatus | null): string {
+export function otherNote(output: AddressOutput, mint: MintStatus): string {
   if (output.spent) return 'It has already been spent.';
   if (mint === null) return 'It is not registered with the sBTC signers.';
+  if (mint === MINT_UNKNOWN)
+    return 'Whether it is registered with the sBTC signers is not known, because their API could not be reached.';
   return `It is registered with the sBTC signers too (status: ${mint}).`;
 }
 
@@ -88,8 +90,20 @@ export function PayoutNotices(props: { snapshot: Snapshot }) {
           checked. Older payments may be missing from this page.
         </p>
       )}
+      <MintUnknownNotice snapshot={snapshot} />
       <RegistrationNotices snapshot={snapshot} />
     </>
+  );
+}
+
+export function MintUnknownNotice(props: { snapshot: Pick<Snapshot, 'mintUnknown'> }) {
+  if (!props.snapshot.mintUnknown) return null;
+  return (
+    <p className={notice({ tone: 'warn' })} role="status">
+      The sBTC signers’ API could not be reached, so this page cannot tell whether your Bitcoin
+      payment has been registered or minted. Your BTC stays at the deposit address, and it can be
+      reclaimed after the timelock if it is not minted. This does not mean the deposit failed.
+    </p>
   );
 }
 

@@ -179,6 +179,50 @@ describe('deriveProgress: after the payout', () => {
   });
 });
 
+describe('deriveProgress: the mint status could not be read', () => {
+  it('a confirmed payout is neither registered nor re-notified, and the page says it cannot tell', () => {
+    const p = deriveProgress(obs({ payout: payout(), mint: 'unknown' }));
+    expect(p).toMatchObject({ stage: 'awaiting-notification', terminal: false });
+    expect(p.needsNotification).toBe(false);
+    expect(p.message).toMatch(/could not be reached/);
+  });
+
+  it('an unconfirmed payout is not re-notified', () => {
+    const p = deriveProgress(
+      obs({ payout: payout({ confirmed: false, blockHeight: null }), mint: 'unknown' })
+    );
+    expect(p).toMatchObject({ stage: 'payout-unconfirmed', needsNotification: false });
+  });
+
+  it('past the timelock it is reclaimable, keeps checking, and never says it was never processed', () => {
+    const p = deriveProgress(obs({ payout: payout(), mint: 'unknown', tipHeight: 1_949 }));
+    expect(p).toMatchObject({ stage: 'reclaimable', terminal: false, blocksUntilReclaim: 0 });
+    expect(p.message).not.toMatch(/never processed/);
+    expect(p.message).toMatch(/could not be reached/);
+  });
+
+  it('a spent payout is not called reclaimed or minted unless the spender says so', () => {
+    for (const payoutSpender of ['signers', null, undefined] as const) {
+      const p = deriveProgress(
+        obs({ payout: payout(), mint: 'unknown', payoutSpent: true, payoutSpender })
+      );
+      expect(p.stage).not.toBe('reclaimed');
+      expect(p.stage).not.toBe('done');
+      expect(p.terminal).toBe(false);
+      expect(p.message).toMatch(/could not be reached/);
+    }
+    const reclaimed = deriveProgress(
+      obs({ payout: payout(), mint: 'unknown', payoutSpent: true, payoutSpender: 'reclaim' })
+    );
+    expect(reclaimed).toMatchObject({ stage: 'reclaimed', terminal: true });
+  });
+
+  it('several candidates with an unknown status are not done', () => {
+    const p = deriveProgress(obs({ ambiguousMints: ['confirmed', 'unknown'] }));
+    expect(p).toMatchObject({ stage: 'payout-ambiguous', terminal: false });
+  });
+});
+
 describe('deriveProgress: several possible payouts', () => {
   it('says plainly that it cannot tell which payment is the deposit', () => {
     const p = deriveProgress(obs({ swap: null, ambiguousMints: [null, 'pending'] }));

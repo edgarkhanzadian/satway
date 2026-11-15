@@ -178,6 +178,7 @@ interface World {
   txHex?: string;
   notifyStatus?: number;
   failPostFor?: string;
+  emilyReadsDown?: boolean;
 }
 
 const OTHER_SPK = '0014' + '11'.repeat(20);
@@ -333,6 +334,7 @@ function world(w: World = {}) {
     }
     const dep = /\/deposit\/([0-9a-f]{64})\/(\d+)$/.exec(url);
     if (dep) {
+      if (w.emilyReadsDown) return jsonRes({ message: 'Service Unavailable' }, 503);
       const status = emily.get(`${dep[1]}:${dep[2]}`);
       return status ? jsonRes(emilyDeposit(status)) : jsonRes({ message: 'nope' }, 404);
     }
@@ -790,6 +792,42 @@ describe('checkProgress: which output is the payout', () => {
     expect(snap.registrationErrors[0]?.message).toMatch(/HTTP 503/);
     expect(snap.registrationErrors[0]).toMatchObject({ kind: 'transient', status: 503 });
     expect(w.emily.get(REAL_OUT)).toBe('pending');
+  });
+});
+
+describe('checkProgress: the sBTC signers’ API cannot be read', () => {
+  it('still shows the outputs, marks the mint status unknown and registers nothing blindly', async () => {
+    const w = world({ swap: 'SUCCESS', hashes: [D.txid], payoutVout: 0, emilyReadsDown: true });
+    const snap = await checkProgress(config, w.backend, await receiptFor(w), w.fetchFn);
+    expect(snap.payout).toMatchObject({ txid: D.txid, vout: 0 });
+    expect(snap.outputs).toHaveLength(1);
+    expect(snap.mint).toBe('unknown');
+    expect(snap.mints.get(REAL_OUT)).toBe('unknown');
+    expect(snap.mintUnknown).toBe(true);
+    expect(snap.progress).toMatchObject({ stage: 'awaiting-notification', terminal: false });
+    expect(w.posts).toHaveLength(0);
+  });
+
+  it('past the timelock the output is reclaimable, without claiming it was never processed', async () => {
+    const w = world({ swap: 'SUCCESS', hashes: [D.txid], payoutVout: 0, emilyReadsDown: true });
+    const receipt = await receiptFor(w);
+    w.setTip(TIP + 2_000);
+    const snap = await checkProgress(config, w.backend, receipt, w.fetchFn);
+    expect(snap.progress).toMatchObject({ stage: 'reclaimable', terminal: false });
+    expect(snap.progress.message).not.toMatch(/never processed/);
+    const plan = planReclaim({
+      outputs: snap.outputs,
+      selected: snap.payout,
+      tipHeight: snap.tipHeight,
+      reclaimLockBlocks: receipt.reclaimLockBlocks,
+    });
+    expect(plan.target?.ready).toBe(true);
+  });
+
+  it('a readable Emily leaves the mint status known', async () => {
+    const w = world({ swap: 'SUCCESS', payoutVout: 0, mint: 'accepted' });
+    const snap = await checkProgress(config, w.backend, await receiptFor(w), w.fetchFn);
+    expect(snap.mintUnknown).toBe(false);
   });
 });
 

@@ -6,7 +6,12 @@ import { type SendRecord, WALLET_PROMPT_WINDOW_MS } from '@satway/chains';
 import type { AddressOutput } from '@satway/core';
 
 import type { RegistrationErrorNote, Snapshot } from '../../src/shared/progress.js';
-import { RegistrationNotices, registrationNoticeGroups } from '../../src/ui/payout-notes.js';
+import {
+  MintUnknownNotice,
+  RegistrationNotices,
+  otherNote,
+  registrationNoticeGroups,
+} from '../../src/ui/payout-notes.js';
 import { SendRecordView } from '../../src/ui/send-record-view.js';
 
 const TXID = 'a'.repeat(64);
@@ -76,6 +81,21 @@ describe('registration notices', () => {
     });
     expect(out).toContain('Other payments to this address could not be registered');
     expect(out).not.toContain('have not been told');
+  });
+});
+
+describe('mint status notes', () => {
+  it('says the signers’ API could not be reached, and not that the deposit failed', () => {
+    const out = renderToStaticMarkup(<MintUnknownNotice snapshot={{ mintUnknown: true }} />);
+    expect(out).toContain('could not be reached');
+    expect(out).not.toMatch(/never processed|rejected/);
+    expect(out).toContain('This does not mean the deposit failed.');
+    expect(renderToStaticMarkup(<MintUnknownNotice snapshot={{ mintUnknown: false }} />)).toBe('');
+  });
+
+  it('describes another payment whose status is unknown without calling it unregistered', () => {
+    expect(otherNote(PAYOUT, 'unknown')).toMatch(/not known/);
+    expect(otherNote(PAYOUT, null)).toBe('It is not registered with the sBTC signers.');
   });
 });
 

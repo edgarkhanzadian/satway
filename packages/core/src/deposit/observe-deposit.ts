@@ -32,7 +32,7 @@ import {
   priorOutputsOf,
   selectPayout,
 } from './payout-selection.js';
-import { type Progress, deriveProgress } from './status.js';
+import { MINT_UNKNOWN, type MintStatus, type Progress, deriveProgress } from './status.js';
 
 export type DepositEndpointsConfig = Pick<NetworkConfig, 'btcApiUrl' | 'sbtcApiUrl'>;
 
@@ -53,14 +53,14 @@ export interface DepositObservation {
   truncated: boolean;
   tipHeight: number | null;
   perDepositMinimum: number | null;
-  mints: Map<string, EmilyDepositStatus | null>;
+  mints: Map<string, MintStatus>;
   payoutSpender: PayoutSpender | null;
   toRegister: AddressOutput[];
   progress: Progress;
   requests: number;
 }
 
-function spenderNeeded(payout: AddressOutput | null, mint: EmilyDepositStatus | null): boolean {
+function spenderNeeded(payout: AddressOutput | null, mint: MintStatus): boolean {
   return payout?.spent === true && mint !== null && mint !== 'confirmed' && mint !== 'failed';
 }
 
@@ -124,6 +124,23 @@ async function optional<T>(load: () => Promise<T>): Promise<T | null> {
   }
 }
 
+async function readMint(
+  sbtcApiUrl: string,
+  output: AddressOutput,
+  fetchFn: FetchLike | undefined
+): Promise<MintStatus> {
+  try {
+    const known = await fetchDeposit(sbtcApiUrl, output.txid, output.vout, fetchFn);
+    return known?.status ?? null;
+  } catch {
+    return MINT_UNKNOWN;
+  }
+}
+
+export function mintStatusUnknown(mints: ReadonlyMap<string, MintStatus>): boolean {
+  return [...mints.values()].some(m => m === MINT_UNKNOWN);
+}
+
 export async function observeDeposit(
   config: DepositEndpointsConfig,
   ctx: WatchedDepositContext,
@@ -168,10 +185,9 @@ export async function observeDeposit(
   ]) {
     lookups.set(outpointOf(o), o);
   }
-  const mints = new Map<string, EmilyDepositStatus | null>();
+  const mints = new Map<string, MintStatus>();
   for (const [key, o] of [...lookups].slice(0, MAX_REGISTRATIONS_PER_CHECK + 1)) {
-    const known = await fetchDeposit(config.sbtcApiUrl, o.txid, o.vout, fetchFn);
-    mints.set(key, known?.status ?? null);
+    mints.set(key, await readMint(config.sbtcApiUrl, o, fetchFn));
   }
 
   const payout = selection.payout;

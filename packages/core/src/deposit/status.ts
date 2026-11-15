@@ -21,13 +21,17 @@ export type Stage =
   | 'reclaimable'
   | 'reclaimed';
 
+export const MINT_UNKNOWN = 'unknown';
+
+export type MintStatus = EmilyDepositStatus | typeof MINT_UNKNOWN | null;
+
 export interface Observations {
   swap: OneClickSwapStatus | null;
   payout: Payout | null;
   payoutSpent?: boolean;
   payoutSpender?: PayoutSpender | null;
-  ambiguousMints?: readonly (EmilyDepositStatus | null)[];
-  mint: EmilyDepositStatus | null;
+  ambiguousMints?: readonly MintStatus[];
+  mint: MintStatus;
   tipHeight: number | null;
   reclaimLockBlocks: number;
 }
@@ -53,6 +57,16 @@ function payoutProgress(o: Observations, payout: Payout): Progress {
     };
   }
   if (o.payoutSpent === true) {
+    if (o.mint === MINT_UNKNOWN && o.payoutSpender !== 'reclaim') {
+      return {
+        ...base,
+        blocksUntilReclaim: null,
+        stage: 'minting',
+        terminal: false,
+        message:
+          'The BTC from this payout has been moved out of the deposit address. The sBTC signers’ API could not be reached, so whether they minted it is not known yet. Check again in a few minutes.',
+      };
+    }
     if (o.mint === null || o.mint === 'failed' || o.payoutSpender === 'reclaim') {
       return {
         ...base,
@@ -101,6 +115,15 @@ function payoutProgress(o: Observations, payout: Payout): Progress {
     };
   }
   if (untilReclaim === 0) {
+    if (o.mint === MINT_UNKNOWN) {
+      return {
+        ...base,
+        stage: 'reclaimable',
+        terminal: false,
+        message:
+          'The timelock has passed. The sBTC signers’ API could not be reached, so whether they have registered or minted this deposit is not known. You can reclaim your BTC now from the recovery page; until you do, the signers may still mint it.',
+      };
+    }
     if (o.mint === null) {
       return {
         ...base,
@@ -127,6 +150,15 @@ function payoutProgress(o: Observations, payout: Payout): Progress {
       message: 'BTC arrived. Registering the deposit with the sBTC signers.',
     };
   }
+  if (o.mint === MINT_UNKNOWN) {
+    return {
+      ...base,
+      stage: 'awaiting-notification',
+      terminal: false,
+      message:
+        'BTC arrived. The sBTC signers’ API could not be reached, so this page cannot tell yet whether the deposit is registered. Check again in a few minutes.',
+    };
+  }
   return {
     ...base,
     stage: 'minting',
@@ -135,7 +167,7 @@ function payoutProgress(o: Observations, payout: Payout): Progress {
   };
 }
 
-function ambiguousProgress(mints: readonly (EmilyDepositStatus | null)[]): Progress {
+function ambiguousProgress(mints: readonly MintStatus[]): Progress {
   const base = { needsNotification: false, blocksUntilReclaim: null };
   if (mints.every(m => m === 'confirmed')) {
     return {
