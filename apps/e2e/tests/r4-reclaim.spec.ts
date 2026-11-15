@@ -129,21 +129,22 @@ test.describe('R4. the mint never happens, so the user reclaims after the timelo
     await expectNoReclaimOffered(app);
   });
 
-  test.fail(
-    'APP ISSUE: after the user reclaims, a still-pending Emily record makes the page say the signers took the deposit in and keep following it (correct: stage reclaimed, terminal)',
-    async ({ app, world, wallets }) => {
-      const { started } = await toReclaimable(app, world);
-      await openInRecover(app, started);
-      await reclaimFromRecover(app, wallets.stacks.account.paymentAddress);
-      await expect(app.progress(/^Reclaim sent for /)).toBeVisible();
-      world.mine(1);
-      await app.uploadReceipt(started.receiptPath);
-      await expect(app.page.getByText(RECLAIM_COPY.nothingLeft, { exact: true })).toBeVisible();
-      await expect(app.progress(RECLAIM_COPY.reclaimed)).toBeVisible({ timeout: 1_000 });
-      await expect(app.progress(PROGRESS.mintingSwept)).toHaveCount(0);
-      await expect(app.page.getByRole('button', { name: 'Follow this deposit' })).toHaveCount(0);
-    }
-  );
+  test('after the user reclaims, a still-pending Emily record does not make the page say the signers took the deposit in: stage reclaimed, terminal', async ({
+    app,
+    world,
+    wallets,
+  }) => {
+    const { started } = await toReclaimable(app, world);
+    await openInRecover(app, started);
+    await reclaimFromRecover(app, wallets.stacks.account.paymentAddress);
+    await expect(app.progress(/^Reclaim sent for /)).toBeVisible();
+    world.mine(1);
+    await app.uploadReceipt(started.receiptPath);
+    await expect(app.page.getByText(RECLAIM_COPY.nothingLeft, { exact: true })).toBeVisible();
+    await expect(app.progress(RECLAIM_COPY.reclaimed)).toBeVisible({ timeout: 1_000 });
+    await expect(app.progress(PROGRESS.mintingSwept)).toHaveCount(0);
+    await expect(app.page.getByRole('button', { name: 'Follow this deposit' })).toHaveCount(0);
+  });
 
   test('the user rejects the PSBT in the wallet: nothing is broadcast and a retry works', async ({
     app,

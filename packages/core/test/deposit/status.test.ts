@@ -139,6 +139,36 @@ describe('deriveProgress: after the payout', () => {
     }
   });
 
+  it('a spent output still pending with Emily is minting when the signers spent it or the spender is unknown', () => {
+    for (const payoutSpender of ['signers', null, undefined] as const) {
+      const p = deriveProgress(
+        obs({
+          payout: payout(),
+          mint: 'pending',
+          tipHeight: 9_999,
+          payoutSpent: true,
+          payoutSpender,
+        })
+      );
+      expect(p).toMatchObject({ stage: 'minting', terminal: false });
+    }
+  });
+
+  it('a spent output the user reclaimed is reclaimed, whatever Emily still says', () => {
+    for (const mint of ['pending', 'accepted', 'reprocessing', 'rbf'] as const) {
+      const p = deriveProgress(
+        obs({
+          payout: payout(),
+          mint,
+          tipHeight: 9_999,
+          payoutSpent: true,
+          payoutSpender: 'reclaim',
+        })
+      );
+      expect(p).toMatchObject({ stage: 'reclaimed', terminal: true, blocksUntilReclaim: null });
+    }
+  });
+
   it('a spent output that was never registered or was rejected has been reclaimed', () => {
     for (const mint of [null, 'failed'] as const) {
       const p = deriveProgress(

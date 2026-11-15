@@ -15,8 +15,10 @@ import {
 import {
   DepositCheckError,
   type EmilyDepositStatus,
+  type PayoutSpender,
   fetchDeposit,
   fetchLimits,
+  fetchPayoutSpender,
   notifyDeposit,
 } from '../sbtc/index.js';
 import { type FetchLike, HttpError, type NetworkConfig, errorMessage } from '../shared/index.js';
@@ -52,9 +54,14 @@ export interface DepositObservation {
   tipHeight: number | null;
   perDepositMinimum: number | null;
   mints: Map<string, EmilyDepositStatus | null>;
+  payoutSpender: PayoutSpender | null;
   toRegister: AddressOutput[];
   progress: Progress;
   requests: number;
+}
+
+function spenderNeeded(payout: AddressOutput | null, mint: EmilyDepositStatus | null): boolean {
+  return payout?.spent === true && mint !== null && mint !== 'confirmed' && mint !== 'failed';
 }
 
 export type RegistrationFailureKind = 'transient' | 'rejected';
@@ -91,7 +98,7 @@ export function classifyRegistrationError(err: unknown, sbtcApiUrl: string): Reg
 }
 
 function progressFor(
-  o: Pick<DepositObservation, 'swap' | 'selection' | 'mints' | 'tipHeight'>,
+  o: Pick<DepositObservation, 'swap' | 'selection' | 'mints' | 'tipHeight' | 'payoutSpender'>,
   reclaimLockBlocks: number
 ): Progress {
   const payout = o.selection.payout;
@@ -99,6 +106,7 @@ function progressFor(
     swap: o.swap,
     payout,
     payoutSpent: payout?.spent,
+    payoutSpender: o.payoutSpender,
     ambiguousMints: o.selection.ambiguous
       ? o.selection.candidates.map(c => o.mints.get(outpointOf(c)) ?? null)
       : undefined,
@@ -165,8 +173,18 @@ export async function observeDeposit(
     mints.set(key, known?.status ?? null);
   }
 
+  const payout = selection.payout;
+  const checkSpender = spenderNeeded(
+    payout,
+    payout ? (mints.get(outpointOf(payout)) ?? null) : null
+  );
+  const payoutSpender =
+    payout && checkSpender
+      ? await optional(() => fetchPayoutSpender(config.btcApiUrl, payout, ctx, fetchFn))
+      : null;
+
   const swap = status?.status ?? null;
-  const observed = { swap, selection, mints, tipHeight };
+  const observed = { swap, selection, mints, tipHeight, payoutSpender };
   return {
     ...observed,
     outputs: fetched.outputs,
@@ -177,7 +195,7 @@ export async function observeDeposit(
       o => mints.has(outpointOf(o)) && mints.get(outpointOf(o)) === null
     ),
     progress: progressFor(observed, ctx.reclaimLockBlocks),
-    requests: fetched.requests + 2 + mints.size,
+    requests: fetched.requests + 2 + mints.size + (checkSpender ? 2 : 0),
   };
 }
 

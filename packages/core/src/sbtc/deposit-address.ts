@@ -104,17 +104,28 @@ export function depositAddressFromScripts(
   return { address: out.address, scriptPubKey: hex.encode(out.script) };
 }
 
-export function depositLeafControlBlock(depositScript: string, reclaimScript: string): string {
-  const wanted = depositScript.toLowerCase();
+function leafControlBlock(depositScript: string, reclaimScript: string, leafScript: string) {
+  const wanted = leafScript.toLowerCase();
   const out = btc.p2tr(
     UNSPENDABLE_PUB,
-    [{ script: hex.decode(wanted) }, { script: hex.decode(reclaimScript.toLowerCase()) }],
+    [
+      { script: hex.decode(depositScript.toLowerCase()) },
+      { script: hex.decode(reclaimScript.toLowerCase()) },
+    ],
     MAINNET,
     true
   );
   const leaf = (out.tapLeafScript ?? []).find(
     ([, script]) => hex.encode(script.slice(0, -1)) === wanted
   );
-  if (!leaf) throw new Error('The deposit script is not a leaf of its own taproot tree');
+  if (!leaf) throw new Error('The script is not a leaf of its own taproot tree');
   return hex.encode(btc.TaprootControlBlock.encode(leaf[0]));
+}
+
+export function depositLeafControlBlock(depositScript: string, reclaimScript: string): string {
+  return leafControlBlock(depositScript, reclaimScript, depositScript);
+}
+
+export function reclaimLeafControlBlock(depositScript: string, reclaimScript: string): string {
+  return leafControlBlock(depositScript, reclaimScript, reclaimScript);
 }

@@ -70,6 +70,7 @@ const coreNetworkExports = [
   'fetchFeeEstimate',
   'fetchLimits',
   'fetchOnChainWithdrawalRequest',
+  'fetchPayoutSpender',
   'fetchSignersPublicKey',
   'fetchSignersPublicKeyVar',
   'fetchStacksTransaction',

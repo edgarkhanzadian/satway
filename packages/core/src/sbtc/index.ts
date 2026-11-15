@@ -2,6 +2,7 @@ export * from './clarity-values.js';
 export * from './deposit-address.js';
 export * from './emily-withdrawal.js';
 export * from './emily.js';
+export * from './payout-spender.js';
 export * from './reclaim.js';
 export * from './signer-evidence.js';
 export * from './signers.js';

@@ -1,6 +1,10 @@
 import type { Payout } from '../bitcoin/index.js';
 import type { OneClickSwapStatus } from '../oneclick/index.js';
-import { type EmilyDepositStatus, blocksUntilReclaimFor } from '../sbtc/index.js';
+import {
+  type EmilyDepositStatus,
+  type PayoutSpender,
+  blocksUntilReclaimFor,
+} from '../sbtc/index.js';
 
 export type Stage =
   | 'awaiting-funds'
@@ -21,6 +25,7 @@ export interface Observations {
   swap: OneClickSwapStatus | null;
   payout: Payout | null;
   payoutSpent?: boolean;
+  payoutSpender?: PayoutSpender | null;
   ambiguousMints?: readonly (EmilyDepositStatus | null)[];
   mint: EmilyDepositStatus | null;
   tipHeight: number | null;
@@ -48,7 +53,7 @@ function payoutProgress(o: Observations, payout: Payout): Progress {
     };
   }
   if (o.payoutSpent === true) {
-    if (o.mint === null || o.mint === 'failed') {
+    if (o.mint === null || o.mint === 'failed' || o.payoutSpender === 'reclaim') {
       return {
         ...base,
         blocksUntilReclaim: null,
