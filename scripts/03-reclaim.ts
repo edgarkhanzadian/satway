@@ -3,33 +3,33 @@ import {
   type OneClickStatusResponse,
   type ReclaimOption,
   type ReclaimPlan,
+  broadcastTransaction,
   buildReclaimPsbt,
   MAINNET_CONFIG as config,
   destinationTxHashesOf,
+  errorMessage,
   fetchDeposit,
   fetchDepositOutputs,
   fetchLimits,
+  fetchReclaimFeeRate,
   fetchTipHeight,
   findReclaimOption,
   isOutputSpent,
   outpointOf,
-  parseWith,
   planReclaim,
   priorOutputsOf,
   quotedSatsOf,
   reclaimAmountProblem,
+  reclaimFeeQuote,
   reportedAmountOutOf,
   selectPayout,
   signReclaimPsbt,
-  z,
 } from '@satway/core';
 
 import { loadEnv, optional } from './lib/env.js';
 import { contextOfProof, loadProof, reclaimKeyFromEnv } from './lib/proof.js';
 
 loadEnv();
-
-const feesSchema = z.looseObject({ halfHourFee: z.number() });
 
 function flag(name: string): string | undefined {
   const i = process.argv.indexOf(name);
@@ -81,7 +81,8 @@ async function main() {
 
   const feeRateFlag = flag('--fee-rate');
   const feeRate =
-    (feeRateFlag === undefined ? 0 : Number(feeRateFlag)) || (await recommendedFeeRate());
+    (feeRateFlag === undefined ? 0 : Number(feeRateFlag)) ||
+    (await fetchReclaimFeeRate(config.btcApiUrl));
   const tooSmall = reclaimAmountProblem(payout.amountSats, feeRate);
   if (tooSmall) {
     console.error(tooSmall);
@@ -98,7 +99,9 @@ async function main() {
     feeRate,
   });
   const { txHex, txid } = signReclaimPsbt(psbtHex, privateKey);
-  console.log(`Fee rate ${feeRate} sat/vB`);
+  const fee = reclaimFeeQuote(payout.amountSats, feeRate);
+  console.log(`Fee rate ${fee.feeRate} sat/vB`);
+  console.log(`Fee      ${fee.feeSats} sats, ${fee.netSats} sats to ${to}`);
   console.log(`Reclaim  ${txid}`);
   console.log(`\n${txHex}\n`);
 
@@ -112,13 +115,13 @@ async function main() {
     console.log('Timelock has passed. Re-run with --broadcast to send it.');
     return;
   }
-  const res = await fetch(`${config.btcApiUrl}/tx`, { method: 'POST', body: txHex });
-  const body = await res.text();
-  if (!res.ok) {
-    console.error(`Broadcast failed: ${body}`);
+  try {
+    await broadcastTransaction(config.btcApiUrl, txHex);
+  } catch (err) {
+    console.error(`Broadcast failed: ${errorMessage(err) ?? String(err)}`);
     process.exit(1);
   }
-  console.log(`Broadcast. ${payout.amountSats} sats (minus fee) are on their way to ${to}.`);
+  console.log(`Broadcast. ${fee.netSats} sats are on their way to ${to}.`);
   console.log('Other unspent outputs at the address, if any, need their own reclaim.');
 }
 
@@ -203,13 +206,6 @@ async function chooseOutput(record: Parameters<typeof contextOfProof>[0]): Promi
   );
   listOptions(plan);
   process.exit(1);
-}
-
-async function recommendedFeeRate(): Promise<number> {
-  const url = `${config.btcApiUrl}/v1/fees/recommended`;
-  const res = await fetch(url);
-  const fees = parseWith(feesSchema, await res.json(), url);
-  return Math.max(1, fees.halfHourFee);
 }
 
 main().catch(err => {

@@ -127,6 +127,7 @@ for (const size of SIZES) {
       await expectTapTarget(controls.to, 'Reclaim destination');
       await controls.to.fill(wallets.stacks.account.paymentAddress);
       await tap(controls.button, 'Reclaim BTC');
+      await tap(controls.confirm, 'Sign and send');
       await expect(app.progress(/^Reclaim sent for /)).toBeVisible();
       await step(app, 'reclaim sent');
     });

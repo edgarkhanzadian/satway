@@ -6,6 +6,7 @@ import {
   buildDepositAddress,
   buildReclaimPsbt,
   finalizeSignedReclaim,
+  reclaimFeeQuote,
   signReclaimPsbt,
 } from '../../src/index.js';
 import { REAL_DEPOSIT as D, defined } from '../fixtures.js';
@@ -63,6 +64,19 @@ describe('buildReclaimPsbt', () => {
     expect(() =>
       buildReclaimPsbt({ ...input, payout: { ...input.payout, amountSats: 2_000 } })
     ).not.toThrow();
+  });
+
+  it('refuses a fee rate above the shared cap', () => {
+    expect(() => buildReclaimPsbt({ ...input, feeRate: 501 })).toThrow(
+      /above the 500 sat\/vB this page pays for a reclaim/
+    );
+    expect(() => buildReclaimPsbt({ ...input, feeRate: 500 })).not.toThrow();
+  });
+
+  it('quotes the fee it will pay and what is left, matching the built transaction', () => {
+    const quote = reclaimFeeQuote(200_000, 5);
+    expect(quote).toEqual({ feeRate: 5, vsize: 126, feeSats: 630, netSats: 199_370 });
+    expect(tx.getOutput(0).amount).toBe(BigInt(quote.netSats));
   });
 
   it('rejects a non-positive fee rate and a bad recipient', () => {

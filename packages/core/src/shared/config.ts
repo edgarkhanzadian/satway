@@ -33,3 +33,9 @@ export const MAINNET_CONFIG: NetworkConfig = Object.freeze({
 });
 
 export const P2TR_DUST_SATS = 330;
+
+export const MAX_FEE_RATE_SATS_PER_VBYTE = 500;
+
+export function feeRateAboveCapMessage(feeRate: number): string {
+  return `The current Bitcoin fee rate is ${feeRate} sat/vB, above the ${MAX_FEE_RATE_SATS_PER_VBYTE} sat/vB this page pays for a reclaim, so no reclaim was built and nothing was signed or sent. Your BTC stays reclaimable: try again when fees are lower.`;
+}

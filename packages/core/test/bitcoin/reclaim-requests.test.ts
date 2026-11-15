@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  FeeRateTooHighError,
   FeeRateUnavailableError,
+  MAINNET_WITHDRAWAL_CONFIG,
+  MAX_FEE_RATE_SATS_PER_VBYTE,
   broadcastTransaction,
   fetchReclaimFeeRate,
 } from '../../src/index.js';
@@ -34,6 +37,21 @@ describe('fetchReclaimFeeRate', () => {
     const pending = fetchReclaimFeeRate(BTC_API, net.fetchFn);
     await expect(pending).rejects.toBeInstanceOf(FeeRateUnavailableError);
     await expect(pending).rejects.toThrow(/nothing was signed or sent\. Try again in a moment\.$/);
+  });
+
+  it('accepts the cap itself and refuses anything above it, saying nothing was signed', async () => {
+    expect(MAX_FEE_RATE_SATS_PER_VBYTE).toBe(500);
+    expect(MAINNET_WITHDRAWAL_CONFIG.maxFeeRateSatsPerVbyte).toBe(MAX_FEE_RATE_SATS_PER_VBYTE);
+    const atCap = answer(JSON.stringify({ halfHourFee: 500 }));
+    expect(await fetchReclaimFeeRate(BTC_API, atCap.fetchFn)).toBe(500);
+    const pending = fetchReclaimFeeRate(
+      BTC_API,
+      answer(JSON.stringify({ halfHourFee: 501 })).fetchFn
+    );
+    await expect(pending).rejects.toBeInstanceOf(FeeRateTooHighError);
+    await expect(pending).rejects.toThrow(
+      'The current Bitcoin fee rate is 501 sat/vB, above the 500 sat/vB this page pays for a reclaim, so no reclaim was built and nothing was signed or sent. Your BTC stays reclaimable: try again when fees are lower.'
+    );
   });
 
   it('says why when the network fails', async () => {

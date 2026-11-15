@@ -13,6 +13,7 @@ import {
   expectReclaimPsbt,
   reclaimControls,
   reclaimFromRecover,
+  reviewReclaim,
 } from '../src/scenario/reclaim.js';
 import { outpointKey } from '../src/world/bitcoin.js';
 import { json } from '../src/world/http.js';
@@ -170,6 +171,7 @@ test.describe('R4. the mint never happens, so the user reclaims after the timelo
     expect(world.bitcoin.broadcasts).toEqual([]);
     world.clearFaults();
     await reclaimControls(app).button.click();
+    await reclaimControls(app).confirm.click();
     await expect(app.progress(/^Reclaim sent for /)).toBeVisible();
     expect(wallets.stacks.behaviour.calls('signPsbt')).toHaveLength(1);
     expect(world.bitcoin.isSpent(payout.outpoint)).toBe(true);
@@ -191,9 +193,9 @@ test.describe('R4. the mint never happens, so the user reclaims after the timelo
     await expect(app.sendError).toHaveText('User rejected the request.');
     expect(world.bitcoin.broadcasts).toEqual([]);
     expect(world.bitcoin.isSpent(payout.outpoint)).toBe(false);
-    await expect(reclaimControls(app).button).toBeEnabled();
+    await expect(reclaimControls(app).confirm).toBeEnabled();
 
-    await reclaimControls(app).button.click();
+    await reclaimControls(app).confirm.click();
     await expect(app.progress(/^Reclaim sent for /)).toBeVisible();
     expect(wallets.stacks.behaviour.calls('signPsbt')).toHaveLength(2);
     expect(world.bitcoin.broadcasts).toHaveLength(1);
@@ -220,6 +222,58 @@ test.describe('R4. the mint never happens, so the user reclaims after the timelo
     await app.uploadReceipt(started.receiptPath);
     await expect(app.progress(PROGRESS.done)).toBeVisible();
     await expectNoReclaimOffered(app);
+  });
+
+  test('the fee rate, the fee and what is left are shown before the wallet is asked to sign', async ({
+    app,
+    world,
+    wallets,
+  }) => {
+    const { started, payout } = await toReclaimable(app, world);
+    await openInRecover(app, started);
+    const to = wallets.stacks.account.paymentAddress;
+    const review = await reviewReclaim(app, to);
+    expect(review).toEqual({
+      feeRate: '4 sat/vB',
+      fee: `${FEE_SATS.toLocaleString('en-US')} sats`,
+      receive: `${(payout.amountSats - FEE_SATS).toLocaleString('en-US')} sats at ${to}`,
+    });
+    expect(wallets.stacks.behaviour.calls('signPsbt')).toEqual([]);
+    await app.page.getByRole('button', { name: 'Cancel' }).click();
+    await expect(reclaimControls(app).confirm).toHaveCount(0);
+    expect(wallets.stacks.behaviour.calls('signPsbt')).toEqual([]);
+
+    await reclaimControls(app).button.click();
+    await reclaimControls(app).confirm.click();
+    await expect(app.progress(/^Reclaim sent for /)).toBeVisible();
+    expectReclaimPsbt(wallets.stacks, {
+      outpoint: payout.outpoint,
+      amountSats: payout.amountSats,
+      to,
+      feeSats: FEE_SATS,
+    });
+  });
+
+  test('a fee rate above the cap is refused before anything is built or signed', async ({
+    app,
+    world,
+    wallets,
+  }) => {
+    const { started, payout } = await toReclaimable(app, world);
+    await openInRecover(app, started);
+    world.bitcoin.feeRates.halfHourFee = 501;
+    await reclaimFromRecover(app, wallets.stacks.account.paymentAddress);
+    await expect(app.sendError).toHaveText(
+      'The current Bitcoin fee rate is 501 sat/vB, above the 500 sat/vB this page pays for a reclaim, so no reclaim was built and nothing was signed or sent. Your BTC stays reclaimable: try again when fees are lower.'
+    );
+    await expect(reclaimControls(app).confirm).toHaveCount(0);
+    expect(wallets.stacks.behaviour.calls('signPsbt')).toEqual([]);
+    expect(world.bitcoin.broadcasts).toEqual([]);
+    expect(world.bitcoin.isSpent(payout.outpoint)).toBe(false);
+
+    world.bitcoin.feeRates.halfHourFee = 500;
+    await reclaimFromRecover(app, wallets.stacks.account.paymentAddress);
+    await expect(app.progress(/^Reclaim sent for /)).toBeVisible();
   });
 
   test('the fee-rate endpoint cannot be reached: the reclaim stops before signing and says why', async ({

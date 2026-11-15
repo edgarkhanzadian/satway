@@ -1,4 +1,4 @@
-import { MAINNET_CONFIG, type NetworkConfig } from './config.js';
+import { MAINNET_CONFIG, MAX_FEE_RATE_SATS_PER_VBYTE, type NetworkConfig } from './config.js';
 
 export interface WithdrawalConfig {
   readonly withdrawalContractName: string;
@@ -32,7 +32,7 @@ export const MAINNET_WITHDRAWAL_CONFIG: WithdrawalConfig = Object.freeze({
   feeCapMargin: 2,
   minFeeCapSats: 3_000,
   maxFeeCapSats: 100_000,
-  maxFeeRateSatsPerVbyte: 500,
+  maxFeeRateSatsPerVbyte: MAX_FEE_RATE_SATS_PER_VBYTE,
   rejectionBlocks: 27,
 });
 

@@ -3,6 +3,7 @@ import * as btc from '@scure/btc-signer';
 import { MAINNET, buildSbtcReclaimTx } from 'sbtc';
 
 import { type AddressOutput, type Payout, outpointOf } from '../bitcoin/index.js';
+import { MAX_FEE_RATE_SATS_PER_VBYTE, feeRateAboveCapMessage } from '../shared/index.js';
 import { assertMainnetStandardAddress, buildDepositAddress, toXOnly } from './deposit-address.js';
 
 export interface ReclaimInput {
@@ -31,6 +32,18 @@ export const RECLAIM_MIN_OUTPUT_SATS = 546;
 
 export function reclaimFeeSats(feeRate: number): number {
   return Math.ceil(RECLAIM_TX_VSIZE * feeRate);
+}
+
+export interface ReclaimFeeQuote {
+  feeRate: number;
+  vsize: number;
+  feeSats: number;
+  netSats: number;
+}
+
+export function reclaimFeeQuote(amountSats: number, feeRate: number): ReclaimFeeQuote {
+  const feeSats = reclaimFeeSats(feeRate);
+  return { feeRate, vsize: RECLAIM_TX_VSIZE, feeSats, netSats: amountSats - feeSats };
 }
 
 export function reclaimAmountProblem(amountSats: number, feeRate: number): string | null {
@@ -84,6 +97,8 @@ export function findReclaimOption(plan: ReclaimPlan, outpoint: string): ReclaimO
 export function buildReclaimPsbt(input: ReclaimInput): { psbtHex: string; depositAddress: string } {
   assertMainnetStandardAddress(input.stacksAddress);
   if (!(input.feeRate > 0)) throw new Error('Fee rate must be positive');
+  if (input.feeRate > MAX_FEE_RATE_SATS_PER_VBYTE)
+    throw new Error(feeRateAboveCapMessage(input.feeRate));
   const problem = reclaimAmountProblem(input.payout.amountSats, input.feeRate);
   if (problem) throw new Error(problem);
 

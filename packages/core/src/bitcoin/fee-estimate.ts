@@ -1,4 +1,12 @@
-import { type FetchLike, defaultFetch, errorMessage, requestJson, z } from '../shared/index.js';
+import {
+  type FetchLike,
+  MAX_FEE_RATE_SATS_PER_VBYTE,
+  defaultFetch,
+  errorMessage,
+  feeRateAboveCapMessage,
+  requestJson,
+  z,
+} from '../shared/index.js';
 
 const feeEstimatesSchema: z.ZodType<Record<string, number>> = z.record(
   z.string(),
@@ -30,18 +38,31 @@ export class FeeRateUnavailableError extends Error {
   }
 }
 
+export class FeeRateTooHighError extends Error {
+  readonly feeRate: number;
+
+  constructor(feeRate: number) {
+    super(feeRateAboveCapMessage(feeRate));
+    this.name = 'FeeRateTooHighError';
+    this.feeRate = feeRate;
+  }
+}
+
 export async function fetchReclaimFeeRate(
   btcApiUrl: string,
   fetchFn: FetchLike = defaultFetch
 ): Promise<number> {
+  let rate: number;
   try {
     const fees = await requestJson(
       fetchFn,
       `${btcApiUrl}/v1/fees/recommended`,
       recommendedFeesSchema
     );
-    return Math.max(1, fees.halfHourFee);
+    rate = Math.max(1, fees.halfHourFee);
   } catch (err) {
     throw new FeeRateUnavailableError(errorMessage(err) ?? 'no answer', { cause: err });
   }
+  if (rate > MAX_FEE_RATE_SATS_PER_VBYTE) throw new FeeRateTooHighError(rate);
+  return rate;
 }

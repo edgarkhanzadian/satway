@@ -21,6 +21,31 @@ export function reclaimControls(app: SatwayApp) {
     output: app.page.getByLabel('Output to reclaim'),
     to: app.page.getByLabel('Send the reclaimed BTC to'),
     button: app.page.getByRole('button', { name: 'Reclaim BTC' }),
+    confirm: app.page.getByRole('button', { name: 'Sign and send' }),
+  };
+}
+
+export interface ReclaimReviewView {
+  feeRate: string;
+  fee: string;
+  receive: string;
+}
+
+export async function reviewReclaim(
+  app: SatwayApp,
+  to: string,
+  options: { choose?: Outpoint } = {}
+): Promise<ReclaimReviewView | null> {
+  const c = reclaimControls(app);
+  if (options.choose) await c.output.selectOption(outpointKey(options.choose));
+  await c.to.fill(to);
+  await c.button.click();
+  await expect(c.confirm.or(app.sendError).first()).toBeVisible();
+  if (await app.sendError.isVisible()) return null;
+  return {
+    feeRate: await app.definition('Network fee rate').innerText(),
+    fee: await app.definition('Network fee').innerText(),
+    receive: await app.definition('You receive').innerText(),
   };
 }
 
@@ -35,10 +60,8 @@ export async function reclaimFromRecover(
   to: string,
   options: { choose?: Outpoint } = {}
 ): Promise<void> {
-  const c = reclaimControls(app);
-  if (options.choose) await c.output.selectOption(outpointKey(options.choose));
-  await c.to.fill(to);
-  await c.button.click();
+  const review = await reviewReclaim(app, to, options);
+  if (review !== null) await reclaimControls(app).confirm.click();
 }
 
 export interface SignedPsbtView {

@@ -169,6 +169,9 @@ test.describe('Q2. keyboard only', () => {
     await app.page.keyboard.type(wallets.stacks.account.paymentAddress);
     await tabTo(app, /^Reclaim BTC$/, { max: 2 });
     await press(app, 'Enter');
+    await expect(app.page.getByRole('button', { name: 'Sign and send' })).toBeVisible();
+    await tabTo(app, /^Sign and send$/, { max: 2 });
+    await press(app, 'Enter');
     await expect(app.progress(/^Reclaim sent for /)).toBeVisible();
     expect(world.bitcoin.isSpent(payout.outpoint)).toBe(true);
     expect(wallets.stacks.behaviour.calls('signPsbt')).toHaveLength(1);
