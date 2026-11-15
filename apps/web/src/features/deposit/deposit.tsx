@@ -20,6 +20,7 @@ import {
   latestSwap,
   nextRefundField,
   promptWaitMs,
+  quoteExpired,
   recordTx,
   resendRecord,
   resolveRecord,
@@ -536,6 +537,8 @@ function Tracking(props: {
     token !== undefined &&
     token.blockchain === 'sol' &&
     !quote.depositMemo;
+  const now = new Date();
+  const expired = quoteExpired(quote.deadline, now);
   const panel = sendPanel({
     swap: latestSwap(snapshot, stale),
     record,
@@ -543,6 +546,7 @@ function Tracking(props: {
     sending,
     durable: durable || !walletReady,
     lockable: sendRecords.lockable() || !walletReady,
+    expired,
   });
 
   function showOutcome(outcome: AttemptOutcome) {
@@ -557,6 +561,10 @@ function Tracking(props: {
 
   async function sendFromWallet() {
     if (!token || !target || sendingRef.current) return;
+    if (quoteExpired(quote.deadline, new Date())) {
+      setSendError('This quote has expired, so the wallet was not asked to send.');
+      return;
+    }
     const keepFocus =
       sendButtonRef.current !== null && document.activeElement === sendButtonRef.current;
     sendingRef.current = true;
@@ -646,31 +654,48 @@ function Tracking(props: {
 
       {waitingForFunds && quote.depositAddress && (
         <div className={send}>
-          {shortDeposit ? (
-            <p className={sendLine}>
-              {owed === null
-                ? 'Part of the amount arrived, but the swap provider did not say how much. From your own wallet, send only what is missing from the quoted total:'
-                : 'Part of the amount arrived. Send exactly the rest, from your own wallet:'}
-            </p>
+          {expired ? (
+            <>
+              <p className={sendLine}>
+                {quote.deadline && Date.parse(quote.deadline) > now.getTime()
+                  ? `This quote expires at ${new Date(quote.deadline).toLocaleString()}, too soon to send safely.`
+                  : `This quote expired${quote.deadline ? ` at ${new Date(quote.deadline).toLocaleString()}` : ''}.`}
+              </p>
+              <p className={sendNote}>
+                Do not send anything to this swap now: the swap provider says funds that arrive
+                after the deadline may be lost. Start a new deposit to get a fresh quote. If you
+                already sent the payment, this page keeps tracking it.
+              </p>
+            </>
           ) : (
-            <p className={sendLine}>
-              {walletReady ? 'Send exactly this:' : 'Send exactly this, from your own wallet:'}
-            </p>
-          )}
-          <p className={sendFigure}>
-            {owed ?? quote.amountInFormatted} {receipt.origin.symbol} on {receipt.origin.chain}
-          </p>
-          <p className={sendLine}>to</p>
-          <p className={sendFigure}>
-            <code>{quote.depositAddress}</code>
-          </p>
-          {quote.depositMemo && (
-            <p className={sendLine}>
-              with memo <code>{quote.depositMemo}</code>
-            </p>
-          )}
-          {quote.deadline && (
-            <p className={sendNote}>before {new Date(quote.deadline).toLocaleString()}</p>
+            <>
+              {shortDeposit ? (
+                <p className={sendLine}>
+                  {owed === null
+                    ? 'Part of the amount arrived, but the swap provider did not say how much. From your own wallet, send only what is missing from the quoted total:'
+                    : 'Part of the amount arrived. Send exactly the rest, from your own wallet:'}
+                </p>
+              ) : (
+                <p className={sendLine}>
+                  {walletReady ? 'Send exactly this:' : 'Send exactly this, from your own wallet:'}
+                </p>
+              )}
+              <p className={sendFigure}>
+                {owed ?? quote.amountInFormatted} {receipt.origin.symbol} on {receipt.origin.chain}
+              </p>
+              <p className={sendLine}>to</p>
+              <p className={sendFigure}>
+                <code>{quote.depositAddress}</code>
+              </p>
+              {quote.depositMemo && (
+                <p className={sendLine}>
+                  with memo <code>{quote.depositMemo}</code>
+                </p>
+              )}
+              {quote.deadline && (
+                <p className={sendNote}>before {new Date(quote.deadline).toLocaleString()}</p>
+              )}
+            </>
           )}
           {walletReady && (panel.kind === 'offer' || panel.kind === 'sending') && (
             <div className={sendActions}>

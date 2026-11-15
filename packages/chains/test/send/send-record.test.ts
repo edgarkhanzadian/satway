@@ -14,6 +14,7 @@ import {
   CANNOT_SAVE_MESSAGE,
   EXPIRED_MESSAGE,
   NO_LOCK_MESSAGE,
+  QUOTE_EXPIRY_MARGIN_MS,
   type ResolveDeps,
   WALLET_PROMPT_WINDOW_MS,
   attemptSend,
@@ -21,6 +22,7 @@ import {
   latestSwap,
   needsConfirmation,
   promptWaitMs,
+  quoteExpired,
   resendRecord,
   resolveRecord,
   sendPanel,
@@ -144,6 +146,7 @@ function offered(record: SendRecord | null, swap: 'PENDING_DEPOSIT' | 'SUCCESS' 
     sending: false,
     durable: true,
     lockable: true,
+    expired: false,
   }).kind;
 }
 
@@ -214,6 +217,7 @@ describe('when the send button is offered', () => {
       sending: false,
       durable: true,
       lockable: true,
+      expired: false,
       ...extra,
     }).kind;
   }
@@ -246,6 +250,33 @@ describe('when the send button is offered', () => {
     expect(kind('PENDING_DEPOSIT', { walletCanSend: false })).toBe('none');
     expect(kind('PENDING_DEPOSIT', { durable: false })).toBe('no-storage');
     expect(kind('PENDING_DEPOSIT', { lockable: false })).toBe('no-lock');
+  });
+
+  it('not once the quote deadline is near or past, whatever 1Click still reports', () => {
+    expect(kind('PENDING_DEPOSIT', { expired: true })).toBe('expired');
+    expect(kind(null, { expired: true, walletCanSend: false })).toBe('expired');
+    const record = attemptingRecord(start(ONE));
+    expect(
+      sendPanel({
+        swap: 'PENDING_DEPOSIT',
+        record,
+        walletCanSend: true,
+        sending: false,
+        durable: true,
+        lockable: true,
+        expired: true,
+      }).kind
+    ).toBe('record');
+  });
+
+  it('counts a quote as expired five minutes before its deadline, and when the deadline is unreadable', () => {
+    const deadline = '2026-11-15T12:00:00.000Z';
+    expect(quoteExpired(deadline, new Date('2026-11-15T11:54:59.999Z'))).toBe(false);
+    expect(quoteExpired(deadline, new Date('2026-11-15T11:55:00.000Z'))).toBe(true);
+    expect(quoteExpired(deadline, new Date('2026-11-15T13:00:00.000Z'))).toBe(true);
+    expect(quoteExpired('soon', NOW)).toBe(true);
+    expect(quoteExpired(undefined, NOW)).toBe(false);
+    expect(QUOTE_EXPIRY_MARGIN_MS).toBe(5 * 60_000);
   });
 });
 

@@ -39,21 +39,40 @@ test.describe('S6. a deposit left open for a long time', () => {
     await expect(app.progress(PROGRESS.awaitingFunds)).toBeVisible();
   });
 
-  test('the quote deadline passes before any funds arrive: while 1Click still reports PENDING_DEPOSIT the page keeps offering the wallet send and the stale "before" time', async ({
+  test('the quote deadline passes before any funds arrive: while 1Click still reports PENDING_DEPOSIT the page stops offering the send, says the quote expired, and keeps tracking', async ({
     app,
     world,
   }) => {
     const started = await startAwaitingFunds(app);
-    const deadline = started.receipt.quoteResponse.quote;
-    const shown = app.page.getByText(/^before /);
-    const before = await shown.innerText();
+    const quote = started.receipt.quoteResponse.quote;
+    const deadlineMs = Date.parse(String(quote.deadline));
+    expect(Number.isFinite(deadlineMs)).toBe(true);
+    await expect(app.page.getByText(/^before /)).toBeVisible();
+    await expect(app.sendButton).toBeVisible();
+
+    await app.fastForward(deadlineMs - 6 * 60_000 - world.now().getTime());
+    await app.tick();
+    await expect(app.sendButton).toBeVisible();
+    await app.fastForward(2 * 60_000);
+    await app.tick();
+    await expect(app.page.getByText(/too soon to send safely\.$/)).toBeVisible();
+    await expect(app.sendButton).toHaveCount(0);
+    await expect(app.page.getByText(/^before /)).toHaveCount(0);
+
     await app.fastForward(2 * HOUR + TEN_MINUTES);
     await app.tick();
     expect(world.swap().status).toBe('PENDING_DEPOSIT');
-    await expect(shown).toHaveText(before);
-    await expect(app.sendButton).toBeVisible();
+    await expect(app.page.getByText(/^This quote expired at /)).toBeVisible();
+    await expect(
+      app.page.getByText(/funds that arrive after the deadline may be lost/)
+    ).toBeVisible();
+    await expect(app.page.getByText(String(quote.depositAddress), { exact: true })).toHaveCount(0);
+    await expect(app.sendButton).toHaveCount(0);
     await expect(app.progress(PROGRESS.awaitingFunds)).toBeVisible();
-    expect(deadline.depositAddress).toBe(world.swap().depositAddress);
+    expect(quote.depositAddress).toBe(world.swap().depositAddress);
+
+    world.reportDeposit();
+    await app.waitForProgress(PROGRESS.swapping);
   });
 
   test('terminal states stop polling: after Done, hours pass with no requests and no pending poll timer', async ({

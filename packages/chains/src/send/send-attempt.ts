@@ -247,8 +247,17 @@ export type SendPanel =
   | { kind: 'unknown' }
   | { kind: 'no-storage' }
   | { kind: 'no-lock' }
+  | { kind: 'expired' }
   | { kind: 'offer' }
   | { kind: 'none' };
+
+export const QUOTE_EXPIRY_MARGIN_MS = 5 * 60_000;
+
+export function quoteExpired(deadline: string | undefined, now: Date): boolean {
+  if (deadline === undefined) return false;
+  const at = Date.parse(deadline);
+  return !Number.isFinite(at) || now.getTime() >= at - QUOTE_EXPIRY_MARGIN_MS;
+}
 
 export function sendPanel(input: {
   swap: OneClickSwapStatus | null | undefined;
@@ -257,9 +266,11 @@ export function sendPanel(input: {
   sending: boolean;
   durable: boolean;
   lockable: boolean;
+  expired: boolean;
 }): SendPanel {
   if (input.sending) return { kind: 'sending' };
   if (input.record !== null) return { kind: 'record', record: input.record };
+  if (input.expired) return { kind: 'expired' };
   if (!input.walletCanSend) return { kind: 'none' };
   if (input.swap === undefined) return { kind: 'checking' };
   if (input.swap === null) return { kind: 'unknown' };
