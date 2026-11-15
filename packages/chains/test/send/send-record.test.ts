@@ -13,7 +13,9 @@ import {
   ALREADY_RECORDED_MESSAGE,
   CANNOT_SAVE_MESSAGE,
   EXPIRED_MESSAGE,
+  NO_LOCK_MESSAGE,
   type ResolveDeps,
+  type SendLock,
   WALLET_PROMPT_WINDOW_MS,
   attemptSend,
   confirmNothingSent,
@@ -22,6 +24,7 @@ import {
   promptWaitMs,
   resendRecord,
   resolveRecord,
+  sendLockName,
   sendPanel,
   settleFromProvider,
 } from '../../src/send/send-attempt.js';
@@ -134,8 +137,59 @@ function start(target: SwapTarget, family: 'evm' | 'solana' = 'evm') {
 const rejection = Object.assign(new Error('User rejected the request.'), { code: 4001 });
 
 function offered(record: SendRecord | null, swap: 'PENDING_DEPOSIT' | 'SUCCESS' | null) {
-  return sendPanel({ swap, record, walletCanSend: true, sending: false, durable: true }).kind;
+  return sendPanel({
+    swap,
+    record,
+    walletCanSend: true,
+    sending: false,
+    durable: true,
+    lockable: true,
+  }).kind;
 }
+
+function gate() {
+  let open: (() => void) | null = null;
+  const promise = new Promise<void>(resolve => {
+    open = resolve;
+  });
+  return {
+    promise,
+    resolve() {
+      open?.();
+    },
+  };
+}
+
+async function settled(run: Promise<unknown>): Promise<void> {
+  try {
+    await run;
+  } catch {
+    return;
+  }
+}
+
+function memoryLocks(log: string[] = []) {
+  const tails = new Map<string, Promise<void>>();
+  function lock<T>(name: string, task: () => Promise<T>): Promise<T> {
+    const prior = tails.get(name) ?? Promise.resolve();
+    async function held(): Promise<T> {
+      await prior;
+      log.push(`lock ${name}`);
+      try {
+        return await task();
+      } finally {
+        log.push(`unlock ${name}`);
+      }
+    }
+    const run = held();
+    tails.set(name, settled(run));
+    return run;
+  }
+  const typed: SendLock = lock;
+  return typed;
+}
+
+const LOCK = memoryLocks();
 
 describe('send record keys', () => {
   it('keys a record by the swap deposit address and memo, never by the Bitcoin address', () => {
@@ -150,6 +204,7 @@ describe('send record keys', () => {
     const log: string[] = [];
     const first = await attemptSend(
       records,
+      LOCK,
       start(ONE),
       evmSend(fakeEvm({ log, send: () => Promise.resolve(HASH) }))
     );
@@ -179,6 +234,7 @@ describe('when the send button is offered', () => {
       walletCanSend: true,
       sending: false,
       durable: true,
+      lockable: true,
       ...extra,
     }).kind;
   }
@@ -210,6 +266,106 @@ describe('when the send button is offered', () => {
     expect(kind('PENDING_DEPOSIT', { sending: true })).toBe('sending');
     expect(kind('PENDING_DEPOSIT', { walletCanSend: false })).toBe('none');
     expect(kind('PENDING_DEPOSIT', { durable: false })).toBe('no-storage');
+    expect(kind('PENDING_DEPOSIT', { lockable: false })).toBe('no-lock');
+  });
+});
+
+describe('attemptSend across tabs', () => {
+  it('claims the record inside the per-swap lock and asks the wallet only after releasing it', async () => {
+    const log: string[] = [];
+    const storage = fakeStorage([], log);
+    const records = createSendRecords(() => storage);
+    await attemptSend(
+      records,
+      memoryLocks(log),
+      start(ONE),
+      evmSend(fakeEvm({ log, send: () => Promise.resolve(HASH) }))
+    );
+    const name = sendLockName(ONE);
+    expect(name).toBe(`${sendRecordKey(ONE)}:lock`);
+    expect(log).toEqual([
+      `lock ${name}`,
+      'store attempting',
+      `unlock ${name}`,
+      'wallet eth_chainId',
+      'wallet eth_accounts',
+      'wallet eth_sendTransaction',
+      'store sent',
+    ]);
+  });
+
+  it('lets only one of two racing tabs ask the wallet', async () => {
+    const storage = fakeStorage();
+    const lock = memoryLocks();
+    const tabA = createSendRecords(() => storage);
+    const tabB = createSendRecords(() => storage);
+    let asked = 0;
+    function send() {
+      asked += 1;
+      return Promise.resolve(HASH);
+    }
+    const outcomes = await Promise.all([
+      attemptSend(tabA, lock, start(ONE), send),
+      attemptSend(tabB, lock, start(ONE), send),
+    ]);
+    expect(asked).toBe(1);
+    expect(outcomes.map(o => o.kind).sort()).toEqual(['refused', 'sent']);
+    expect(outcomes.find(o => o.kind === 'refused')).toEqual({
+      kind: 'refused',
+      message: ALREADY_RECORDED_MESSAGE,
+    });
+  });
+
+  it('waits for another tab that holds the lock and then sees its record', async () => {
+    const storage = fakeStorage();
+    const lock = memoryLocks();
+    const other = createSendRecords(() => storage);
+    const held = gate();
+    const holding = lock(sendLockName(ONE), async () => {
+      await held.promise;
+      other.write(attemptingRecord(start(ONE)));
+    });
+    let asked = false;
+    const mine = attemptSend(
+      createSendRecords(() => storage),
+      lock,
+      start(ONE),
+      () => {
+        asked = true;
+        return Promise.resolve(HASH);
+      }
+    );
+    held.resolve();
+    await holding;
+    expect(await mine).toEqual({ kind: 'refused', message: ALREADY_RECORDED_MESSAGE });
+    expect(asked).toBe(false);
+  });
+
+  it('does not lock other swaps', async () => {
+    const lock = memoryLocks();
+    const held = gate();
+    const holding = lock(sendLockName(TWO), () => held.promise);
+    const outcome = await attemptSend(freshRecords(), lock, start(ONE), () =>
+      Promise.resolve(HASH)
+    );
+    expect(outcome.kind).toBe('sent');
+    held.resolve();
+    await holding;
+  });
+
+  it.each([
+    ['no lock is available', null],
+    ['the lock cannot be taken', () => Promise.reject(new Error('SecurityError'))],
+  ])('refuses wallet sending when %s', async (_name, lock) => {
+    const records = freshRecords();
+    let asked = false;
+    const outcome = await attemptSend(records, lock, start(ONE), () => {
+      asked = true;
+      return Promise.resolve(HASH);
+    });
+    expect(outcome).toEqual({ kind: 'refused', message: NO_LOCK_MESSAGE });
+    expect(asked).toBe(false);
+    expect(records.read(ONE, 'evm')).toBeNull();
   });
 });
 
@@ -220,6 +376,7 @@ describe('attemptSend on EVM', () => {
     const records = createSendRecords(() => storage);
     await attemptSend(
       records,
+      LOCK,
       start(ONE),
       evmSend(fakeEvm({ log, send: () => Promise.resolve(HASH) }))
     );
@@ -247,7 +404,8 @@ describe('attemptSend on EVM', () => {
     const events = new EventTarget();
     const seen: (string | null)[] = [];
     const stop = watchSendRecords(events, () => seen.push(tabB.read(ONE, 'evm')?.state ?? null));
-    const sending = attemptSend(tabA, start(ONE), () => pending);
+    const sending = attemptSend(tabA, LOCK, start(ONE), () => pending);
+    await vi.waitFor(() => expect(tabA.read(ONE, 'evm')).not.toBeNull());
     events.dispatchEvent(new Event('storage'));
     expect(tabB.read(ONE, 'evm')?.state).toBe('attempting');
     expect(offered(tabB.read(ONE, 'evm'), 'PENDING_DEPOSIT')).toBe('record');
@@ -265,6 +423,7 @@ describe('attemptSend on EVM', () => {
     const log: string[] = [];
     const outcome = await attemptSend(
       records,
+      LOCK,
       start(ONE),
       evmSend(fakeEvm({ log, send: () => Promise.reject(rejection) }))
     );
@@ -281,7 +440,7 @@ describe('attemptSend on EVM', () => {
           args.method === 'eth_chainId' ? '0x2105' : ['0x000000000000000000000000000000000000dEaD']
         ),
     };
-    const outcome = await attemptSend(records, start(ONE), evmSend(provider));
+    const outcome = await attemptSend(records, LOCK, start(ONE), evmSend(provider));
     expect(outcome).toMatchObject({ kind: 'cleared', rejected: false });
     expect(records.read(ONE, 'evm')).toBeNull();
   });
@@ -290,6 +449,7 @@ describe('attemptSend on EVM', () => {
     const records = freshRecords();
     const outcome = await attemptSend(
       records,
+      LOCK,
       start(ONE),
       evmSend(fakeEvm({ log: [], send: () => Promise.reject(new Error('Request expired')) }))
     );
@@ -303,9 +463,9 @@ describe('attemptSend on EVM', () => {
   it('never asks the wallet twice for one swap', async () => {
     const storage = fakeStorage();
     const records = createSendRecords(() => storage);
-    await attemptSend(records, start(ONE), () => Promise.resolve(HASH));
+    await attemptSend(records, LOCK, start(ONE), () => Promise.resolve(HASH));
     let asked = false;
-    const second = await attemptSend(records, start(ONE), () => {
+    const second = await attemptSend(records, LOCK, start(ONE), () => {
       asked = true;
       return Promise.resolve(HASH);
     });
@@ -324,7 +484,7 @@ describe('attemptSend on EVM', () => {
     const records = createSendRecords(() => broken);
     expect(records.durable()).toBe(false);
     let asked = false;
-    const outcome = await attemptSend(records, start(ONE), () => {
+    const outcome = await attemptSend(records, LOCK, start(ONE), () => {
       asked = true;
       return Promise.resolve(HASH);
     });
@@ -337,7 +497,7 @@ describe('attemptSend on EVM', () => {
   it('remembers a send in the tab when storage fails after the attempt began', async () => {
     const storage = fakeStorage();
     const records = createSendRecords(() => storage);
-    const outcome = await attemptSend(records, start(ONE), () => {
+    const outcome = await attemptSend(records, LOCK, start(ONE), () => {
       storage.setItem = () => {
         throw new Error('QuotaExceededError');
       };
@@ -381,7 +541,7 @@ describe('resolving an uncertain record', () => {
 
   it('lets the user clear a record nothing can prove, after checking their wallet', async () => {
     const records = freshRecords();
-    await attemptSend(records, start(ONE), () => Promise.reject(new Error('socket closed')));
+    await attemptSend(records, LOCK, start(ONE), () => Promise.reject(new Error('socket closed')));
     const record = records.read(ONE, 'evm');
     if (!record) throw new Error('expected a record');
     expect(await resolveRecord(records, record, noChecks)).toEqual({
@@ -395,7 +555,7 @@ describe('resolving an uncertain record', () => {
 
   it('treats the deposit as sent once 1Click reports it, and keeps the button hidden', async () => {
     const records = freshRecords();
-    await attemptSend(records, start(ONE), () => Promise.reject(new Error('socket closed')));
+    await attemptSend(records, LOCK, start(ONE), () => Promise.reject(new Error('socket closed')));
     const settled = settleFromProvider(records, records.read(ONE, 'evm'), 'KNOWN_DEPOSIT_TX');
     expect(settled).toMatchObject({ state: 'sent', via: 'provider' });
     expect(records.read(ONE, 'evm')?.state).toBe('sent');
@@ -493,7 +653,7 @@ describe('Solana sign-only sends', () => {
         return Promise.resolve(SIG);
       },
     });
-    const outcome = await attemptSend(records, start(SOLANA_SWAP, 'solana'), hooks =>
+    const outcome = await attemptSend(records, LOCK, start(SOLANA_SWAP, 'solana'), hooks =>
       sendSolanaDeposit(input, signer, net.rpc, hooks)
     );
     fail = false;
@@ -560,7 +720,7 @@ describe('Solana sign-only sends', () => {
     expect(result).toEqual({ kind: 'cleared', message: EXPIRED_MESSAGE });
     expect(records.read(SOLANA_SWAP, 'solana')).toBeNull();
     expect(offered(null, 'PENDING_DEPOSIT')).toBe('offer');
-    const fresh = await attemptSend(records, start(SOLANA_SWAP, 'solana'), hooks =>
+    const fresh = await attemptSend(records, LOCK, start(SOLANA_SWAP, 'solana'), hooks =>
       sendSolanaDeposit(input, signer, expired.rpc, hooks)
     );
     expect(fresh.kind).toBe('sent');

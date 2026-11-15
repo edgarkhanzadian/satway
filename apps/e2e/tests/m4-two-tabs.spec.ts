@@ -41,36 +41,38 @@ test.describe('M4. two tabs on the same awaiting deposit', () => {
     expect(world.evm.transactions.size).toBe(1);
   });
 
-  test.fail(
-    'APP ISSUE: the send-record check is not atomic across tabs, so clicking both buttons in a tight race asks the wallet twice (correct: once)',
-    async ({ app, world, wallets, harness }) => {
-      const started = await startAwaitingFunds(app);
-      const other = await app.newTab();
-      await resumeIn(other, started);
-      await expect(other.sendButton).toBeVisible();
-      await expect(app.sendButton).toBeVisible();
+  test('clicking both buttons in a tight race asks the wallet once: the send-record check is locked across tabs', async ({
+    app,
+    world,
+    wallets,
+    harness,
+  }) => {
+    const started = await startAwaitingFunds(app);
+    const other = await app.newTab();
+    await resumeIn(other, started);
+    await expect(other.sendButton).toBeVisible();
+    await expect(app.sendButton).toBeVisible();
 
-      const wallet = wallets.evm.behaviour.late('eth_sendTransaction');
-      const [first, second] = await Promise.all([clickSendInPage(app), clickSendInPage(other)]);
-      expect(first).toBe(true);
-      test.info().annotations.push({
-        type: 'race',
-        description: second
-          ? 'the second tab clicked before its button was removed'
-          : 'the second tab had already removed its button',
-      });
-      await harness.idle();
-      wallet.release();
-      await expect(app.progress('Sent from your wallet.')).toBeVisible();
-      await harness.idle();
+    const wallet = wallets.evm.behaviour.late('eth_sendTransaction');
+    const [first, second] = await Promise.all([clickSendInPage(app), clickSendInPage(other)]);
+    expect(first).toBe(true);
+    test.info().annotations.push({
+      type: 'race',
+      description: second
+        ? 'the second tab clicked before its button was removed'
+        : 'the second tab had already removed its button',
+    });
+    await harness.idle();
+    wallet.release();
+    await expect(app.progress('Sent from your wallet.')).toBeVisible();
+    await harness.idle();
 
-      expect(wallets.evm.behaviour.calls('eth_sendTransaction')).toHaveLength(1);
-      expect(wallets.evm.behaviour.calls('eth_chainId')).toHaveLength(1);
-      expect(world.evm.transactions.size).toBe(1);
-      if (second) await expect(other.sendError).toHaveText(SEND_COPY.alreadyRecorded);
-      await expect(app.sendButton).toHaveCount(0);
-      await expect(other.sendButton).toHaveCount(0);
-      await expect(other.progress('Sent from your wallet.')).toBeVisible();
-    }
-  );
+    expect(wallets.evm.behaviour.calls('eth_sendTransaction')).toHaveLength(1);
+    expect(wallets.evm.behaviour.calls('eth_chainId')).toHaveLength(1);
+    expect(world.evm.transactions.size).toBe(1);
+    if (second) await expect(other.sendError).toHaveText(SEND_COPY.alreadyRecorded);
+    await expect(app.sendButton).toHaveCount(0);
+    await expect(other.sendButton).toHaveCount(0);
+    await expect(other.progress('Sent from your wallet.')).toBeVisible();
+  });
 });

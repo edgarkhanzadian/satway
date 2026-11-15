@@ -43,6 +43,7 @@ import {
   downloadReceipt,
   latestRequests,
   rememberReceipt,
+  sendLock,
   sendRecords,
 } from '../../shared/index.js';
 import {
@@ -518,6 +519,7 @@ function Tracking(props: {
     walletCanSend: walletReady || solanaPayReady,
     sending,
     durable: durable || !walletReady,
+    lockable: sendLock !== null || !walletReady,
   });
 
   function showOutcome(outcome: AttemptOutcome) {
@@ -544,6 +546,7 @@ function Tracking(props: {
         showOutcome(
           await attemptSend(
             sendRecords,
+            sendLock,
             { target, family: 'solana', account: solanaAccount.address, now: new Date() },
             hooks =>
               sendSolanaDeposit(
@@ -565,6 +568,7 @@ function Tracking(props: {
         showOutcome(
           await attemptSend(
             sendRecords,
+            sendLock,
             { target, family: 'evm', account: source.address, now: new Date() },
             () => sendFromEvm(provider, transfer)
           )
@@ -666,6 +670,13 @@ function Tracking(props: {
               Sending from your wallet is turned off because this browser cannot save a record of
               the payment, which is what stops it being sent twice. Send it manually using the
               details above.
+            </p>
+          )}
+          {panel.kind === 'no-lock' && (
+            <p className={sendNote}>
+              Sending from your wallet is turned off because this browser cannot stop two open tabs
+              from sending the same payment. Send it manually using the details above, or use an
+              up-to-date browser.
             </p>
           )}
           {panel.kind === 'record' && (

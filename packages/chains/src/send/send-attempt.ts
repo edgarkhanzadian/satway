@@ -12,6 +12,7 @@ import {
   lastValidBlockHeight,
   recordTx,
   sameAttempt,
+  sendRecordKey,
   sentRecord,
   signedBytes,
   uncertainRecord,
@@ -24,6 +25,15 @@ export const CANNOT_SAVE_MESSAGE =
   'This browser could not save a record of the payment, so the wallet was not asked to send. Send it manually using the details above, or allow this site to store data and reload.';
 export const ALREADY_RECORDED_MESSAGE =
   'A payment from your wallet is already recorded for this swap, so the wallet was not asked again.';
+
+export const NO_LOCK_MESSAGE =
+  'This browser cannot stop two tabs from sending the same payment, so the wallet was not asked to send. Send it manually using the details above, or use an up-to-date browser.';
+
+export type SendLock = <T>(name: string, task: () => Promise<T>) => Promise<T>;
+
+export function sendLockName(target: SwapTarget): string {
+  return `${sendRecordKey(target)}:lock`;
+}
 
 export interface AttemptStart {
   target: SwapTarget;
@@ -42,18 +52,34 @@ export type AttemptOutcome =
   | { kind: 'uncertain'; record: UncertainRecord }
   | { kind: 'refused'; message: string };
 
-export async function attemptSend(
-  records: SendRecords,
-  start: AttemptStart,
-  send: (hooks: AttemptHooks) => Promise<string>
-): Promise<AttemptOutcome> {
+type Claim = { kind: 'claimed'; record: AttemptingRecord } | { kind: 'refused'; message: string };
+
+function claim(records: SendRecords, start: AttemptStart): Claim {
   if (records.read(start.target, start.family) !== null)
     return { kind: 'refused', message: ALREADY_RECORDED_MESSAGE };
-  let record: AttemptingRecord = attemptingRecord(start);
+  const record = attemptingRecord(start);
   if (!records.write(record)) {
     records.clear(start.target);
     return { kind: 'refused', message: CANNOT_SAVE_MESSAGE };
   }
+  return { kind: 'claimed', record };
+}
+
+export async function attemptSend(
+  records: SendRecords,
+  lock: SendLock | null,
+  start: AttemptStart,
+  send: (hooks: AttemptHooks) => Promise<string>
+): Promise<AttemptOutcome> {
+  if (lock === null) return { kind: 'refused', message: NO_LOCK_MESSAGE };
+  let claimed: Claim;
+  try {
+    claimed = await lock(sendLockName(start.target), () => Promise.resolve(claim(records, start)));
+  } catch {
+    return { kind: 'refused', message: NO_LOCK_MESSAGE };
+  }
+  if (claimed.kind === 'refused') return claimed;
+  let record: AttemptingRecord = claimed.record;
   try {
     const tx = await send({
       onSigned(signed) {
@@ -238,6 +264,7 @@ export type SendPanel =
   | { kind: 'checking' }
   | { kind: 'unknown' }
   | { kind: 'no-storage' }
+  | { kind: 'no-lock' }
   | { kind: 'offer' }
   | { kind: 'none' };
 
@@ -247,6 +274,7 @@ export function sendPanel(input: {
   walletCanSend: boolean;
   sending: boolean;
   durable: boolean;
+  lockable: boolean;
 }): SendPanel {
   if (input.sending) return { kind: 'sending' };
   if (input.record !== null) return { kind: 'record', record: input.record };
@@ -255,5 +283,6 @@ export function sendPanel(input: {
   if (input.swap === null) return { kind: 'unknown' };
   if (input.swap !== 'PENDING_DEPOSIT') return { kind: 'none' };
   if (!input.durable) return { kind: 'no-storage' };
+  if (!input.lockable) return { kind: 'no-lock' };
   return { kind: 'offer' };
 }
