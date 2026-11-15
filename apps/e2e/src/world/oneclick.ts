@@ -173,6 +173,7 @@ export class OneClick {
   readonly swaps = new Map<string, Swap>();
   readonly arrivals: DepositArrival[] = [];
   tamper: QuoteTamper | null = null;
+  reportDeposited = true;
   private readonly rng: Rng;
   private readonly now: () => Date;
 
@@ -418,7 +419,7 @@ export class OneClick {
 
   statusOf(swap: Swap): Record<string, unknown> {
     const token = swap.token;
-    const deposited = swap.received > 0n;
+    const deposited = swap.received > 0n && this.reportDeposited;
     const settled = swap.status === 'SUCCESS';
     const amountOut = swap.reportedAmountOut;
     const refunded = swap.refundedAmount ?? 0n;

@@ -26,3 +26,23 @@ export function reportedAmountOutOf(status: OneClickStatusResponse | null): numb
 export function quotedSatsOf(text: string): number | null {
   return satsOf(text);
 }
+
+const BASE_UNITS = /^\d+$/;
+
+export function remainingDepositOf(
+  status: OneClickStatusResponse | null,
+  amountIn: string
+): bigint | null {
+  const deposited = status?.swapDetails.depositedAmount;
+  if (status?.status !== 'INCOMPLETE_DEPOSIT' || deposited === undefined) return null;
+  if (!BASE_UNITS.test(deposited) || !BASE_UNITS.test(amountIn)) return null;
+  const owed = BigInt(amountIn) - BigInt(deposited);
+  return BigInt(deposited) > 0n && owed > 0n ? owed : null;
+}
+
+export function formatBaseUnits(units: bigint, decimals: number): string {
+  const digits = units.toString().padStart(decimals + 1, '0');
+  const whole = digits.slice(0, digits.length - decimals);
+  const fraction = digits.slice(digits.length - decimals).replace(/0+$/, '');
+  return `${whole}.${fraction === '' ? '0' : fraction}`;
+}

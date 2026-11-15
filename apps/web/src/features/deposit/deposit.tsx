@@ -32,7 +32,12 @@ import {
   walletCovers,
   watchSendRecords,
 } from '@portage/chains';
-import { type OneClickToken, MAINNET_CONFIG as config, errorMessage } from '@portage/core';
+import {
+  type OneClickToken,
+  MAINNET_CONFIG as config,
+  errorMessage,
+  formatBaseUnits,
+} from '@portage/core';
 
 import {
   type Backend,
@@ -499,6 +504,11 @@ function Tracking(props: {
   }, [onRoute, receipt, stage]);
 
   const waitingForFunds = !snapshot || progress?.stage === 'awaiting-funds';
+  const shortDeposit = snapshot?.swap === 'INCOMPLETE_DEPOSIT';
+  const owed =
+    shortDeposit && snapshot.remaining !== null && token !== undefined
+      ? formatBaseUnits(snapshot.remaining, token.decimals)
+      : null;
   const walletCanSend =
     family === 'evm' ? source?.kind === 'evm' : family === 'solana' && solanaAccount !== null;
   const walletReady =
@@ -622,11 +632,19 @@ function Tracking(props: {
 
       {waitingForFunds && quote.depositAddress && (
         <div className={send}>
-          <p className={sendLine}>
-            {walletReady ? 'Send exactly this:' : 'Send exactly this, from your own wallet:'}
-          </p>
+          {shortDeposit ? (
+            <p className={sendLine}>
+              {owed === null
+                ? 'Part of the amount arrived, but the swap provider did not say how much. From your own wallet, send only what is missing from the quoted total:'
+                : 'Part of the amount arrived. Send exactly the rest, from your own wallet:'}
+            </p>
+          ) : (
+            <p className={sendLine}>
+              {walletReady ? 'Send exactly this:' : 'Send exactly this, from your own wallet:'}
+            </p>
+          )}
           <p className={sendFigure}>
-            {quote.amountInFormatted} {receipt.origin.symbol} on {receipt.origin.chain}
+            {owed ?? quote.amountInFormatted} {receipt.origin.symbol} on {receipt.origin.chain}
           </p>
           <p className={sendLine}>to</p>
           <p className={sendFigure}>

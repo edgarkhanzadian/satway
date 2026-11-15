@@ -13,6 +13,7 @@ import {
   observeDeposit,
   outpointOf,
   registerOutputs,
+  remainingDepositOf,
 } from '@portage/core';
 
 import type { Backend } from './backend.js';
@@ -33,6 +34,7 @@ export interface Snapshot {
   truncated: boolean;
   registrationError: string | null;
   registrationErrors: RegistrationErrorNote[];
+  remaining: bigint | null;
 }
 
 export interface RegistrationErrorNote {
@@ -106,5 +108,6 @@ export async function checkProgress(
     truncated: o.truncated,
     registrationError: registrationErrors.map(e => e.message).join(' ') || null,
     registrationErrors,
+    remaining: remainingDepositOf(status, receipt.quoteResponse.quote.amountIn),
   };
 }

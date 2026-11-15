@@ -15,13 +15,11 @@ test.describe('R2. less than the quoted amount arrives (INCOMPLETE_DEPOSIT)', ()
       connectEvm: false,
       refundTo: world.rng.evmAddress(),
     });
-    const quote = receipt.quoteResponse.quote;
+    expect(receipt.quoteResponse.quote.amountInFormatted).toBe('100.0');
     world.reportDeposit({ amount: 40_000_000n });
     await app.waitForProgress(INCOMPLETE);
     await app.expectRouteAt('Your chain', 'In progress');
-    await expect(
-      app.page.getByText(`${quote.amountInFormatted} USDC on base`, { exact: true })
-    ).toBeVisible();
+    await expect(app.page.getByText('60.0 USDC on base', { exact: true })).toBeVisible();
     await expect(app.sendButton).toHaveCount(0);
     expect(world.swap().status).toBe('INCOMPLETE_DEPOSIT');
 
@@ -33,16 +31,37 @@ test.describe('R2. less than the quoted amount arrives (INCOMPLETE_DEPOSIT)', ()
     expect(wallets.evm.behaviour.requests).toEqual([]);
   });
 
-  test.fail(
-    'APP ISSUE: after a short deposit the send box still says "Send exactly" the full quoted amount instead of the remainder (correct: show what is still owed)',
-    async ({ app, world }) => {
-      await startAwaitingFunds(app, { connectEvm: false, refundTo: world.rng.evmAddress() });
-      world.reportDeposit({ amount: 40_000_000n });
-      await app.waitForProgress(INCOMPLETE);
-      await expect(app.page.getByText('60.0 USDC on base', { exact: true })).toBeVisible({
-        timeout: 500,
-      });
-      await expect(app.page.getByText('100.0 USDC on base', { exact: true })).toHaveCount(0);
-    }
-  );
+  test('after a short deposit the send box asks for exactly the remainder 1Click reports, not the full quoted amount', async ({
+    app,
+    world,
+  }) => {
+    await startAwaitingFunds(app, { connectEvm: false, refundTo: world.rng.evmAddress() });
+    world.reportDeposit({ amount: 40_000_000n });
+    await app.waitForProgress(INCOMPLETE);
+    await expect(
+      app.page.getByText('Part of the amount arrived. Send exactly the rest, from your own wallet:')
+    ).toBeVisible();
+    await expect(app.page.getByText('60.0 USDC on base', { exact: true })).toBeVisible({
+      timeout: 500,
+    });
+    await expect(app.page.getByText('100.0 USDC on base', { exact: true })).toHaveCount(0);
+  });
+
+  test('when 1Click does not say how much arrived, the page says so instead of showing a wrong remainder', async ({
+    app,
+    world,
+  }) => {
+    world.oneClick.reportDeposited = false;
+    await startAwaitingFunds(app, { connectEvm: false, refundTo: world.rng.evmAddress() });
+    world.reportDeposit({ amount: 40_000_000n });
+    await app.waitForProgress(INCOMPLETE);
+    await expect(
+      app.page.getByText(
+        'Part of the amount arrived, but the swap provider did not say how much. From your own wallet, send only what is missing from the quoted total:'
+      )
+    ).toBeVisible();
+    await expect(app.page.getByText('100.0 USDC on base', { exact: true })).toBeVisible();
+    await expect(app.page.getByText('60.0 USDC on base', { exact: true })).toHaveCount(0);
+    await expect(app.sendButton).toHaveCount(0);
+  });
 });
