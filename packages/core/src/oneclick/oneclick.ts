@@ -284,7 +284,10 @@ export function providerFeesOf(
   const ours = sent.appFees ?? [];
   const echoed = response.quoteRequest?.appFees ?? [];
   const head = echoed.slice(0, ours.length);
-  if (JSON.stringify(head) !== JSON.stringify(ours)) {
+  const same =
+    head.length === ours.length &&
+    head.every((fee, i) => fee.recipient === ours[i]?.recipient && fee.fee === ours[i]?.fee);
+  if (!same) {
     throw new Error('Quote does not match the request: "appFees" was changed');
   }
   const extra = echoed.slice(ours.length);

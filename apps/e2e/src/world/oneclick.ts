@@ -293,7 +293,12 @@ export class OneClick {
       confidentiality: 'public',
       quoteWaitingTimeMs: 0,
       insured: false,
-      appFees: [...ownFees, providerFee],
+      appFees: [
+        ...ownFees.map(fee =>
+          dry || typeof fee !== 'object' || fee === null ? fee : { ...fee, limitOrderId: null }
+        ),
+        providerFee,
+      ],
     };
     const depositAddress = dry ? undefined : this.newDepositAddress(token);
     const quote: Record<string, unknown> = {

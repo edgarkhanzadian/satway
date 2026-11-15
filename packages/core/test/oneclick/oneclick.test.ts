@@ -126,6 +126,26 @@ describe('assertQuoteMatchesRequest', () => {
     expect(providerFeesOf(sent, respond(sent))).toEqual([]);
   });
 
+  it('matches our fee in a real live echo, which adds limitOrderId: null to each entry', () => {
+    const real = oneClickQuoteResponseSchema.parse(REAL_LIVE_QUOTE);
+    const [echoedFee] = real.quoteRequest.appFees ?? [];
+    expect(echoedFee).toMatchObject({ limitOrderId: null });
+    const ours: OneClickQuoteRequest = {
+      ...real.quoteRequest,
+      appFees: [{ recipient: String(echoedFee?.recipient), fee: Number(echoedFee?.fee) }],
+    };
+    expect(providerFeesOf(ours, real)).toEqual([]);
+    expect(() =>
+      providerFeesOf({ ...ours, appFees: [{ recipient: 'thief.near', fee: 20 }] }, real)
+    ).toThrow(/appFees/);
+    expect(() =>
+      providerFeesOf(
+        { ...ours, appFees: [{ recipient: String(echoedFee?.recipient), fee: 25 }] },
+        real
+      )
+    ).toThrow(/appFees/);
+  });
+
   it('keeps our fee first and unchanged when the provider adds its own', () => {
     const withFee = buildQuoteRequest(
       { ...MAINNET_CONFIG, appFeeBps: 25, appFeeRecipient: 'fees.near' },
