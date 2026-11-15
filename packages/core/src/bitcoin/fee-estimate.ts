@@ -1,4 +1,4 @@
-import { type FetchLike, defaultFetch, requestJson, z } from '../shared/index.js';
+import { type FetchLike, defaultFetch, errorMessage, requestJson, z } from '../shared/index.js';
 
 const feeEstimatesSchema: z.ZodType<Record<string, number>> = z.record(
   z.string(),
@@ -16,4 +16,32 @@ export async function fetchFeeEstimate(
     throw new Error(`The Bitcoin API has no fee estimate for ${targetBlocks} block(s)`);
   }
   return rate;
+}
+
+const recommendedFeesSchema = z.looseObject({ halfHourFee: z.number() });
+
+export class FeeRateUnavailableError extends Error {
+  constructor(reason: string, options?: ErrorOptions) {
+    super(
+      `Could not read the current Bitcoin fee rate (${reason}), so no reclaim was built and nothing was signed or sent. Try again in a moment.`,
+      options
+    );
+    this.name = 'FeeRateUnavailableError';
+  }
+}
+
+export async function fetchReclaimFeeRate(
+  btcApiUrl: string,
+  fetchFn: FetchLike = defaultFetch
+): Promise<number> {
+  try {
+    const fees = await requestJson(
+      fetchFn,
+      `${btcApiUrl}/v1/fees/recommended`,
+      recommendedFeesSchema
+    );
+    return Math.max(1, fees.halfHourFee);
+  } catch (err) {
+    throw new FeeRateUnavailableError(errorMessage(err) ?? 'no answer', { cause: err });
+  }
 }

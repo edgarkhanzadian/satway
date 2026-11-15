@@ -59,6 +59,7 @@ const noBrowserGlobals = {
 
 const coreNetworkExports = [
   'OneClickClient',
+  'broadcastTransaction',
   'assertActiveWithdrawalContract',
   'callReadOnly',
   'fetchActiveWithdrawalContract',
@@ -71,6 +72,7 @@ const coreNetworkExports = [
   'fetchLimits',
   'fetchOnChainWithdrawalRequest',
   'fetchPayoutSpender',
+  'fetchReclaimFeeRate',
   'fetchSignersPublicKey',
   'fetchSignersPublicKeyVar',
   'fetchStacksTransaction',

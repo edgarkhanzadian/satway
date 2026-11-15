@@ -7,17 +7,17 @@ import { actions, button, details, field, notice, sheet } from 'portage-styles/r
 import {
   type ReclaimOption,
   type ReclaimPlan,
+  broadcastTransaction,
   buildReclaimPsbt,
   MAINNET_CONFIG as config,
   errorMessage,
+  fetchReclaimFeeRate,
   finalizeSignedReclaim,
   findReclaimOption,
   isOutputSpent,
   outpointOf,
-  parseWith,
   planReclaim,
   reclaimAmountProblem,
-  z,
 } from '@portage/core';
 
 import {
@@ -32,8 +32,6 @@ import {
   verifyReceipt,
 } from '../../shared/index.js';
 import { PayoutDetails, PayoutNotices, type RouteUpdate } from '../../ui/index.js';
-
-const feesSchema = z.looseObject({ halfHourFee: z.number() });
 
 const fields = field();
 
@@ -135,9 +133,7 @@ export function Recover(props: {
           'That output has already been spent. Choose another one, if any is listed.'
         );
       }
-      const feesUrl = `${config.btcApiUrl}/v1/fees/recommended`;
-      const fees = parseWith(feesSchema, await (await fetch(feesUrl)).json(), feesUrl);
-      const feeRate = Math.max(1, fees.halfHourFee);
+      const feeRate = await fetchReclaimFeeRate(config.btcApiUrl);
       const tooSmall = reclaimAmountProblem(output.amountSats, feeRate);
       if (tooSmall) throw new Error(tooSmall);
       const { psbtHex } = buildReclaimPsbt({
@@ -152,9 +148,7 @@ export function Recover(props: {
       });
       const signed = await props.signReclaim(psbtHex, props.account);
       const { txHex, txid } = finalizeSignedReclaim(signed);
-      const res = await fetch(`${config.btcApiUrl}/tx`, { method: 'POST', body: txHex });
-      if (!res.ok)
-        throw new Error(`The Bitcoin network rejected the transaction: ${await res.text()}`);
+      await broadcastTransaction(config.btcApiUrl, txHex);
       setMessage(`Reclaim sent for ${outpointOf(output)}. Transaction ${txid}.`);
       if (!isCurrent()) return;
       setChosen(null);

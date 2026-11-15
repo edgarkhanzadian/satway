@@ -1,6 +1,7 @@
 import {
   type FetchLike,
   HttpError,
+  SLOW_REQUEST_TIMEOUT_MS,
   defaultFetch,
   requestJson,
   requestText,
@@ -306,6 +307,26 @@ export async function fetchTransactionHex(
   const raw = text.trim().toLowerCase();
   if (!EVEN_HEX.test(raw)) throw new Error(`Bitcoin API returned non-hex data for tx ${wanted}`);
   return raw;
+}
+
+export async function broadcastTransaction(
+  btcApiUrl: string,
+  txHex: string,
+  fetchFn: FetchLike = defaultFetch
+): Promise<string> {
+  try {
+    const txid = await requestText(fetchFn, `${btcApiUrl}/tx`, {
+      method: 'POST',
+      body: txHex,
+      timeoutMs: SLOW_REQUEST_TIMEOUT_MS,
+    });
+    return txid.trim();
+  } catch (err) {
+    if (err instanceof HttpError) {
+      throw new Error(`The Bitcoin network rejected the transaction: ${err.body}`, { cause: err });
+    }
+    throw err;
+  }
 }
 
 export async function isOutputSpent(

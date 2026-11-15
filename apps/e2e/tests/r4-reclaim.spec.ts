@@ -1,6 +1,7 @@
 import { PROGRESS, type PortageApp, type StartedDeposit } from '../src/app/portage-app.js';
 import { expect, test } from '../src/fixtures.js';
 import {
+  FAILED_TO_LOAD,
   NET_FAILED,
   savedLabel,
   startAwaitingFunds,
@@ -14,6 +15,7 @@ import {
   reclaimFromRecover,
 } from '../src/scenario/reclaim.js';
 import { outpointKey } from '../src/world/bitcoin.js';
+import { json } from '../src/world/http.js';
 import type { PayoutResult, World } from '../src/world/world.js';
 
 const FEE_SATS = Math.ceil(126 * 4);
@@ -146,6 +148,33 @@ test.describe('R4. the mint never happens, so the user reclaims after the timelo
     await expect(app.page.getByRole('button', { name: 'Follow this deposit' })).toHaveCount(0);
   });
 
+  test('the fee-rate endpoint is down: a clear error, nothing is signed or broadcast, and a retry works', async ({
+    app,
+    world,
+    wallets,
+    harness,
+  }) => {
+    harness.allowConsoleErrors(FAILED_TO_LOAD);
+    const { started, payout } = await toReclaimable(app, world);
+    await openInRecover(app, started);
+    world.addFault({
+      service: 'mempool',
+      path: /^\/api\/v1\/fees\/recommended$/,
+      outcome: json({ halfHourFee: 4 }, 503),
+    });
+    await reclaimFromRecover(app, wallets.stacks.account.paymentAddress);
+    await expect(app.sendError).toHaveText(
+      /^Could not read the current Bitcoin fee rate \(.+\), so no reclaim was built and nothing was signed or sent\. Try again in a moment\.$/
+    );
+    expect(wallets.stacks.behaviour.calls('signPsbt')).toEqual([]);
+    expect(world.bitcoin.broadcasts).toEqual([]);
+    world.clearFaults();
+    await reclaimControls(app).button.click();
+    await expect(app.progress(/^Reclaim sent for /)).toBeVisible();
+    expect(wallets.stacks.behaviour.calls('signPsbt')).toHaveLength(1);
+    expect(world.bitcoin.isSpent(payout.outpoint)).toBe(true);
+  });
+
   test('the user rejects the PSBT in the wallet: nothing is broadcast and a retry works', async ({
     app,
     world,
@@ -193,7 +222,7 @@ test.describe('R4. the mint never happens, so the user reclaims after the timelo
     await expectNoReclaimOffered(app);
   });
 
-  test('the fee-rate endpoint is down: the reclaim stops before signing', async ({
+  test('the fee-rate endpoint cannot be reached: the reclaim stops before signing and says why', async ({
     app,
     world,
     wallets,
@@ -208,7 +237,9 @@ test.describe('R4. the mint never happens, so the user reclaims after the timelo
       outcome: 'network-error',
     });
     await reclaimFromRecover(app, wallets.stacks.account.paymentAddress);
-    await expect(app.sendError).toHaveText('Failed to fetch');
+    await expect(app.sendError).toHaveText(
+      'Could not read the current Bitcoin fee rate (Failed to fetch), so no reclaim was built and nothing was signed or sent. Try again in a moment.'
+    );
     expect(wallets.stacks.behaviour.calls('signPsbt')).toEqual([]);
     expect(world.bitcoin.broadcasts).toEqual([]);
     expect(world.requestsTo('mempool', { path: '/api/v1/fees/recommended' })).toHaveLength(1);
