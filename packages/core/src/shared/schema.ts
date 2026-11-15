@@ -24,6 +24,14 @@ export class ResponseShapeError extends Error {
   }
 }
 
+function dropNull(value: unknown): unknown {
+  return value === null ? undefined : value;
+}
+
+export function nullOrAbsent<T>(schema: z.ZodType<T>) {
+  return z.preprocess(dropNull, schema.optional());
+}
+
 export function parseWith<T>(schema: z.ZodType<T>, value: unknown, source: string): T {
   const result = schema.safeParse(value);
   if (!result.success) throw new ResponseShapeError(source, result.error.issues);

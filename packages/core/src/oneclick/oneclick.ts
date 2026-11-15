@@ -1,4 +1,4 @@
-import { type FetchLike, defaultFetch, requestJson, z } from '../shared/index.js';
+import { type FetchLike, defaultFetch, nullOrAbsent, requestJson, z } from '../shared/index.js';
 
 export interface OneClickToken {
   assetId: string;
@@ -66,17 +66,26 @@ export type OneClickSwapStatus =
   | 'REFUNDED'
   | 'FAILED';
 
+export interface OneClickTxHash {
+  hash: string;
+  explorerUrl?: string;
+}
+
 export interface OneClickStatusResponse {
   status: OneClickSwapStatus;
   updatedAt: string;
   swapDetails: {
+    depositedAmount?: string;
+    amountIn?: string;
     amountOut?: string;
     refundedAmount?: string;
     refundReason?: string;
-    originChainTxHashes: { hash: string; explorerUrl: string }[];
-    destinationChainTxHashes: { hash: string; explorerUrl: string }[];
+    originChainTxHashes: OneClickTxHash[];
+    destinationChainTxHashes: OneClickTxHash[];
   };
 }
+
+const text = z.string();
 
 const oneClickTokenSchema: z.ZodType<OneClickToken> = z.looseObject({
   assetId: z.string(),
@@ -84,7 +93,7 @@ const oneClickTokenSchema: z.ZodType<OneClickToken> = z.looseObject({
   blockchain: z.string(),
   symbol: z.string(),
   price: z.number(),
-  contractAddress: z.string().optional(),
+  contractAddress: nullOrAbsent(text),
 });
 
 export const oneClickTokensSchema: z.ZodType<OneClickToken[]> = z.array(oneClickTokenSchema);
@@ -107,13 +116,13 @@ const oneClickQuoteRequestSchema: z.ZodType<OneClickQuoteRequest> = z.looseObjec
   recipient: z.string(),
   recipientType: z.literal('DESTINATION_CHAIN'),
   deadline: z.string(),
-  appFees: z.array(oneClickAppFeeSchema).optional(),
-  referral: z.string().optional(),
+  appFees: nullOrAbsent(z.array(oneClickAppFeeSchema)),
+  referral: nullOrAbsent(text),
 });
 
 const oneClickQuoteSchema: z.ZodType<OneClickQuote> = z.looseObject({
-  depositAddress: z.string().optional(),
-  depositMemo: z.string().optional(),
+  depositAddress: nullOrAbsent(text),
+  depositMemo: nullOrAbsent(text),
   amountIn: z.string(),
   amountInFormatted: z.string(),
   amountInUsd: z.string(),
@@ -122,11 +131,11 @@ const oneClickQuoteSchema: z.ZodType<OneClickQuote> = z.looseObject({
   amountOutFormatted: z.string(),
   amountOutUsd: z.string(),
   minAmountOut: z.string(),
-  deadline: z.string().optional(),
-  timeWhenInactive: z.string().optional(),
+  deadline: nullOrAbsent(text),
+  timeWhenInactive: nullOrAbsent(text),
   timeEstimate: z.number(),
-  refundFee: z.string().optional(),
-  withdrawFee: z.string().optional(),
+  refundFee: nullOrAbsent(text),
+  withdrawFee: nullOrAbsent(text),
 });
 
 export const oneClickQuoteResponseSchema: z.ZodType<OneClickQuoteResponse> = z.looseObject({
@@ -137,7 +146,10 @@ export const oneClickQuoteResponseSchema: z.ZodType<OneClickQuoteResponse> = z.l
   correlationId: z.string(),
 });
 
-const txHashSchema = z.looseObject({ hash: z.string(), explorerUrl: z.string() });
+const txHashSchema: z.ZodType<OneClickTxHash> = z.looseObject({
+  hash: z.string(),
+  explorerUrl: nullOrAbsent(text),
+});
 
 export const oneClickStatusResponseSchema: z.ZodType<OneClickStatusResponse> = z.looseObject({
   status: z.enum([
@@ -151,9 +163,11 @@ export const oneClickStatusResponseSchema: z.ZodType<OneClickStatusResponse> = z
   ]),
   updatedAt: z.string(),
   swapDetails: z.looseObject({
-    amountOut: z.string().optional(),
-    refundedAmount: z.string().optional(),
-    refundReason: z.string().optional(),
+    depositedAmount: nullOrAbsent(text),
+    amountIn: nullOrAbsent(text),
+    amountOut: nullOrAbsent(text),
+    refundedAmount: nullOrAbsent(text),
+    refundReason: nullOrAbsent(text),
     originChainTxHashes: z.array(txHashSchema),
     destinationChainTxHashes: z.array(txHashSchema),
   }),

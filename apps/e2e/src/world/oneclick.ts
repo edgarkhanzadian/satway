@@ -392,32 +392,63 @@ export class OneClick {
     swap.updatedAt = this.now().toISOString();
   }
 
+  private statusEchoOf(swap: Swap): Record<string, unknown> {
+    const response = swap.quote.response;
+    const request = field(response, 'quoteRequest');
+    const echoedRequest: Record<string, unknown> =
+      typeof request === 'object' && request !== null ? { ...request } : {};
+    delete echoedRequest.quoteWaitingTimeMs;
+    delete echoedRequest.insured;
+    const fees = echoedRequest.appFees;
+    if (Array.isArray(fees)) {
+      echoedRequest.appFees = fees.map((fee: unknown) =>
+        typeof fee === 'object' && fee !== null ? { limitOrderId: null, ...fee } : fee
+      );
+    }
+    echoedRequest.virtualChainRecipient = null;
+    echoedRequest.virtualChainRefundRecipient = null;
+    echoedRequest.referral = echoedRequest.referral ?? null;
+    return {
+      timestamp: field(response, 'timestamp'),
+      signature: field(response, 'signature'),
+      quoteRequest: echoedRequest,
+      quote: field(response, 'quote'),
+    };
+  }
+
   statusOf(swap: Swap): Record<string, unknown> {
     const token = swap.token;
+    const deposited = swap.received > 0n;
+    const settled = swap.status === 'SUCCESS';
+    const amountOut = swap.reportedAmountOut;
+    const refunded = swap.refundedAmount ?? 0n;
+    function inUsd(amount: bigint): string {
+      return usd((Number(amount) / 10 ** token.decimals) * token.price);
+    }
+    const quote = field(swap.quote.response, 'quote');
     return {
-      correlationId: field(swap.quote.response, 'correlationId'),
-      quoteResponse: swap.quote.response,
       status: swap.status,
       updatedAt: swap.updatedAt,
+      correlationId: field(swap.quote.response, 'correlationId'),
       swapDetails: {
+        depositedAmount: deposited ? swap.received.toString() : null,
+        depositedAmountUsd: deposited ? inUsd(swap.received) : null,
+        depositedAmountFormatted: deposited ? formatUnits(swap.received, token.decimals) : null,
         intentHashes: [],
         nearTxHashes: [],
-        amountIn: swap.received > 0n ? swap.received.toString() : undefined,
-        amountInFormatted:
-          swap.received > 0n ? formatUnits(swap.received, token.decimals) : undefined,
-        ...(swap.reportedAmountOut === null
-          ? {}
-          : {
-              amountOut: String(swap.reportedAmountOut),
-              amountOutFormatted: formatUnits(BigInt(swap.reportedAmountOut), 8),
-            }),
-        ...(swap.refundedAmount === null
-          ? {}
-          : {
-              refundedAmount: swap.refundedAmount.toString(),
-              refundedAmountFormatted: formatUnits(swap.refundedAmount, token.decimals),
-              refundReason: swap.refundReason ?? undefined,
-            }),
+        amountIn: settled ? swap.received.toString() : null,
+        amountInFormatted: settled ? formatUnits(swap.received, token.decimals) : null,
+        amountInUsd: settled ? inUsd(swap.received) : null,
+        amountOut: amountOut === null ? null : String(amountOut),
+        amountOutFormatted: amountOut === null ? null : formatUnits(BigInt(amountOut), 8),
+        amountOutUsd: amountOut === null ? null : usd((amountOut / 1e8) * BTC_PRICE_USD),
+        slippage: settled ? 0 : null,
+        refundedAmount: refunded.toString(),
+        refundedAmountFormatted: formatUnits(refunded, token.decimals),
+        refundedAmountUsd: inUsd(refunded),
+        refundReason: swap.refundReason,
+        refundFee: stringField(quote, 'refundFee') ?? REFUND_FEE,
+        withdrawFee: stringField(quote, 'withdrawFee') ?? String(WITHDRAW_FEE_SATS),
         originChainTxHashes: swap.originTxHashes.map(hash => ({
           hash,
           explorerUrl: explorerUrlFor(token, hash),
@@ -427,6 +458,7 @@ export class OneClick {
           explorerUrl: `https://mempool.space/tx/${hash}`,
         })),
       },
+      quoteResponse: this.statusEchoOf(swap),
     };
   }
 }

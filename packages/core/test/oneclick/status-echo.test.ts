@@ -35,9 +35,9 @@ describe('parseOneClickStatus', () => {
     expect(status.swapDetails.refundedAmount).toBe('0');
   });
 
-  it('documents that the strict status schema refuses that real response', () => {
-    expect(() => parseWith(oneClickStatusResponseSchema, REAL_BTC_ORIGIN_STATUS, 'x')).toThrow(
-      ResponseShapeError
+  it('reads that real response with the one status schema every reader uses', () => {
+    expect(parseWith(oneClickStatusResponseSchema, REAL_BTC_ORIGIN_STATUS, 'x')).toEqual(
+      parseOneClickStatus(REAL_BTC_ORIGIN_STATUS)
     );
   });
 

@@ -58,6 +58,40 @@ describe('createBackend', () => {
     );
   });
 
+  it('reads a real pending status, whose empty fields are null', async () => {
+    answer({
+      status: 'PENDING_DEPOSIT',
+      updatedAt: '2026-11-14T16:56:57.169Z',
+      correlationId: '113e0005-b8a2-4373-9542-76038e41b67a',
+      swapDetails: {
+        depositedAmount: null,
+        depositedAmountUsd: null,
+        depositedAmountFormatted: null,
+        intentHashes: [],
+        nearTxHashes: [],
+        amountIn: null,
+        amountInFormatted: null,
+        amountInUsd: null,
+        amountOut: null,
+        amountOutFormatted: null,
+        amountOutUsd: null,
+        slippage: null,
+        refundedAmount: '0',
+        refundedAmountFormatted: '0',
+        refundedAmountUsd: '0',
+        refundReason: null,
+        refundFee: '9972',
+        withdrawFee: '1900',
+        originChainTxHashes: [],
+        destinationChainTxHashes: [],
+      },
+    });
+    const status = await createBackend(BASE).status('2CXBDfuKKrEmmo5vXnYbCEbUbDyweZcbL12gXC4vHC4G');
+    expect(status.status).toBe('PENDING_DEPOSIT');
+    expect(status.swapDetails.amountOut).toBeUndefined();
+    expect(status.swapDetails.refundReason).toBeUndefined();
+  });
+
   it('rejects a 200 answer that is not JSON instead of returning null', async () => {
     answer('<html>proxy page</html>');
     await expect(createBackend(BASE).tokens()).rejects.toBeInstanceOf(ResponseShapeError);

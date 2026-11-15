@@ -4,6 +4,7 @@ import {
   HttpError,
   type NetworkConfig,
   defaultFetch,
+  nullOrAbsent,
   requestJson,
   z,
 } from '../shared/index.js';
@@ -46,7 +47,7 @@ const emilyDepositSchema: z.ZodType<EmilyDeposit> = z.looseObject({
   recipient: z.string(),
   amount: z.number(),
   status: z.enum(['pending', 'reprocessing', 'accepted', 'confirmed', 'failed', 'rbf']),
-  statusMessage: z.string().optional(),
+  statusMessage: nullOrAbsent(z.string()),
   reclaimScript: z.string(),
   depositScript: z.string(),
 });
