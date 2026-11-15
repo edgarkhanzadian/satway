@@ -50,6 +50,29 @@ test.describe('S1. our backend (the Worker) is down', () => {
     expect(preview.expectedSats).toBeGreaterThan(0);
   });
 
+  test('at page load: the asset list cannot load, and "Load the asset list again" retries in place once the backend is back', async ({
+    app,
+    harness,
+  }) => {
+    harness.allowConsoleErrors(REFUSED);
+    harness.backendDown();
+    await app.open();
+    await app.connectStacksWallet();
+    await expect(app.page.getByRole('alert')).toHaveText(
+      `Could not load the asset list: ${FAILED_TO_FETCH}`
+    );
+    const retry = app.page.getByRole('button', { name: 'Load the asset list again' });
+    await retry.click();
+    await expect(app.page.getByRole('alert')).toHaveText(
+      `Could not load the asset list: ${FAILED_TO_FETCH}`
+    );
+    harness.backendUp();
+    await retry.click();
+    await expect(app.assetSelect).toHaveValue(TOKENS.usdcBase.assetId);
+    await expect(app.page.getByRole('alert')).toHaveCount(0);
+    await expect(retry).toHaveCount(0);
+  });
+
   test('at "Get quote": the quote fails with the app’s message, nothing can be continued, and it works once the backend is back', async ({
     app,
     harness,

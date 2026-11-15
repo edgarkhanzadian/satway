@@ -121,6 +121,8 @@ export function Deposit(props: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previews] = useState(latestRequests);
+  const [tokensFailed, setTokensFailed] = useState(false);
+  const [tokenAttempt, setTokenAttempt] = useState(0);
 
   useEffect(() => {
     async function loadTokens() {
@@ -146,12 +148,14 @@ export function Deposit(props: {
           });
         setTokens(usable);
         setAssetId(current => current || usable[0]?.assetId || '');
+        setTokensFailed(false);
       } catch (err) {
         setError(`Could not load the asset list: ${errorMessage(err)}`);
+        setTokensFailed(true);
       }
     }
     void loadTokens();
-  }, [backend]);
+  }, [backend, tokenAttempt]);
 
   const token = useMemo(() => tokens.find(t => t.assetId === assetId), [tokens, assetId]);
   const covered = walletCovers(source, token);
@@ -311,6 +315,20 @@ export function Deposit(props: {
         <p className={notice({ tone: 'error' })} role="alert">
           {error}
         </p>
+      )}
+      {tokensFailed && (
+        <div className={actions()}>
+          <button
+            className={button()}
+            onClick={() => {
+              setError(null);
+              setTokensFailed(false);
+              setTokenAttempt(attempt => attempt + 1);
+            }}
+          >
+            Load the asset list again
+          </button>
+        </div>
       )}
 
       {preview && (
