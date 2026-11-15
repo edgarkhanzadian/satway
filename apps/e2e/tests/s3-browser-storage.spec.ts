@@ -7,6 +7,8 @@ const ONLY_COPY =
   'This browser could not keep a copy of the receipt, so the file that was just downloaded is the only copy. Keep it: it is what lets you recover your BTC if anything goes wrong.';
 const NO_STORAGE =
   'Sending from your wallet is turned off because this browser cannot save a record of the payment, which is what stops it being sent twice. Send it manually using the details above.';
+const STORAGE_BLOCKED =
+  'Connecting a Stacks wallet needs this site to store data in your browser, and this browser is blocking that (private browsing, or site data turned off for this site).';
 const CANNOT_SAVE =
   'This browser could not save a record of the payment, so the wallet was not asked to send. Send it manually using the details above, or allow this site to store data and reload.';
 
@@ -49,39 +51,18 @@ async function payManuallyToDone(
 }
 
 test.describe('S3. browser storage is unavailable or full', () => {
-  test.fail(
-    'APP ISSUE: with localStorage blocked, the Stacks wallet cannot even be connected ("The operation is insecure."), so nothing can be done (correct: connect works, wallet sending is turned off with the notice, the receipt downloads with the "only copy" warning and a manual payment completes)',
-    async ({ app, world }) => {
-      await blockStorage(app, 'localStorage');
-      await app.open();
-      await app.to.getByRole('button', { name: 'Connect Stacks wallet' }).click();
-      await expect(app.page.locator('connect-modal')).toBeVisible({ timeout: 3_000 });
-      await app.page
-        .locator('connect-modal')
-        .getByRole('button', { name: 'Connect' })
-        .first()
-        .click();
-      await expect(app.to.getByText('Connected', { exact: true })).toBeVisible();
-      await app.connectEvmWallet();
-      await app.fillDeposit({ amount: '100' });
-      await app.getQuote();
-      const started = await app.continue();
-      await expect(app.page.getByRole('alert')).toHaveText(ONLY_COPY);
-      await app.waitForProgress(PROGRESS.awaitingFunds);
-      await expect(app.page.getByText(NO_STORAGE)).toBeVisible();
-      await expectNoSendOffered(app);
-      await payManuallyToDone(app, world, started);
-    }
-  );
-
-  test('with localStorage blocked the page still loads and says why connecting failed', async ({
+  test('with localStorage blocked, the Stacks wallet panel says up front that the wallet connection needs browser storage and how to proceed, instead of failing inside the wallet library', async ({
     app,
     harness,
   }) => {
     await blockStorage(app, 'localStorage');
     await app.open();
-    await app.to.getByRole('button', { name: 'Connect Stacks wallet' }).click();
-    await expect(app.to.getByRole('alert')).toHaveText('The operation is insecure.');
+    await expect(app.to.getByRole('alert')).toHaveText(STORAGE_BLOCKED);
+    await expect(
+      app.to.getByText(/^Allow site data for this page, or open it outside private browsing/)
+    ).toBeVisible();
+    await expect(app.to.getByRole('button', { name: 'Connect Stacks wallet' })).toHaveCount(0);
+    await expect(app.page.getByText('The operation is insecure.')).toHaveCount(0);
     expect(harness.pageErrors).toEqual([]);
     await app.openRecover();
     await expect(app.page.getByLabel('Receipt file')).toBeEnabled();

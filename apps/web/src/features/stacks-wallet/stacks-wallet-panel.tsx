@@ -5,7 +5,7 @@ import { actions, button, details, notice } from 'portage-styles/recipes';
 
 import { errorMessage } from '@portage/core';
 
-import type { WalletAccount } from '../../shared/index.js';
+import { type WalletAccount, localStorageWorks } from '../../shared/index.js';
 import { connected, end, endLede, endTitle, short } from '../../ui/index.js';
 import { connectWallet, disconnectWallet } from './wallet.js';
 
@@ -17,6 +17,7 @@ export function StacksWalletPanel(props: {
 }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [storageWorks] = useState(localStorageWorks);
 
   async function onConnect() {
     setBusy(true);
@@ -29,6 +30,37 @@ export function StacksWalletPanel(props: {
       setBusy(false);
     }
   }
+
+  const notConnected = storageWorks ? (
+    <>
+      <p className={notice()}>
+        Required. It supplies the Stacks address that receives your sBTC and the Bitcoin key that
+        lets you take your BTC back if a deposit is never minted.
+      </p>
+      <div className={toActions}>
+        <button
+          className={button({ variant: 'primary' })}
+          disabled={busy}
+          onClick={() => void onConnect()}
+        >
+          {busy ? 'Connecting…' : 'Connect Stacks wallet'}
+        </button>
+      </div>
+    </>
+  ) : (
+    <>
+      <p className={notice({ tone: 'warn' })} role="alert">
+        Connecting a Stacks wallet needs this site to store data in your browser, and this browser
+        is blocking that (private browsing, or site data turned off for this site).
+      </p>
+      <p className={notice()}>
+        Allow site data for this page, or open it outside private browsing, then reload. A deposit
+        cannot be started without the wallet: it supplies the Stacks address that receives your sBTC
+        and the Bitcoin key that lets you take your BTC back, and there is no manual way to enter
+        them here. Checking a deposit from its receipt file still works on the Recover tab.
+      </p>
+    </>
+  );
 
   return (
     <section className={end({ side: 'to' })} aria-labelledby="stacks-title">
@@ -65,21 +97,7 @@ export function StacksWalletPanel(props: {
           </div>
         </>
       ) : (
-        <>
-          <p className={notice()}>
-            Required. It supplies the Stacks address that receives your sBTC and the Bitcoin key
-            that lets you take your BTC back if a deposit is never minted.
-          </p>
-          <div className={toActions}>
-            <button
-              className={button({ variant: 'primary' })}
-              disabled={busy}
-              onClick={() => void onConnect()}
-            >
-              {busy ? 'Connecting…' : 'Connect Stacks wallet'}
-            </button>
-          </div>
-        </>
+        notConnected
       )}
       {error && (
         <p className={notice({ tone: 'error' })} role="alert">
