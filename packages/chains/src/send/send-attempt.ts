@@ -12,7 +12,6 @@ import {
   lastValidBlockHeight,
   recordTx,
   sameAttempt,
-  sendRecordKey,
   sentRecord,
   signedBytes,
   uncertainRecord,
@@ -28,12 +27,6 @@ export const ALREADY_RECORDED_MESSAGE =
 
 export const NO_LOCK_MESSAGE =
   'This browser cannot stop two tabs from sending the same payment, so the wallet was not asked to send. Send it manually using the details above, or use an up-to-date browser.';
-
-export type SendLock = <T>(name: string, task: () => Promise<T>) => Promise<T>;
-
-export function sendLockName(target: SwapTarget): string {
-  return `${sendRecordKey(target)}:lock`;
-}
 
 export interface AttemptStart {
   target: SwapTarget;
@@ -52,34 +45,23 @@ export type AttemptOutcome =
   | { kind: 'uncertain'; record: UncertainRecord }
   | { kind: 'refused'; message: string };
 
-type Claim = { kind: 'claimed'; record: AttemptingRecord } | { kind: 'refused'; message: string };
-
-function claim(records: SendRecords, start: AttemptStart): Claim {
-  if (records.read(start.target, start.family) !== null)
+export async function attemptSend(
+  records: SendRecords,
+  start: AttemptStart,
+  send: (hooks: AttemptHooks) => Promise<string>
+): Promise<AttemptOutcome> {
+  const claim = await records.claim(start.target);
+  if (claim === 'unavailable') return { kind: 'refused', message: NO_LOCK_MESSAGE };
+  if (claim === 'busy') return { kind: 'refused', message: ALREADY_RECORDED_MESSAGE };
+  if (records.read(start.target, start.family) !== null) {
+    records.release(start.target);
     return { kind: 'refused', message: ALREADY_RECORDED_MESSAGE };
-  const record = attemptingRecord(start);
+  }
+  let record: AttemptingRecord = attemptingRecord(start);
   if (!records.write(record)) {
     records.clear(start.target);
     return { kind: 'refused', message: CANNOT_SAVE_MESSAGE };
   }
-  return { kind: 'claimed', record };
-}
-
-export async function attemptSend(
-  records: SendRecords,
-  lock: SendLock | null,
-  start: AttemptStart,
-  send: (hooks: AttemptHooks) => Promise<string>
-): Promise<AttemptOutcome> {
-  if (lock === null) return { kind: 'refused', message: NO_LOCK_MESSAGE };
-  let claimed: Claim;
-  try {
-    claimed = await lock(sendLockName(start.target), () => Promise.resolve(claim(records, start)));
-  } catch {
-    return { kind: 'refused', message: NO_LOCK_MESSAGE };
-  }
-  if (claimed.kind === 'refused') return claimed;
-  let record: AttemptingRecord = claimed.record;
   try {
     const tx = await send({
       onSigned(signed) {

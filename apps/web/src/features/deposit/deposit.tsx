@@ -48,7 +48,6 @@ import {
   downloadReceipt,
   latestRequests,
   rememberReceipt,
-  sendLock,
   sendRecords,
 } from '../../shared/index.js';
 import {
@@ -529,7 +528,7 @@ function Tracking(props: {
     walletCanSend: walletReady || solanaPayReady,
     sending,
     durable: durable || !walletReady,
-    lockable: sendLock !== null || !walletReady,
+    lockable: sendRecords.lockable() || !walletReady,
   });
 
   function showOutcome(outcome: AttemptOutcome) {
@@ -556,7 +555,6 @@ function Tracking(props: {
         showOutcome(
           await attemptSend(
             sendRecords,
-            sendLock,
             { target, family: 'solana', account: solanaAccount.address, now: new Date() },
             hooks =>
               sendSolanaDeposit(
@@ -578,7 +576,6 @@ function Tracking(props: {
         showOutcome(
           await attemptSend(
             sendRecords,
-            sendLock,
             { target, family: 'evm', account: source.address, now: new Date() },
             () => sendFromEvm(provider, transfer)
           )

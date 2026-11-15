@@ -1,34 +1,58 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { webLocksClaim } from '../../src/shared/send-records.js';
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.resetModules();
 });
 
-async function loadLock() {
-  const { sendLock } = await import('../../src/shared/send-records.js');
-  return sendLock;
+function fakeLockManager() {
+  const held = new Set<string>();
+  const requests: { name: string; mode: string | undefined; ifAvailable: boolean | undefined }[] =
+    [];
+  async function request(
+    name: string,
+    options: LockOptions,
+    task: (lock: Lock | null) => Promise<void>
+  ): Promise<void> {
+    requests.push({ name, mode: options.mode, ifAvailable: options.ifAvailable });
+    if (held.has(name)) {
+      await task(null);
+      return;
+    }
+    held.add(name);
+    try {
+      await task({ name, mode: options.mode ?? 'exclusive' });
+    } finally {
+      held.delete(name);
+    }
+  }
+  return { held, requests, request };
 }
 
-describe('sendLock', () => {
-  it('runs the task inside an exclusive Web Lock with the given name', async () => {
-    const requests: { name: string; mode: string | undefined }[] = [];
-    vi.stubGlobal('navigator', {
-      locks: {
-        request(name: string, options: { mode?: string }, task: () => Promise<unknown>) {
-          requests.push({ name, mode: options.mode });
-          return task();
-        },
-      },
-    });
-    const lock = await loadLock();
-    expect(lock).not.toBeNull();
-    expect(await lock?.('portage:send-record:v1:0xswap::lock', () => Promise.resolve(7))).toBe(7);
-    expect(requests).toEqual([{ name: 'portage:send-record:v1:0xswap::lock', mode: 'exclusive' }]);
+describe('webLocksClaim', () => {
+  it('claims an exclusive Web Lock without waiting, holds it until released, and lets one tab re-enter', async () => {
+    const fake = fakeLockManager();
+    const tabA = webLocksClaim(fake);
+    const tabB = webLocksClaim(fake);
+    const name = 'portage:send-record:v1:0xswap::lock';
+    expect(await tabA.claim(name)).toBe(true);
+    expect(fake.held.has(name)).toBe(true);
+    expect(await tabA.claim(name)).toBe(true);
+    expect(await tabB.claim(name)).toBe(false);
+    tabA.release(name);
+    await vi.waitFor(() => expect(fake.held.has(name)).toBe(false));
+    expect(await tabB.claim(name)).toBe(true);
+    expect(fake.requests[0]).toEqual({ name, mode: 'exclusive', ifAvailable: true });
   });
+});
 
-  it('is absent when the browser has no Web Locks, so wallet sending is refused', async () => {
+describe('sendRecords', () => {
+  it('refuses wallet sending when the browser has no Web Locks', async () => {
     vi.stubGlobal('navigator', {});
-    expect(await loadLock()).toBeNull();
+    const { sendRecords } = await import('../../src/shared/send-records.js');
+    expect(sendRecords.lockable()).toBe(false);
+    expect(await sendRecords.claim({ address: '0xswap', memo: null })).toBe('unavailable');
   });
 });

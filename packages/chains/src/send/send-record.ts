@@ -259,14 +259,31 @@ export interface KeyValueStore {
   removeItem(key: string): void;
 }
 
+export interface SendLock {
+  claim(name: string): Promise<boolean>;
+  release(name: string): void;
+}
+
+export function sendLockName(target: SwapTarget): string {
+  return `${sendRecordKey(target)}:lock`;
+}
+
+export type SendClaim = 'claimed' | 'busy' | 'unavailable';
+
 export interface SendRecords {
   read(target: SwapTarget, family: SendFamily): SendRecord | null;
   write(record: SendRecord): boolean;
   clear(target: SwapTarget): boolean;
   durable(): boolean;
+  lockable(): boolean;
+  claim(target: SwapTarget): Promise<SendClaim>;
+  release(target: SwapTarget): void;
 }
 
-export function createSendRecords(storage: () => KeyValueStore | null | undefined): SendRecords {
+export function createSendRecords(
+  storage: () => KeyValueStore | null | undefined,
+  lock: SendLock | null = null
+): SendRecords {
   const memory = new Map<string, string>();
 
   function stored(key: string): string | null {
@@ -305,13 +322,30 @@ export function createSendRecords(storage: () => KeyValueStore | null | undefine
     clear(target) {
       const key = sendRecordKey(target);
       memory.delete(key);
+      let cleared: boolean;
       try {
         const store = storage();
         store?.removeItem(key);
-        return (store?.getItem(key) ?? null) === null;
+        cleared = (store?.getItem(key) ?? null) === null;
       } catch {
-        return false;
+        cleared = false;
       }
+      lock?.release(sendLockName(target));
+      return cleared;
+    },
+    lockable() {
+      return lock !== null;
+    },
+    async claim(target) {
+      if (lock === null) return 'unavailable';
+      try {
+        return (await lock.claim(sendLockName(target))) ? 'claimed' : 'busy';
+      } catch {
+        return 'unavailable';
+      }
+    },
+    release(target) {
+      lock?.release(sendLockName(target));
     },
     durable() {
       try {

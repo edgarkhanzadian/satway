@@ -68,7 +68,10 @@ test.describe('M4. two tabs on the same awaiting deposit', () => {
     await harness.idle();
 
     expect(wallets.evm.behaviour.calls('eth_sendTransaction')).toHaveLength(1);
-    expect(wallets.evm.behaviour.calls('eth_chainId')).toHaveLength(1);
+    const switches = wallets.evm.behaviour.calls('wallet_switchEthereumChain').length;
+    expect(switches).toBeLessThanOrEqual(1);
+    expect(wallets.evm.behaviour.calls('eth_chainId')).toHaveLength(1 + switches);
+    expect(wallets.evm.behaviour.calls('eth_accounts')).toHaveLength(1);
     expect(world.evm.transactions.size).toBe(1);
     if (second) await expect(other.sendError).toHaveText(SEND_COPY.alreadyRecorded);
     await expect(app.sendButton).toHaveCount(0);

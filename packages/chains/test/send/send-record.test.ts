@@ -15,7 +15,6 @@ import {
   EXPIRED_MESSAGE,
   NO_LOCK_MESSAGE,
   type ResolveDeps,
-  type SendLock,
   WALLET_PROMPT_WINDOW_MS,
   attemptSend,
   confirmNothingSent,
@@ -24,17 +23,18 @@ import {
   promptWaitMs,
   resendRecord,
   resolveRecord,
-  sendLockName,
   sendPanel,
   settleFromProvider,
 } from '../../src/send/send-attempt.js';
 import {
   type KeyValueStore,
+  type SendLock,
   type SendRecord,
   type SwapTarget,
   UNREADABLE_RECORD_MESSAGE,
   attemptingRecord,
   createSendRecords,
+  sendLockName,
   sendRecordKey,
   swapTargetOf,
   uncertainRecord,
@@ -104,7 +104,7 @@ function fakeStorage(entries: [string, string][] = [], log: string[] = []): Fake
 
 function freshRecords() {
   const storage = fakeStorage();
-  return createSendRecords(() => storage);
+  return createSendRecords(() => storage, browserLocks().tab());
 }
 
 function fakeEvm(opts: { log: string[]; send(): Promise<unknown> }): Eip1193Provider {
@@ -147,49 +147,29 @@ function offered(record: SendRecord | null, swap: 'PENDING_DEPOSIT' | 'SUCCESS' 
   }).kind;
 }
 
-function gate() {
-  let open: (() => void) | null = null;
-  const promise = new Promise<void>(resolve => {
-    open = resolve;
-  });
-  return {
-    promise,
-    resolve() {
-      open?.();
-    },
-  };
-}
-
-async function settled(run: Promise<unknown>): Promise<void> {
-  try {
-    await run;
-  } catch {
-    return;
+function browserLocks(log: string[] = []) {
+  const owners = new Map<string, number>();
+  let tabs = 0;
+  function tab(): SendLock {
+    tabs += 1;
+    const id = tabs;
+    return {
+      claim(name) {
+        const owner = owners.get(name);
+        if (owner !== undefined && owner !== id) return Promise.resolve(false);
+        if (owner === undefined) log.push(`claim ${name}`);
+        owners.set(name, id);
+        return Promise.resolve(true);
+      },
+      release(name) {
+        if (owners.get(name) !== id) return;
+        owners.delete(name);
+        log.push(`release ${name}`);
+      },
+    };
   }
+  return { tab, owners };
 }
-
-function memoryLocks(log: string[] = []) {
-  const tails = new Map<string, Promise<void>>();
-  function lock<T>(name: string, task: () => Promise<T>): Promise<T> {
-    const prior = tails.get(name) ?? Promise.resolve();
-    async function held(): Promise<T> {
-      await prior;
-      log.push(`lock ${name}`);
-      try {
-        return await task();
-      } finally {
-        log.push(`unlock ${name}`);
-      }
-    }
-    const run = held();
-    tails.set(name, settled(run));
-    return run;
-  }
-  const typed: SendLock = lock;
-  return typed;
-}
-
-const LOCK = memoryLocks();
 
 describe('send record keys', () => {
   it('keys a record by the swap deposit address and memo, never by the Bitcoin address', () => {
@@ -204,7 +184,6 @@ describe('send record keys', () => {
     const log: string[] = [];
     const first = await attemptSend(
       records,
-      LOCK,
       start(ONE),
       evmSend(fakeEvm({ log, send: () => Promise.resolve(HASH) }))
     );
@@ -220,7 +199,7 @@ describe('send record keys', () => {
       ['portage:sent-tx:bc1pytlwt3qfg4rdrk3yxtmdhcjvy0l63yp7qh3jra5xwq8yt6w4fvhqyjl7dx', HASH],
       ['stxonector:sent-tx:bc1pytlwt3qfg4rdrk3yxtmdhcjvy0l63yp7qh3jra5xwq8yt6w4fvhqyjl7dx', HASH],
     ]);
-    const records = createSendRecords(() => storage);
+    const records = createSendRecords(() => storage, browserLocks().tab());
     expect(records.read(ONE, 'evm')).toBeNull();
     expect(offered(records.read(ONE, 'evm'), 'PENDING_DEPOSIT')).toBe('offer');
   });
@@ -271,42 +250,41 @@ describe('when the send button is offered', () => {
 });
 
 describe('attemptSend across tabs', () => {
-  it('claims the record inside the per-swap lock and asks the wallet only after releasing it', async () => {
+  it('claims the per-swap lock before writing the record, and keeps it once something may have been sent', async () => {
     const log: string[] = [];
     const storage = fakeStorage([], log);
-    const records = createSendRecords(() => storage);
+    const locks = browserLocks(log);
+    const records = createSendRecords(() => storage, locks.tab());
     await attemptSend(
       records,
-      memoryLocks(log),
       start(ONE),
       evmSend(fakeEvm({ log, send: () => Promise.resolve(HASH) }))
     );
     const name = sendLockName(ONE);
     expect(name).toBe(`${sendRecordKey(ONE)}:lock`);
     expect(log).toEqual([
-      `lock ${name}`,
+      `claim ${name}`,
       'store attempting',
-      `unlock ${name}`,
       'wallet eth_chainId',
       'wallet eth_accounts',
       'wallet eth_sendTransaction',
       'store sent',
     ]);
+    expect(locks.owners.has(name)).toBe(true);
   });
 
-  it('lets only one of two racing tabs ask the wallet', async () => {
-    const storage = fakeStorage();
-    const lock = memoryLocks();
-    const tabA = createSendRecords(() => storage);
-    const tabB = createSendRecords(() => storage);
+  it('lets only one of two racing tabs ask the wallet, even if the other cannot see the record yet', async () => {
+    const locks = browserLocks();
+    const tabA = createSendRecords(() => fakeStorage(), locks.tab());
+    const tabB = createSendRecords(() => fakeStorage(), locks.tab());
     let asked = 0;
     function send() {
       asked += 1;
       return Promise.resolve(HASH);
     }
     const outcomes = await Promise.all([
-      attemptSend(tabA, lock, start(ONE), send),
-      attemptSend(tabB, lock, start(ONE), send),
+      attemptSend(tabA, start(ONE), send),
+      attemptSend(tabB, start(ONE), send),
     ]);
     expect(asked).toBe(1);
     expect(outcomes.map(o => o.kind).sort()).toEqual(['refused', 'sent']);
@@ -316,50 +294,56 @@ describe('attemptSend across tabs', () => {
     });
   });
 
-  it('waits for another tab that holds the lock and then sees its record', async () => {
+  it('releases the lock when nothing was sent, so another tab can send', async () => {
     const storage = fakeStorage();
-    const lock = memoryLocks();
-    const other = createSendRecords(() => storage);
-    const held = gate();
-    const holding = lock(sendLockName(ONE), async () => {
-      await held.promise;
-      other.write(attemptingRecord(start(ONE)));
-    });
-    let asked = false;
-    const mine = attemptSend(
-      createSendRecords(() => storage),
-      lock,
-      start(ONE),
-      () => {
-        asked = true;
-        return Promise.resolve(HASH);
-      }
-    );
-    held.resolve();
-    await holding;
-    expect(await mine).toEqual({ kind: 'refused', message: ALREADY_RECORDED_MESSAGE });
-    expect(asked).toBe(false);
+    const locks = browserLocks();
+    const tabA = createSendRecords(() => storage, locks.tab());
+    const tabB = createSendRecords(() => storage, locks.tab());
+    const rejected = await attemptSend(tabA, start(ONE), () => Promise.reject(rejection));
+    expect(rejected).toMatchObject({ kind: 'cleared', rejected: true });
+    expect(locks.owners.size).toBe(0);
+    expect((await attemptSend(tabB, start(ONE), () => Promise.resolve(HASH))).kind).toBe('sent');
   });
 
-  it('does not lock other swaps', async () => {
-    const lock = memoryLocks();
-    const held = gate();
-    const holding = lock(sendLockName(TWO), () => held.promise);
-    const outcome = await attemptSend(freshRecords(), lock, start(ONE), () =>
-      Promise.resolve(HASH)
-    );
-    expect(outcome.kind).toBe('sent');
-    held.resolve();
-    await holding;
+  it('refuses and releases when the record is already there, and does not lock other swaps', async () => {
+    const storage = fakeStorage();
+    const locks = browserLocks();
+    const tab = createSendRecords(() => storage, locks.tab());
+    tab.write(attemptingRecord(start(ONE)));
+    let asked = false;
+    const outcome = await attemptSend(tab, start(ONE), () => {
+      asked = true;
+      return Promise.resolve(HASH);
+    });
+    expect(outcome).toEqual({ kind: 'refused', message: ALREADY_RECORDED_MESSAGE });
+    expect(asked).toBe(false);
+    expect(locks.owners.size).toBe(0);
+    expect((await attemptSend(tab, start(TWO), () => Promise.resolve(HASH))).kind).toBe('sent');
+  });
+
+  it('lets the user clear an unprovable attempt, which frees the lock for other tabs', async () => {
+    const storage = fakeStorage();
+    const locks = browserLocks();
+    const tabA = createSendRecords(() => storage, locks.tab());
+    await attemptSend(tabA, start(ONE), () => Promise.reject(new Error('socket closed')));
+    const record = tabA.read(ONE, 'evm');
+    if (!record) throw new Error('expected a record');
+    expect(locks.owners.size).toBe(1);
+    expect(confirmNothingSent(tabA, record)).toBe(true);
+    expect(locks.owners.size).toBe(0);
   });
 
   it.each([
     ['no lock is available', null],
-    ['the lock cannot be taken', () => Promise.reject(new Error('SecurityError'))],
+    [
+      'the lock cannot be taken',
+      { claim: () => Promise.reject(new Error('SecurityError')), release: () => undefined },
+    ],
   ])('refuses wallet sending when %s', async (_name, lock) => {
-    const records = freshRecords();
+    const records = createSendRecords(() => fakeStorage(), lock);
+    expect(records.lockable()).toBe(lock !== null);
     let asked = false;
-    const outcome = await attemptSend(records, lock, start(ONE), () => {
+    const outcome = await attemptSend(records, start(ONE), () => {
       asked = true;
       return Promise.resolve(HASH);
     });
@@ -373,10 +357,9 @@ describe('attemptSend on EVM', () => {
   it('writes the record before the wallet is asked anything', async () => {
     const log: string[] = [];
     const storage = fakeStorage([], log);
-    const records = createSendRecords(() => storage);
+    const records = createSendRecords(() => storage, browserLocks().tab());
     await attemptSend(
       records,
-      LOCK,
       start(ONE),
       evmSend(fakeEvm({ log, send: () => Promise.resolve(HASH) }))
     );
@@ -399,12 +382,12 @@ describe('attemptSend on EVM', () => {
     function release(hash: string) {
       for (const resolve of releases) resolve(hash);
     }
-    const tabA = createSendRecords(() => storage);
-    const tabB = createSendRecords(() => storage);
+    const tabA = createSendRecords(() => storage, browserLocks().tab());
+    const tabB = createSendRecords(() => storage, browserLocks().tab());
     const events = new EventTarget();
     const seen: (string | null)[] = [];
     const stop = watchSendRecords(events, () => seen.push(tabB.read(ONE, 'evm')?.state ?? null));
-    const sending = attemptSend(tabA, LOCK, start(ONE), () => pending);
+    const sending = attemptSend(tabA, start(ONE), () => pending);
     await vi.waitFor(() => expect(tabA.read(ONE, 'evm')).not.toBeNull());
     events.dispatchEvent(new Event('storage'));
     expect(tabB.read(ONE, 'evm')?.state).toBe('attempting');
@@ -414,7 +397,7 @@ describe('attemptSend on EVM', () => {
     events.dispatchEvent(new Event('storage'));
     stop();
     expect(seen).toEqual(['attempting', 'sent']);
-    const reopened = createSendRecords(() => storage);
+    const reopened = createSendRecords(() => storage, browserLocks().tab());
     expect(reopened.read(ONE, 'evm')).toMatchObject({ state: 'sent', tx: HASH });
   });
 
@@ -423,7 +406,6 @@ describe('attemptSend on EVM', () => {
     const log: string[] = [];
     const outcome = await attemptSend(
       records,
-      LOCK,
       start(ONE),
       evmSend(fakeEvm({ log, send: () => Promise.reject(rejection) }))
     );
@@ -440,7 +422,7 @@ describe('attemptSend on EVM', () => {
           args.method === 'eth_chainId' ? '0x2105' : ['0x000000000000000000000000000000000000dEaD']
         ),
     };
-    const outcome = await attemptSend(records, LOCK, start(ONE), evmSend(provider));
+    const outcome = await attemptSend(records, start(ONE), evmSend(provider));
     expect(outcome).toMatchObject({ kind: 'cleared', rejected: false });
     expect(records.read(ONE, 'evm')).toBeNull();
   });
@@ -449,7 +431,6 @@ describe('attemptSend on EVM', () => {
     const records = freshRecords();
     const outcome = await attemptSend(
       records,
-      LOCK,
       start(ONE),
       evmSend(fakeEvm({ log: [], send: () => Promise.reject(new Error('Request expired')) }))
     );
@@ -462,10 +443,10 @@ describe('attemptSend on EVM', () => {
 
   it('never asks the wallet twice for one swap', async () => {
     const storage = fakeStorage();
-    const records = createSendRecords(() => storage);
-    await attemptSend(records, LOCK, start(ONE), () => Promise.resolve(HASH));
+    const records = createSendRecords(() => storage, browserLocks().tab());
+    await attemptSend(records, start(ONE), () => Promise.resolve(HASH));
     let asked = false;
-    const second = await attemptSend(records, LOCK, start(ONE), () => {
+    const second = await attemptSend(records, start(ONE), () => {
       asked = true;
       return Promise.resolve(HASH);
     });
@@ -481,10 +462,10 @@ describe('attemptSend on EVM', () => {
       },
       removeItem: () => undefined,
     };
-    const records = createSendRecords(() => broken);
+    const records = createSendRecords(() => broken, browserLocks().tab());
     expect(records.durable()).toBe(false);
     let asked = false;
-    const outcome = await attemptSend(records, LOCK, start(ONE), () => {
+    const outcome = await attemptSend(records, start(ONE), () => {
       asked = true;
       return Promise.resolve(HASH);
     });
@@ -496,8 +477,8 @@ describe('attemptSend on EVM', () => {
 
   it('remembers a send in the tab when storage fails after the attempt began', async () => {
     const storage = fakeStorage();
-    const records = createSendRecords(() => storage);
-    const outcome = await attemptSend(records, LOCK, start(ONE), () => {
+    const records = createSendRecords(() => storage, browserLocks().tab());
+    const outcome = await attemptSend(records, start(ONE), () => {
       storage.setItem = () => {
         throw new Error('QuotaExceededError');
       };
@@ -505,7 +486,9 @@ describe('attemptSend on EVM', () => {
     });
     expect(outcome.kind).toBe('sent');
     expect(records.read(ONE, 'evm')?.state).toBe('sent');
-    expect(createSendRecords(() => storage).read(ONE, 'evm')?.state).toBe('attempting');
+    expect(createSendRecords(() => storage, browserLocks().tab()).read(ONE, 'evm')?.state).toBe(
+      'attempting'
+    );
   });
 });
 
@@ -541,7 +524,7 @@ describe('resolving an uncertain record', () => {
 
   it('lets the user clear a record nothing can prove, after checking their wallet', async () => {
     const records = freshRecords();
-    await attemptSend(records, LOCK, start(ONE), () => Promise.reject(new Error('socket closed')));
+    await attemptSend(records, start(ONE), () => Promise.reject(new Error('socket closed')));
     const record = records.read(ONE, 'evm');
     if (!record) throw new Error('expected a record');
     expect(await resolveRecord(records, record, noChecks)).toEqual({
@@ -555,7 +538,7 @@ describe('resolving an uncertain record', () => {
 
   it('treats the deposit as sent once 1Click reports it, and keeps the button hidden', async () => {
     const records = freshRecords();
-    await attemptSend(records, LOCK, start(ONE), () => Promise.reject(new Error('socket closed')));
+    await attemptSend(records, start(ONE), () => Promise.reject(new Error('socket closed')));
     const settled = settleFromProvider(records, records.read(ONE, 'evm'), 'KNOWN_DEPOSIT_TX');
     expect(settled).toMatchObject({ state: 'sent', via: 'provider' });
     expect(records.read(ONE, 'evm')?.state).toBe('sent');
@@ -565,7 +548,7 @@ describe('resolving an uncertain record', () => {
 
   it('reflects an EVM receipt for a known hash', async () => {
     const storage = fakeStorage();
-    const records = createSendRecords(() => storage);
+    const records = createSendRecords(() => storage, browserLocks().tab());
     const uncertain: SendRecord = {
       version: 1,
       state: 'uncertain',
@@ -645,7 +628,7 @@ describe('Solana sign-only sends', () => {
 
   async function failedFirstSend() {
     const storage = fakeStorage();
-    const records = createSendRecords(() => storage);
+    const records = createSendRecords(() => storage, browserLocks().tab());
     let fail = true;
     const net = chain({
       send() {
@@ -653,7 +636,7 @@ describe('Solana sign-only sends', () => {
         return Promise.resolve(SIG);
       },
     });
-    const outcome = await attemptSend(records, LOCK, start(SOLANA_SWAP, 'solana'), hooks =>
+    const outcome = await attemptSend(records, start(SOLANA_SWAP, 'solana'), hooks =>
       sendSolanaDeposit(input, signer, net.rpc, hooks)
     );
     fail = false;
@@ -663,7 +646,10 @@ describe('Solana sign-only sends', () => {
   it('persists the signature and signed bytes when the RPC send throws', async () => {
     const { storage, records, net, outcome } = await failedFirstSend();
     expect(outcome.kind).toBe('uncertain');
-    const record = createSendRecords(() => storage).read(SOLANA_SWAP, 'solana');
+    const record = createSendRecords(() => storage, browserLocks().tab()).read(
+      SOLANA_SWAP,
+      'solana'
+    );
     expect(record).toMatchObject({ state: 'uncertain', tx: SIG });
     if (!record || record.state === 'sent' || !record.signed) throw new Error('expected bytes');
     expect(record.signed.lastValidBlockHeight).toBe('500');
@@ -720,7 +706,7 @@ describe('Solana sign-only sends', () => {
     expect(result).toEqual({ kind: 'cleared', message: EXPIRED_MESSAGE });
     expect(records.read(SOLANA_SWAP, 'solana')).toBeNull();
     expect(offered(null, 'PENDING_DEPOSIT')).toBe('offer');
-    const fresh = await attemptSend(records, LOCK, start(SOLANA_SWAP, 'solana'), hooks =>
+    const fresh = await attemptSend(records, start(SOLANA_SWAP, 'solana'), hooks =>
       sendSolanaDeposit(input, signer, expired.rpc, hooks)
     );
     expect(fresh.kind).toBe('sent');
