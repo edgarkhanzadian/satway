@@ -73,6 +73,7 @@ const coreNetworkExports = [
   'fetchOnChainWithdrawalRequest',
   'fetchPayoutSpender',
   'fetchReclaimFeeRate',
+  'fetchSbtcBalance',
   'fetchSignersPublicKey',
   'fetchSignersPublicKeyVar',
   'fetchStacksTransaction',
@@ -89,6 +90,7 @@ const coreNetworkExports = [
   'observeDeposit',
   'observeWithdrawal',
   'prepareWithdrawal',
+  'previewWithdrawal',
   'registerOutputs',
   'snapshotOutpoints',
 ];

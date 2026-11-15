@@ -4,6 +4,7 @@ export * from './emily-withdrawal.js';
 export * from './emily.js';
 export * from './payout-spender.js';
 export * from './reclaim.js';
+export * from './sbtc-balance.js';
 export * from './signer-evidence.js';
 export * from './signers.js';
 export * from './stacks-api.js';
