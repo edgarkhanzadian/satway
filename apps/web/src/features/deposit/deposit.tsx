@@ -17,6 +17,7 @@ import {
   chainFamily,
   confirmNothingSent,
   evmTransactionState,
+  needsChainCheck,
   nextRefundField,
   promptWaitMs,
   quoteExpired,
@@ -557,7 +558,7 @@ function Tracking(props: {
   }, [record, promptOpen, promptTick]);
 
   const recordStamp = record ? `${record.state}|${record.startedAt}|${recordTx(record) ?? ''}` : '';
-  const checkable = record !== null && record.state !== 'sent' && recordTx(record) !== null;
+  const checkable = record !== null && needsChainCheck(record);
   const evmProvider = source?.kind === 'evm' ? source.provider : null;
 
   useEffect(() => {
@@ -577,7 +578,7 @@ function Tracking(props: {
     };
     async function check() {
       const current = readRecord();
-      if (current === null || current.state === 'sent') return;
+      if (current === null || !needsChainCheck(current)) return;
       try {
         const result = await resolveRecord(sendRecords, current, deps);
         if (!live) return;

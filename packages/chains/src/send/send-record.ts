@@ -37,6 +37,8 @@ export interface SentRecord {
   startedAt: string;
   tx: string | null;
   via: 'wallet' | 'chain' | 'provider';
+  confirmed?: boolean;
+  lastValidBlockHeight?: string;
 }
 
 export interface UncertainRecord {
@@ -80,6 +82,8 @@ const recordSchema: z.ZodType<SendRecord> = z.discriminatedUnion('state', [
     state: z.literal('sent'),
     tx: z.string().nullable(),
     via: z.union([z.literal('wallet'), z.literal('chain'), z.literal('provider')]),
+    confirmed: z.boolean().optional(),
+    lastValidBlockHeight: z.string().regex(/^\d+$/).optional(),
   }),
   z.object({
     ...base,
@@ -199,11 +203,26 @@ export function withSigned(
   };
 }
 
+export function sendConfirmed(record: SentRecord): boolean {
+  return record.confirmed ?? record.via !== 'wallet';
+}
+
+export function needsChainCheck(record: SendRecord): boolean {
+  if (recordTx(record) === null) return false;
+  return record.state !== 'sent' || !sendConfirmed(record);
+}
+
+function validityOf(record: SendRecord): string | undefined {
+  if (record.state === 'sent') return record.lastValidBlockHeight;
+  return record.signed?.lastValidBlockHeight;
+}
+
 export function sentRecord(
   record: SendRecord,
   tx: string | null,
   via: SentRecord['via']
 ): SentRecord {
+  const lastValid = validityOf(record);
   return {
     version: 1,
     state: 'sent',
@@ -213,6 +232,22 @@ export function sentRecord(
     startedAt: record.startedAt,
     tx,
     via,
+    confirmed: via !== 'wallet',
+    ...(via === 'wallet' && lastValid !== undefined ? { lastValidBlockHeight: lastValid } : {}),
+  };
+}
+
+export function confirmedRecord(record: SentRecord): SentRecord {
+  return {
+    version: 1,
+    state: 'sent',
+    swap: record.swap,
+    family: record.family,
+    account: record.account,
+    startedAt: record.startedAt,
+    tx: record.tx,
+    via: record.via,
+    confirmed: true,
   };
 }
 
@@ -245,8 +280,8 @@ export function signedBytes(record: SendRecord): Uint8Array | null {
 }
 
 export function lastValidBlockHeight(record: SendRecord): bigint | null {
-  if (record.state === 'sent' || record.signed === null) return null;
-  return BigInt(record.signed.lastValidBlockHeight);
+  const lastValid = validityOf(record);
+  return lastValid === undefined ? null : BigInt(lastValid);
 }
 
 export function sameAttempt(a: SendRecord | null, b: SendRecord | null): boolean {

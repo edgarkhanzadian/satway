@@ -45,7 +45,11 @@ test.describe('W2. the wallet side of WalletConnect, played in Node through the 
     app,
     world,
     wallets,
+    harness,
   }) => {
+    harness.allowConsoleErrors(
+      /^Failed to load resource: the server responded with a status of 400 \(Bad Request\)$/
+    );
     const wallet = await pairAndQuote(app, world, wallets.solana.address, [1, 8453]);
     await expect(app.from.getByText('EVM', { exact: true })).toBeVisible();
     await expect(app.from.getByText('Solana', { exact: true })).toBeVisible();

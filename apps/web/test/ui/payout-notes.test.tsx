@@ -163,7 +163,17 @@ describe('SendRecordView', () => {
       via: 'wallet',
     });
     expect(out).toContain('Do not send again.');
+    expect(out).toContain('Waiting for it to be confirmed on chain.');
     expect(out).not.toContain('<button');
+    const confirmed = view({
+      ...base,
+      state: 'sent',
+      family: 'evm',
+      tx: `0x${'ab'.repeat(32)}`,
+      via: 'wallet',
+      confirmed: true,
+    });
+    expect(confirmed).not.toContain('Waiting for it to be confirmed');
   });
 
   it('offers only the confirmation when nothing can be proven', () => {

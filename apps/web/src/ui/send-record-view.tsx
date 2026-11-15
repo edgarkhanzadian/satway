@@ -8,6 +8,7 @@ import {
   needsConfirmation,
   promptWaitMs,
   recordTx,
+  sendConfirmed,
 } from '@satway/chains';
 
 const sendStatus = cx(notice({ tone: 'status' }), css({ marginBlock: 'space.06' }));
@@ -34,15 +35,18 @@ export function SendRecordView(props: {
   const promptOpen = promptWaitMs(record, props.now) > 0;
   const confirmable = needsConfirmation(record) && !promptOpen;
   if (record.state === 'sent') {
+    const waiting = !sendConfirmed(record) && tx !== null;
     return (
       <p className={sendStatus} role="status">
         {tx ? (
           <>
-            Sent from your wallet. Transaction <code>{tx}</code>. Do not send again.
+            Sent from your wallet. Transaction <code>{tx}</code>.
+            {waiting ? ' Waiting for it to be confirmed on chain.' : ''} Do not send again.
           </>
         ) : (
           'A payment has been recorded for this swap. Do not send again.'
         )}
+        {waiting && props.note ? ` ${props.note}` : ''}
       </p>
     );
   }

@@ -9,9 +9,12 @@ import {
   type SwapTarget,
   type UncertainRecord,
   attemptingRecord,
+  confirmedRecord,
   lastValidBlockHeight,
+  needsChainCheck,
   recordTx,
   sameAttempt,
+  sendConfirmed,
   sentRecord,
   signedBytes,
   uncertainRecord,
@@ -124,9 +127,15 @@ export async function resolveRecord(
   record: SendRecord,
   deps: ResolveDeps
 ): Promise<Resolution> {
-  if (record.state === 'sent') return { kind: 'unchanged', note: null };
   const tx = recordTx(record);
-  if (tx === null) return { kind: 'unchanged', note: null };
+  if (tx === null || !needsChainCheck(record)) return { kind: 'unchanged', note: null };
+  function landed(): Resolution {
+    return {
+      kind: 'sent',
+      record: record.state === 'sent' ? confirmedRecord(record) : sentRecord(record, tx, 'chain'),
+    };
+  }
+  const sent = record.state === 'sent';
   if (record.family === 'solana') {
     const check = await deps.checkSolana({
       signature: tx,
@@ -134,28 +143,25 @@ export async function resolveRecord(
     });
     switch (check.status) {
       case 'landed':
-        return commit(records, record, {
-          kind: 'sent',
-          record: sentRecord(record, tx, 'chain'),
-        });
+        return commit(records, record, landed());
       case 'failed':
         return commit(records, record, { kind: 'cleared', message: LANDED_FAILED_MESSAGE });
       case 'expired':
         return commit(records, record, { kind: 'cleared', message: EXPIRED_MESSAGE });
       default:
-        return { kind: 'unchanged', note: SOLANA_PENDING_NOTE };
+        return { kind: 'unchanged', note: sent ? null : SOLANA_PENDING_NOTE };
     }
   }
   const state = await deps.evmState(tx);
   switch (state) {
     case 'succeeded':
-      return commit(records, record, { kind: 'sent', record: sentRecord(record, tx, 'chain') });
+      return commit(records, record, landed());
     case 'reverted':
       return commit(records, record, { kind: 'cleared', message: LANDED_FAILED_MESSAGE });
     case 'pending':
-      return { kind: 'unchanged', note: EVM_PENDING_NOTE };
+      return { kind: 'unchanged', note: sent ? null : EVM_PENDING_NOTE };
     default:
-      return { kind: 'unchanged', note: EVM_UNKNOWN_NOTE };
+      return { kind: 'unchanged', note: sent ? null : EVM_UNKNOWN_NOTE };
   }
 }
 
@@ -164,9 +170,12 @@ export function settleFromProvider(
   record: SendRecord | null,
   swap: OneClickSwapStatus | null | undefined
 ): SendRecord | null {
-  if (record === null || record.state === 'sent') return record;
+  if (record === null || (record.state === 'sent' && sendConfirmed(record))) return record;
   if (swap === undefined || swap === null || swap === 'PENDING_DEPOSIT') return record;
-  const sent = sentRecord(record, recordTx(record), 'provider');
+  const sent =
+    record.state === 'sent'
+      ? confirmedRecord(record)
+      : sentRecord(record, recordTx(record), 'provider');
   records.write(sent);
   return sent;
 }
