@@ -1,0 +1,19 @@
+export const SUBREQUEST_LIMIT = 50;
+export const RUN_SUBREQUEST_BUDGET = 40;
+
+export const LIST_COST = 1;
+export const SHARED_LOOKUP_COST = 2;
+export const IDLE_ADDRESS_COST = 2;
+export const RECORD_WRITE_COST = 1;
+export const REGISTRATION_COST = 4;
+
+export const MAX_ADDRESSES_PER_RUN = Math.floor(
+  (RUN_SUBREQUEST_BUDGET - LIST_COST - SHARED_LOOKUP_COST - REGISTRATION_COST - RECORD_WRITE_COST) /
+    IDLE_ADDRESS_COST
+);
+
+export const CRON_PERIOD_MINUTES = 2;
+export const FULL_CYCLE_RUNS = 20;
+export const MAX_ACTIVE_WATCHES = MAX_ADDRESSES_PER_RUN * FULL_CYCLE_RUNS;
+
+export const PAYOUT_GRACE_HOURS = 24;

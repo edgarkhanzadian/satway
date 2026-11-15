@@ -34,21 +34,24 @@ test.describe('M1. the swap status is unknown, so the wallet button is not offer
     api,
     wallets,
   }) => {
-    const held = world.hold({ service: 'oneclick', path: STATUS, callers: ['worker'] });
+    const held = world.hold({ service: 'oneclick', path: STATUS, callers: ['worker'], skip: 1 });
     const started = await startDeposit(app);
 
     await expect(app.page.getByText(SEND_COPY.checking, { exact: true })).toBeVisible();
     await expect(app.progress('Checking…')).toBeVisible();
     await expectNoSendOffered(app);
     await expectManualDetails(app, started);
-    expect(world.requestsTo('oneclick', { path: '/v0/status' })).toEqual([]);
+    expect(api.depositPosts().map(r => r.status)).toEqual([201]);
+    expect(world.requestsTo('oneclick', { path: '/v0/status' }).map(e => e.status)).toEqual([200]);
     expect(world.parked).toBe(1);
 
     held.release();
     await app.waitForProgress(PROGRESS.awaitingFunds);
     await expect(app.sendButton).toHaveText('Send from Test EVM Wallet');
     await expect(app.page.getByText(SEND_COPY.checking)).toHaveCount(0);
-    expect(world.requestsTo('oneclick', { path: '/v0/status' }).map(e => e.status)).toEqual([200]);
+    expect(world.requestsTo('oneclick', { path: '/v0/status' }).map(e => e.status)).toEqual([
+      200, 200,
+    ]);
     expect(api.requests.filter(r => r.path === '/status').map(r => r.status)).toEqual([200]);
     expectWalletNeverAskedToSend(wallets, world);
   });

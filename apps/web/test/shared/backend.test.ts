@@ -39,7 +39,7 @@ describe('createBackend', () => {
     ],
     [
       'a registration',
-      (b: ReturnType<typeof createBackend>) => b.register('aa', 'bb'),
+      (b: ReturnType<typeof createBackend>) => b.register('aa', 'bb', 'cc'),
       { address: 7 },
     ],
   ])('rejects malformed %s', async (_name, run, body) => {
@@ -66,6 +66,81 @@ describe('createBackend', () => {
   it('still surfaces the server message on an error status', async () => {
     answer({ message: 'refundTo is not valid' }, 400);
     await expect(createBackend(BASE).tokens()).rejects.toThrow('refundTo is not valid');
+  });
+});
+
+describe('createBackend register', () => {
+  function sentBody() {
+    const bodies: unknown[] = [];
+    vi.stubGlobal('fetch', (_url: string, init: RequestInit) => {
+      bodies.push(typeof init.body === 'string' ? JSON.parse(init.body) : null);
+      return Promise.resolve(
+        new Response(JSON.stringify({ address: 'bc1pwatched' }), { status: 201 })
+      );
+    });
+    return bodies;
+  }
+
+  it('always sends the swap deposit address', async () => {
+    const bodies = sentBody();
+    expect(await createBackend(BASE).register('aa', 'bb', '0xswap')).toEqual({
+      kind: 'registered',
+      address: 'bc1pwatched',
+    });
+    expect(bodies).toEqual([
+      { depositScript: 'aa', reclaimScript: 'bb', swapDepositAddress: '0xswap' },
+    ]);
+  });
+
+  it.each([
+    [
+      409,
+      { message: 'This swap is already registered', address: 'bc1pw' },
+      { kind: 'registered', address: 'bc1pw' },
+    ],
+    [
+      400,
+      { message: 'The swap does not pay this deposit address' },
+      { kind: 'rejected', status: 400, message: 'The swap does not pay this deposit address' },
+    ],
+    [
+      400,
+      { message: 'not a known 1Click swap', code: 'unknown-swap' },
+      { kind: 'rejected', status: 400, message: 'not a known 1Click swap', code: 'unknown-swap' },
+    ],
+    [
+      400,
+      { message: 'not a known 1Click swap', code: 'something-else' },
+      { kind: 'rejected', status: 400, message: 'not a known 1Click swap' },
+    ],
+    [
+      413,
+      { message: 'Body too large' },
+      { kind: 'rejected', status: 413, message: 'Body too large' },
+    ],
+    [
+      429,
+      { message: 'Too many requests. Try again later.' },
+      { kind: 'unavailable', status: 429, message: 'Too many requests. Try again later.' },
+    ],
+    [
+      503,
+      { message: 'Background tracking is at capacity.' },
+      { kind: 'unavailable', status: 503, message: 'Background tracking is at capacity.' },
+    ],
+    [500, 'oops', { kind: 'unavailable', status: 500, message: 'Request failed (500)' }],
+  ])('returns a %i answer as a value instead of throwing', async (status, body, expected) => {
+    answer(body, status);
+    expect(await createBackend(BASE).register('aa', 'bb', 'cc')).toEqual(expected);
+  });
+
+  it('returns an unreachable backend as unavailable', async () => {
+    vi.stubGlobal('fetch', () => Promise.reject(new TypeError('Failed to fetch')));
+    expect(await createBackend(BASE).register('aa', 'bb', 'cc')).toEqual({
+      kind: 'unavailable',
+      status: null,
+      message: 'The backend could not be reached',
+    });
   });
 });
 

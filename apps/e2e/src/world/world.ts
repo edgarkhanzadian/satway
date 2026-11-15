@@ -16,7 +16,7 @@ import { EvmChains, type EvmTransfer } from './evm.js';
 import { Hiro } from './hiro.js';
 import { type Reply, field, parseJson, text } from './http.js';
 import { type BitcoinKey, bitcoinKey, p2trOf, stacksAddressOf } from './keys.js';
-import { OneClick, type Swap, TOKENS } from './oneclick.js';
+import { BTC_ASSET_ID, OneClick, type Swap, TOKENS } from './oneclick.js';
 import { Rng } from './random.js';
 import { parseDepositScript } from './sbtc-scripts.js';
 import { type Credit, NATIVE_SOL_ASSET, SolanaChain } from './solana.js';
@@ -59,11 +59,13 @@ export interface FaultRule {
   callers?: readonly Caller[];
   outcome: FaultOutcome;
   times?: number;
+  skip?: number;
   label?: string;
 }
 
 interface ActiveFault extends FaultRule {
   remaining: number;
+  skipping: number;
 }
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -284,7 +286,11 @@ export class World {
   }
 
   addFault(rule: FaultRule): void {
-    this.faults.push({ ...rule, remaining: rule.times ?? Number.MAX_SAFE_INTEGER });
+    this.faults.push({
+      ...rule,
+      remaining: rule.times ?? Number.MAX_SAFE_INTEGER,
+      skipping: rule.skip ?? 0,
+    });
   }
 
   hold(rule: Omit<FaultRule, 'outcome' | 'times'> & { times?: number }): Gate {
@@ -315,6 +321,10 @@ export class World {
         (f.callers === undefined || f.callers.includes(caller))
     );
     if (!fault) return null;
+    if (fault.skipping > 0) {
+      fault.skipping -= 1;
+      return null;
+    }
     fault.remaining -= 1;
     return fault;
   }
@@ -495,6 +505,34 @@ export class World {
     return depositAddress === undefined
       ? this.oneClick.latestSwap()
       : this.oneClick.swap(depositAddress);
+  }
+
+  liveSwapFor(recipient: string, options: { deadlineMinutes?: number } = {}): Swap {
+    const deadline = new RealDate(
+      this.now().getTime() + (options.deadlineMinutes ?? 120) * 60_000
+    ).toISOString();
+    const reply = this.oneClick.serve(
+      'POST',
+      '/v0/quote',
+      new URLSearchParams(),
+      JSON.stringify({
+        dry: false,
+        swapType: 'EXACT_INPUT',
+        slippageTolerance: 100,
+        originAsset: TOKENS.usdcBase.assetId,
+        depositType: 'ORIGIN_CHAIN',
+        destinationAsset: BTC_ASSET_ID,
+        amount: '100000000',
+        refundTo: '0x2222222222222222222222222222222222222222',
+        refundType: 'ORIGIN_CHAIN',
+        recipient,
+        recipientType: 'DESTINATION_CHAIN',
+        deadline,
+      }),
+      new Headers()
+    );
+    if (reply.status !== 200) throw new Error(`1Click refused the quote: ${reply.body}`);
+    return this.oneClick.latestSwap();
   }
 
   reportDeposit(options: { depositAddress?: string; amount?: bigint } = {}): Swap {

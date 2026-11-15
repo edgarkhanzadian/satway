@@ -1,17 +1,18 @@
 import { buildDepositAddress } from '@portage/core';
 
+import { PROGRESS } from '../src/app/portage-app.js';
 import { API_ORIGIN, APP_ORIGIN } from '../src/config.js';
 import { expect, test } from '../src/fixtures.js';
-import { expectRegisteredWithEmily } from '../src/scenario/checks.js';
-import { startDeposit } from '../src/scenario/journeys.js';
+import { expectRegisteredWithEmily, notifierRun } from '../src/scenario/checks.js';
+import { FAILED_TO_LOAD, startDeposit } from '../src/scenario/journeys.js';
 import type { ApiWorker } from '../src/worker/worker.js';
 import { outpointKey } from '../src/world/bitcoin.js';
-import { field, json } from '../src/world/http.js';
+import { field, json, notFound, parseJson } from '../src/world/http.js';
 import { bitcoinKey, stacksAddressOf } from '../src/world/keys.js';
 import type { World } from '../src/world/world.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const NOTHING = { notified: [], finished: [], errors: [] };
+const STATUS = /^\/v0\/status$/;
 
 async function anotherUsersWatch(world: World, api: ApiWorker) {
   const owner = bitcoinKey(world.rng);
@@ -22,6 +23,7 @@ async function anotherUsersWatch(world: World, api: ApiWorker) {
     maxSignerFeeSats: 80_000,
     reclaimLockBlocks: 950,
   });
+  const swap = world.liveSwapFor(deposit.address);
   const response = await api.dispatch(
     new Request(`${API_ORIGIN}/deposits`, {
       method: 'POST',
@@ -29,6 +31,7 @@ async function anotherUsersWatch(world: World, api: ApiWorker) {
       body: JSON.stringify({
         depositScript: deposit.depositScript,
         reclaimScript: deposit.reclaimScript,
+        swapDepositAddress: swap.depositAddress,
       }),
     })
   );
@@ -38,7 +41,7 @@ async function anotherUsersWatch(world: World, api: ApiWorker) {
 
 function sortedReport(report: unknown): unknown {
   const out: Record<string, unknown> = {};
-  for (const key of ['watched', 'notified', 'finished', 'errors']) {
+  for (const key of ['watched', 'notified', 'finished', 'expired', 'errors']) {
     const value = field(report, key);
     const list: unknown[] | null = Array.isArray(value) ? value : null;
     out[key] = list
@@ -46,6 +49,12 @@ function sortedReport(report: unknown): unknown {
       : value;
   }
   return out;
+}
+
+function deadlineOf(api: ApiWorker, address: string): number {
+  const registrations = field(api.watch(address), 'registrations');
+  const first: unknown = Array.isArray(registrations) ? registrations[0] : undefined;
+  return Date.parse(String(field(first, 'deadline')));
 }
 
 test.describe('R8. the Worker watch for a deposit whose tab was closed', () => {
@@ -60,29 +69,32 @@ test.describe('R8. the Worker watch for a deposit whose tab was closed', () => {
     expect(field(watch, 'registrations')).toEqual([
       expect.objectContaining({
         swapDepositAddress: receipt.quoteResponse.quote.depositAddress,
+        deadline: receipt.quoteResponse.quoteRequest.deadline,
         priorOutpoints: [],
       }),
     ]);
+    expect(api.kv.metadataOf(`dep:${receipt.depositAddress}`)).toEqual({ registrations: 1 });
     for (let run = 0; run < 2; run++) {
-      expect(await api.runScheduled()).toEqual({ watched: 1, ...NOTHING });
+      expect(await api.runScheduled()).toEqual(notifierRun({ watched: 1 }));
       expect(api.watched()).toEqual([receipt.depositAddress]);
     }
     expect(world.requestsTo('emily', { method: 'POST' })).toEqual([]);
 
     world.reportDeposit();
     const payout = world.completeSwap();
-    expect(await api.runScheduled()).toEqual({
-      watched: 1,
-      notified: [{ address: receipt.depositAddress, txid: payout.outpoint.txid, vout: 0 }],
-      finished: [receipt.depositAddress],
-      errors: [],
-    });
+    expect(await api.runScheduled()).toEqual(
+      notifierRun({
+        watched: 1,
+        notified: [{ address: receipt.depositAddress, txid: payout.outpoint.txid, vout: 0 }],
+        finished: [receipt.depositAddress],
+      })
+    );
     expect(api.watched()).toEqual([]);
     expectRegisteredWithEmily(world, receipt, payout.outpoint, 'notifier');
-    expect(await api.runScheduled()).toEqual({ watched: 0, ...NOTHING });
+    expect(await api.runScheduled()).toEqual(notifierRun({ watched: 0 }));
   });
 
-  test('an abandoned watch expires after 14 days on the world clock', async ({
+  test('an abandoned watch ends 24 hours after the quote deadline; the 14-day KV TTL stays as the backstop', async ({
     app,
     world,
     api,
@@ -91,12 +103,21 @@ test.describe('R8. the Worker watch for a deposit whose tab was closed', () => {
     await app.page.close();
     const key = `dep:${receipt.depositAddress}`;
     expect(Math.abs((api.kv.expiresInMs(key) ?? 0) - 14 * DAY_MS)).toBeLessThan(10_000);
-    world.advanceClock(13 * DAY_MS);
-    expect(await api.runScheduled()).toEqual({ watched: 1, ...NOTHING });
-    world.advanceClock(DAY_MS + 60_000);
-    expect(await api.runScheduled()).toEqual({ watched: 0, ...NOTHING });
-    expect(api.kv.operations).toContain(`expired ${key}`);
+    const deadline = deadlineOf(api, receipt.depositAddress);
+    expect(deadline).toBe(Date.parse(String(receipt.quoteResponse.quoteRequest.deadline)));
+
+    world.advanceClock(deadline + DAY_MS - world.now().getTime() - 60_000);
+    expect(await api.runScheduled()).toEqual(notifierRun({ watched: 1 }));
+    expect(api.watched()).toEqual([receipt.depositAddress]);
+
+    world.advanceClock(2 * 60_000);
+    expect(await api.runScheduled()).toEqual(
+      notifierRun({ watched: 1, expired: [receipt.depositAddress] })
+    );
+    expect(api.kv.operations).toContain(`delete ${key}`);
+    expect(api.kv.operations).not.toContain(`expired ${key}`);
     expect(api.watched()).toEqual([]);
+    expect(await api.runScheduled()).toEqual(notifierRun({ watched: 0 }));
   });
 
   test('a failing registration for one address does not block another address', async ({
@@ -106,9 +127,10 @@ test.describe('R8. the Worker watch for a deposit whose tab was closed', () => {
   }) => {
     const { receipt } = await startDeposit(app);
     await app.page.close();
+    const ownSwap = receipt.quoteResponse.quote.depositAddress;
     const other = await anotherUsersWatch(world, api);
-    world.reportDeposit();
-    const payout = world.completeSwap();
+    world.reportDeposit({ depositAddress: ownSwap });
+    const payout = world.completeSwap({ depositAddress: ownSwap });
     const theirs = world.payTo(other.address, 50_000);
     world.addFault({
       service: 'emily',
@@ -117,11 +139,21 @@ test.describe('R8. the Worker watch for a deposit whose tab was closed', () => {
       outcome: json({ message: 'Service Unavailable' }, 503),
     });
     const ours = outpointKey(payout.outpoint);
-    expect(sortedReport(await api.runScheduled())).toEqual(
+    const report = await api.runScheduled();
+    expect(report).toEqual(
+      notifierRun({
+        watched: 2,
+        notified: [expect.anything()],
+        finished: [expect.anything()],
+        errors: [expect.anything()],
+      })
+    );
+    expect(sortedReport(report)).toEqual(
       sortedReport({
         watched: 2,
         notified: [{ address: other.address, txid: theirs.outpoint.txid, vout: 0 }],
         finished: [other.address],
+        expired: [],
         errors: [
           {
             address: receipt.depositAddress,
@@ -135,12 +167,59 @@ test.describe('R8. the Worker watch for a deposit whose tab was closed', () => {
     expect(world.emily.get(theirs.outpoint.txid, 0)?.status).toBe('pending');
 
     world.clearFaults();
-    expect(await api.runScheduled()).toEqual({
-      watched: 1,
-      notified: [{ address: receipt.depositAddress, txid: payout.outpoint.txid, vout: 0 }],
-      finished: [receipt.depositAddress],
-      errors: [],
+    expect(await api.runScheduled()).toEqual(
+      notifierRun({
+        watched: 1,
+        notified: [{ address: receipt.depositAddress, txid: payout.outpoint.txid, vout: 0 }],
+        finished: [receipt.depositAddress],
+      })
+    );
+  });
+
+  test('1Click does not know the new swap yet: the first registration is refused, the page retries and the watch lands in KV', async ({
+    app,
+    world,
+    api,
+    harness,
+  }) => {
+    harness.allowConsoleErrors(FAILED_TO_LOAD);
+    world.addFault({
+      service: 'oneclick',
+      method: 'GET',
+      path: STATUS,
+      callers: ['worker'],
+      times: 1,
+      outcome: notFound('Deposit address not found'),
+      label: 'status lags behind the quote',
     });
+    const { receipt } = await startDeposit(app);
+    expect(
+      api.depositPosts().map(r => [r.status, field(parseJson(r.responseBody), 'code')])
+    ).toEqual([[400, 'unknown-swap']]);
+    expect(api.watched()).toEqual([]);
+    await expect(app.page.getByRole('heading', { name: 'Deposit in progress' })).toBeVisible();
+    await app.waitForProgress(PROGRESS.awaitingFunds);
+
+    await app.fastForward(2_000);
+    await expect.poll(() => api.depositPosts().map(r => r.status)).toEqual([400, 201]);
+    expect(api.watched()).toEqual([receipt.depositAddress]);
+    expect(field(api.watch(receipt.depositAddress), 'registrations')).toEqual([
+      expect.objectContaining({ swapDepositAddress: receipt.quoteResponse.quote.depositAddress }),
+    ]);
+    await app.fastForward(30_000);
+    expect(api.depositPosts()).toHaveLength(2);
+
+    await app.page.close();
+    world.reportDeposit();
+    const payout = world.completeSwap();
+    expect(await api.runScheduled()).toEqual(
+      notifierRun({
+        watched: 1,
+        notified: [{ address: receipt.depositAddress, txid: payout.outpoint.txid, vout: 0 }],
+        finished: [receipt.depositAddress],
+      })
+    );
+    expectRegisteredWithEmily(world, receipt, payout.outpoint, 'notifier');
   });
 
   test.fail(

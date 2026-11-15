@@ -5,7 +5,7 @@ import {
   isMainnetTaproot,
 } from '@portage/core';
 
-export class BadRequest extends Error {}
+import { BadRequest } from './errors.js';
 
 type FeeConfig = Pick<
   NetworkConfig,

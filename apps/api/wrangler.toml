@@ -3,7 +3,9 @@ main = "src/index.ts"
 compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Runs the notifier every two minutes.
+# Runs the notifier every two minutes. CRON_PERIOD_MINUTES in
+# src/store/limits.ts must match: it sets which slice of the watches
+# each run visits (round robin by run index).
 [triggers]
 crons = ["*/2 * * * *"]
 
@@ -12,6 +14,28 @@ crons = ["*/2 * * * *"]
 [[kv_namespaces]]
 binding = "DEPOSITS"
 id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+# Workers Rate Limiting bindings, per client IP (CF-Connecting-IP).
+# Wrangler 3 only knows them as "unsafe" bindings; Wrangler 4.36+ calls
+# the same thing [[ratelimits]]. Counters are per Cloudflare location and
+# eventually consistent, so treat the limits as approximate.
+# The limit and period must match DEPOSIT_RATE and PROXY_RATE in
+# src/http/rate-limit.ts (the period is sent back as Retry-After, and the
+# same numbers drive the in-isolate fallback used when a binding is missing).
+# namespace_id is any positive integer unique within the Cloudflare account;
+# two bindings with the same namespace_id share counters.
+# Docs: https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/
+[[unsafe.bindings]]
+name = "DEPOSIT_RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "7301"
+simple = { limit = 5, period = 60 }
+
+[[unsafe.bindings]]
+name = "PROXY_RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "7302"
+simple = { limit = 120, period = 60 }
 
 [vars]
 # Comma-separated origins allowed to call this API.

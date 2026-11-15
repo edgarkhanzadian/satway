@@ -1,6 +1,6 @@
 import { PROGRESS, type PortageApp } from '../src/app/portage-app.js';
 import { expect, test } from '../src/fixtures.js';
-import { expectRegisteredWithEmily } from '../src/scenario/checks.js';
+import { expectRegisteredWithEmily, notifierRun } from '../src/scenario/checks.js';
 import { FAILED_TO_LOAD, payOut, startAwaitingFunds } from '../src/scenario/journeys.js';
 import type { Outpoint } from '../src/world/bitcoin.js';
 import { field, json, parseJson } from '../src/world/http.js';
@@ -57,12 +57,9 @@ test.describe('M10. dust and outsiders on the public Bitcoin deposit address', (
     await expectTooSmall(app, dust.outpoint);
     expectRegisteredWithEmily(world, receipt, payout.outpoint, 'page');
     expect(emilyPostsFor(world)).toEqual([payout.outpoint.txid]);
-    expect(await api.runScheduled()).toEqual({
-      watched: 1,
-      notified: [],
-      finished: [receipt.depositAddress],
-      errors: [],
-    });
+    expect(await api.runScheduled()).toEqual(
+      notifierRun({ watched: 1, finished: [receipt.depositAddress] })
+    );
     expect(emilyPostsFor(world)).toEqual([payout.outpoint.txid]);
   });
 
@@ -79,24 +76,20 @@ test.describe('M10. dust and outsiders on the public Bitcoin deposit address', (
     await expectTooSmall(app, dust.outpoint);
     await expect(app.sendButton).toHaveText('Send from Test EVM Wallet');
     for (let run = 0; run < 2; run++) {
-      expect(await api.runScheduled()).toEqual({
-        watched: 1,
-        notified: [],
-        finished: [],
-        errors: [],
-      });
+      expect(await api.runScheduled()).toEqual(notifierRun({ watched: 1 }));
       expect(api.watched()).toEqual([receipt.depositAddress]);
     }
     await app.page.close();
 
     world.reportDeposit();
     const payout = world.completeSwap();
-    expect(await api.runScheduled()).toEqual({
-      watched: 1,
-      notified: [{ address: receipt.depositAddress, txid: payout.outpoint.txid, vout: 0 }],
-      finished: [receipt.depositAddress],
-      errors: [],
-    });
+    expect(await api.runScheduled()).toEqual(
+      notifierRun({
+        watched: 1,
+        notified: [{ address: receipt.depositAddress, txid: payout.outpoint.txid, vout: 0 }],
+        finished: [receipt.depositAddress],
+      })
+    );
     expect(api.watched()).toEqual([]);
     expectRegisteredWithEmily(world, receipt, payout.outpoint, 'notifier');
     expect(emilyPostsFor(world)).toEqual([payout.outpoint.txid]);

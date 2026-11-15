@@ -2,10 +2,14 @@ import { parseWith, z } from '@portage/core';
 
 export interface KV {
   get(key: string): Promise<string | null>;
-  put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>;
+  put(
+    key: string,
+    value: string,
+    options?: { expirationTtl?: number; metadata?: Record<string, number> }
+  ): Promise<void>;
   delete(key: string): Promise<void>;
   list(options: { prefix: string; cursor?: string }): Promise<{
-    keys: { name: string }[];
+    keys: { name: string; metadata?: unknown }[];
     list_complete: boolean;
     cursor?: string;
   }>;
@@ -16,6 +20,7 @@ export interface WatchRegistration {
   priorOutpoints: string[] | null;
   priorTruncated?: boolean;
   swapDepositAddress?: string;
+  deadline?: string;
 }
 
 export interface RegisteredOutput {
@@ -45,6 +50,7 @@ const watchedDepositSchema: z.ZodType<WatchedDeposit> = z.looseObject({
         priorOutpoints: z.array(z.string().regex(OUTPOINT)).nullable(),
         priorTruncated: z.boolean().optional(),
         swapDepositAddress: z.string().optional(),
+        deadline: z.string().optional(),
       })
     )
     .optional(),
@@ -60,8 +66,10 @@ const watchedDepositSchema: z.ZodType<WatchedDeposit> = z.looseObject({
 });
 
 const PREFIX = 'dep:';
+const SIGNER_KEY_CACHE = 'meta:signer-key';
 export const WATCH_TTL_SECONDS = 14 * 24 * 60 * 60;
 export const MAX_REGISTRATIONS_PER_ADDRESS = 8;
+export const MAX_LIST_PAGES = 2;
 const MIN_TTL_SECONDS = 60;
 
 export function registrationsOf(deposit: WatchedDeposit): WatchRegistration[] {
@@ -88,21 +96,72 @@ export async function putWatched(
 ): Promise<void> {
   await kv.put(PREFIX + address, JSON.stringify(deposit), {
     expirationTtl: remainingTtl(deposit, now),
+    metadata: { registrations: registrationsOf(deposit).length },
   });
 }
 
-export async function getWatched(kv: KV, address: string): Promise<WatchedDeposit | null> {
-  const raw = await kv.get(PREFIX + address);
-  if (!raw) return null;
+function registrationsInMetadata(metadata: unknown): number {
+  const count: unknown =
+    typeof metadata === 'object' && metadata !== null
+      ? Reflect.get(metadata, 'registrations')
+      : undefined;
+  return typeof count === 'number' && Number.isSafeInteger(count) && count > 0 ? count : 1;
+}
+
+function parseWatched(raw: string, key: string): WatchedDeposit | null {
   try {
-    return parseWith(watchedDepositSchema, JSON.parse(raw), `KV record ${PREFIX + address}`);
+    return parseWith(watchedDepositSchema, JSON.parse(raw), `KV record ${key}`);
   } catch {
     return null;
   }
 }
 
+export async function getWatched(kv: KV, address: string): Promise<WatchedDeposit | null> {
+  const raw = await kv.get(PREFIX + address);
+  if (!raw) return null;
+  return parseWatched(raw, PREFIX + address);
+}
+
+export async function loadWatched(
+  kv: KV,
+  address: string
+): Promise<{ deposit: WatchedDeposit | null; broken: boolean }> {
+  const raw = await kv.get(PREFIX + address);
+  if (!raw) return { deposit: null, broken: false };
+  const deposit = parseWatched(raw, PREFIX + address);
+  return { deposit, broken: deposit === null };
+}
+
 export async function deleteWatched(kv: KV, address: string): Promise<void> {
   await kv.delete(PREFIX + address);
+}
+
+export async function listWatchedAddresses(
+  kv: KV,
+  maxPages = MAX_LIST_PAGES
+): Promise<{ addresses: string[]; registrations: number; truncated: boolean; pages: number }> {
+  const found = new Map<string, number>();
+  let cursor: string | undefined;
+  let pages = 0;
+  do {
+    const page = await kv.list({ prefix: PREFIX, cursor });
+    pages += 1;
+    for (const k of page.keys) {
+      found.set(k.name.slice(PREFIX.length), registrationsInMetadata(k.metadata));
+    }
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor && pages < maxPages);
+  return {
+    addresses: [...found.keys()].sort(),
+    registrations: [...found.values()].reduce((sum, n) => sum + n, 0),
+    truncated: cursor !== undefined,
+    pages,
+  };
+}
+
+export async function countRegistrations(kv: KV, maxPages = MAX_LIST_PAGES): Promise<number> {
+  const { registrations, truncated } = await listWatchedAddresses(kv, maxPages);
+  return truncated ? Number.MAX_SAFE_INTEGER : registrations;
 }
 
 export async function listWatched(
@@ -117,16 +176,41 @@ export async function listWatched(
       if (out.length >= max) return out;
       const raw = await kv.get(name);
       if (!raw) continue;
-      try {
-        out.push({
-          address: name.slice(PREFIX.length),
-          deposit: parseWith(watchedDepositSchema, JSON.parse(raw), `KV record ${name}`),
-        });
-      } catch {
-        await kv.delete(name);
-      }
+      const deposit = parseWatched(raw, name);
+      if (deposit) out.push({ address: name.slice(PREFIX.length), deposit });
+      else await kv.delete(name);
     }
     cursor = page.list_complete ? undefined : page.cursor;
   } while (cursor);
   return out;
+}
+
+export interface CachedSignerKey {
+  key: string;
+  fetchedAt: number;
+}
+
+const cachedSignerKeySchema: z.ZodType<CachedSignerKey> = z.looseObject({
+  key: z.string().regex(/^[0-9a-f]{64}$/),
+  fetchedAt: z.number(),
+});
+
+export async function getCachedSignerKey(kv: KV): Promise<CachedSignerKey | null> {
+  const raw = await kv.get(SIGNER_KEY_CACHE);
+  if (!raw) return null;
+  try {
+    return parseWith(cachedSignerKeySchema, JSON.parse(raw), `KV record ${SIGNER_KEY_CACHE}`);
+  } catch {
+    return null;
+  }
+}
+
+export async function putCachedSignerKey(
+  kv: KV,
+  entry: CachedSignerKey,
+  ttlSeconds: number
+): Promise<void> {
+  await kv.put(SIGNER_KEY_CACHE, JSON.stringify(entry), {
+    expirationTtl: Math.max(MIN_TTL_SECONDS, ttlSeconds),
+  });
 }

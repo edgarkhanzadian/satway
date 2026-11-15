@@ -10,6 +10,13 @@ import {
   z,
 } from '@portage/core';
 
+export const UNKNOWN_SWAP = 'unknown-swap';
+
+export type BackgroundRegistration =
+  | { kind: 'registered'; address: string }
+  | { kind: 'rejected'; status: number; message: string; code?: typeof UNKNOWN_SWAP }
+  | { kind: 'unavailable'; status: number | null; message: string };
+
 export interface Backend {
   tokens(): Promise<OneClickToken[]>;
   quote(request: OneClickQuoteRequest): Promise<OneClickQuoteResponse>;
@@ -17,17 +24,24 @@ export interface Backend {
   register(
     depositScript: string,
     reclaimScript: string,
-    swapDepositAddress?: string
-  ): Promise<{ address: string }>;
+    swapDepositAddress: string
+  ): Promise<BackgroundRegistration>;
 }
 
 const registeredSchema = z.looseObject({ address: z.string() });
+const unknownSwapSchema = z.looseObject({ code: z.literal(UNKNOWN_SWAP) });
 
 function endpointOf(url: string): string {
   return url.split('?')[0] ?? url;
 }
 
-async function call<T>(url: string, schema: z.ZodType<T>, init?: RequestInit): Promise<T> {
+function messageOf(body: unknown): string | undefined {
+  const message =
+    typeof body === 'object' && body !== null && 'message' in body ? body.message : undefined;
+  return typeof message === 'string' ? message : undefined;
+}
+
+async function send(url: string, init?: RequestInit): Promise<{ res: Response; body: unknown }> {
   const res = await fetch(url, init);
   const text = await res.text();
   let body: unknown;
@@ -36,12 +50,31 @@ async function call<T>(url: string, schema: z.ZodType<T>, init?: RequestInit): P
   } catch {
     body = null;
   }
-  if (!res.ok) {
-    const message =
-      typeof body === 'object' && body !== null && 'message' in body ? body.message : undefined;
-    throw new Error(typeof message === 'string' ? message : `Request failed (${res.status})`);
-  }
+  return { res, body };
+}
+
+async function call<T>(url: string, schema: z.ZodType<T>, init?: RequestInit): Promise<T> {
+  const { res, body } = await send(url, init);
+  if (!res.ok) throw new Error(messageOf(body) ?? `Request failed (${res.status})`);
   return parseWith(schema, body, `the backend at ${endpointOf(url)}`);
+}
+
+function registrationFrom(url: string, res: Response, body: unknown): BackgroundRegistration {
+  const message = messageOf(body) ?? `Request failed (${res.status})`;
+  if (res.ok || res.status === 409) {
+    const { address } = parseWith(registeredSchema, body, `the backend at ${endpointOf(url)}`);
+    return { kind: 'registered', address };
+  }
+  if (res.status >= 400 && res.status < 500 && res.status !== 429) {
+    const unknownSwap = res.status === 400 && unknownSwapSchema.safeParse(body).success;
+    return {
+      kind: 'rejected',
+      status: res.status,
+      message,
+      ...(unknownSwap ? { code: UNKNOWN_SWAP } : {}),
+    };
+  }
+  return { kind: 'unavailable', status: res.status, message };
 }
 
 export function createBackend(baseUrl: string): Backend {
@@ -62,11 +95,15 @@ export function createBackend(baseUrl: string): Backend {
       if (depositMemo) params.set('depositMemo', depositMemo);
       return call(`${base}/status?${params.toString()}`, oneClickStatusResponseSchema);
     },
-    register: (depositScript, reclaimScript, swapDepositAddress) =>
-      call(
-        `${base}/deposits`,
-        registeredSchema,
-        jsonPost({ depositScript, reclaimScript, swapDepositAddress })
-      ),
+    async register(depositScript, reclaimScript, swapDepositAddress) {
+      const url = `${base}/deposits`;
+      let sent: { res: Response; body: unknown };
+      try {
+        sent = await send(url, jsonPost({ depositScript, reclaimScript, swapDepositAddress }));
+      } catch {
+        return { kind: 'unavailable', status: null, message: 'The backend could not be reached' };
+      }
+      return registrationFrom(url, sent.res, sent.body);
+    },
   };
 }

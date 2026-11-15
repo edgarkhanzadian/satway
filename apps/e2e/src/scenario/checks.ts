@@ -79,6 +79,35 @@ export function expectWatchRegistered(
   expect(field(list.at(-1), 'swapDepositAddress')).toBe(receipt.quoteResponse.quote.depositAddress);
 }
 
+export interface NotifierRun {
+  watched: number;
+  processed?: number;
+  skipped?: number;
+  notified?: unknown[];
+  finished?: unknown[];
+  expired?: unknown[];
+  deferred?: unknown[];
+  errors?: unknown[];
+}
+
+export const NOTIFIER_BUDGET = 40;
+
+export function notifierRun(run: NotifierRun): Record<string, unknown> {
+  return {
+    runIndex: expect.any(Number),
+    budget: NOTIFIER_BUDGET,
+    subrequests: expect.any(Number),
+    processed: run.watched,
+    skipped: 0,
+    notified: [],
+    finished: [],
+    expired: [],
+    deferred: [],
+    errors: [],
+    ...run,
+  };
+}
+
 export function expectRegisteredWithEmily(
   world: World,
   receipt: ReceiptFile,

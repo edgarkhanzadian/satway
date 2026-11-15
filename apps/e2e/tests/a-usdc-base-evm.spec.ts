@@ -5,6 +5,7 @@ import {
   expectReceiptMatchesWorld,
   expectRegisteredWithEmily,
   expectWatchRegistered,
+  notifierRun,
 } from '../src/scenario/checks.js';
 import { PROVIDER_FEE_BPS, TOKENS, WITHDRAW_FEE_SATS } from '../src/world/oneclick.js';
 
@@ -90,12 +91,7 @@ test.describe('A. USDC on Base from the injected EVM wallet', () => {
     await expect(app.sendButton).toHaveCount(0);
 
     const report = await api.runScheduled();
-    expect(report).toEqual({
-      watched: 1,
-      notified: [],
-      finished: [receipt.depositAddress],
-      errors: [],
-    });
+    expect(report).toEqual(notifierRun({ watched: 1, finished: [receipt.depositAddress] }));
     expect(api.watched()).toEqual([]);
     expectRegisteredWithEmily(world, receipt, payout.outpoint, 'page');
 
@@ -129,12 +125,13 @@ test.describe('A. USDC on Base from the injected EVM wallet', () => {
 
     const payout = world.completeSwap();
     const report = await api.runScheduled();
-    expect(report).toEqual({
-      watched: 1,
-      notified: [{ address: receipt.depositAddress, txid: payout.outpoint.txid, vout: 0 }],
-      finished: [receipt.depositAddress],
-      errors: [],
-    });
+    expect(report).toEqual(
+      notifierRun({
+        watched: 1,
+        notified: [{ address: receipt.depositAddress, txid: payout.outpoint.txid, vout: 0 }],
+        finished: [receipt.depositAddress],
+      })
+    );
     expectRegisteredWithEmily(world, receipt, payout.outpoint, 'notifier');
     expect(api.watched()).toEqual([]);
     world.mine(1);

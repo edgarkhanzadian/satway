@@ -1,6 +1,6 @@
 import { PROGRESS, type PortageApp } from '../src/app/portage-app.js';
 import { expect, test } from '../src/fixtures.js';
-import { expectRegisteredWithEmily } from '../src/scenario/checks.js';
+import { expectRegisteredWithEmily, notifierRun } from '../src/scenario/checks.js';
 import {
   FAILED_TO_LOAD,
   NET_FAILED,
@@ -96,28 +96,29 @@ test.describe('R3. registering the payout with Emily', () => {
     await expect(notice).toBeVisible();
 
     const report = await api.runScheduled();
-    expect(report).toEqual({
-      watched: 1,
-      notified: [],
-      finished: [],
-      errors: [
-        {
-          address: receipt.depositAddress,
-          outpoint: op,
-          message: `Registering ${op} with the sBTC API failed: ${reason}`,
-        },
-      ],
-    });
+    expect(report).toEqual(
+      notifierRun({
+        watched: 1,
+        errors: [
+          {
+            address: receipt.depositAddress,
+            outpoint: op,
+            message: `Registering ${op} with the sBTC API failed: ${reason}`,
+          },
+        ],
+      })
+    );
     expect(api.watched()).toEqual([receipt.depositAddress]);
     expect(world.emily.get(payout.outpoint.txid, 0)).toBeNull();
 
     world.clearFaults();
-    expect(await api.runScheduled()).toEqual({
-      watched: 1,
-      notified: [{ address: receipt.depositAddress, txid: payout.outpoint.txid, vout: 0 }],
-      finished: [receipt.depositAddress],
-      errors: [],
-    });
+    expect(await api.runScheduled()).toEqual(
+      notifierRun({
+        watched: 1,
+        notified: [{ address: receipt.depositAddress, txid: payout.outpoint.txid, vout: 0 }],
+        finished: [receipt.depositAddress],
+      })
+    );
   });
 
   test('the Bitcoin API serves the wrong raw transaction: nothing reaches Emily and the notice says why', async ({

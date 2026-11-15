@@ -12,7 +12,11 @@ import {
 
 import { prepareDeposit, toBaseUnits } from '../../../src/features/deposit/flow.js';
 import { pickAccount } from '../../../src/features/stacks-wallet/wallet.js';
-import { type Backend, createBackend } from '../../../src/shared/backend.js';
+import {
+  type Backend,
+  type BackgroundRegistration,
+  createBackend,
+} from '../../../src/shared/backend.js';
 import { checkProgress } from '../../../src/shared/progress.js';
 import {
   MAX_UNREADABLE_BACKUPS,
@@ -288,7 +292,8 @@ function world(w: World = {}) {
     register(depositScript) {
       return later(() => {
         registered.push(depositScript);
-        return { address: D.address };
+        const done: BackgroundRegistration = { kind: 'registered', address: D.address };
+        return done;
       });
     },
   };

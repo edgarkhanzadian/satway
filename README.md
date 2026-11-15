@@ -166,8 +166,12 @@ Worker and the wallets saw) in `apps/e2e/test-results`; the HTML report is in
   and the build refuses to run if `apps/web` has `.env` files the config would read, so no
   `.env*` file is ever loaded. `apps/web/dist` and `check:bundle` are untouched. A tiny static
   server (`scripts/serve-web.ts`, Playwright's `webServer`) serves it on `127.0.0.1:4391`.
-- **The Worker**: `src/worker/worker.ts` calls the exported `handle(request, env, fetchFn)` from
-  `@portage/api` with an in-memory KV (`src/worker/kv.ts`, pages its `list` two keys at a time)
+- **The Worker**: `src/worker/worker.ts` calls the exported
+  `handle(request, env, fetchFn, options)` from `@portage/api` with an in-memory KV
+  (`src/worker/kv.ts`: key metadata on `put` and in `list`, 1,000 keys per `list` page like
+  Cloudflare), fake rate-limit bindings on the world clock with the `wrangler.toml` limits
+  (`src/worker/rate-limiter.ts`, `api.limiters`; `deny = true` refuses), a signer-key cache and
+  fallback limiters of its own (the module-level ones would leak between tests in one process)
   and a `fetchFn` that goes to the world. `api.runScheduled()` calls the Worker's real
   `scheduled` handler; for that one awaited call the test process's global `fetch` points at
   the world (the handler uses the global) and the logged report is captured. This exercises
@@ -197,7 +201,9 @@ landing credits the swap deposit address. Useful controls: `world.reportDeposit(
 send), `world.completeSwap()` (pays BTC and reports SUCCESS), `world.mine(n)`,
 `world.signers.accept|sweep|confirm|fail|mint(outpoint)`, `world.payTo(address, sats)` (dust
 and outsiders), `world.addFault({ service, method, path, rpcMethod, bodyIncludes, callers,
-outcome: reply | 'hang' | 'network-error', times })`, `world.hold(rule)` (answers the matching
+outcome: reply | 'hang' | 'network-error', times, skip })` (`skip` lets that many matching
+requests through first), `world.liveSwapFor(address)` (a live 1Click quote made outside the
+page, for registering a watch directly), `world.hold(rule)` (answers the matching
 request normally once the returned gate is released; `harness.idle()` does not wait for held
 requests), and `world.log`, `world.requestsTo(service, filter)` for assertions.
 
@@ -272,14 +278,16 @@ ticks). Bitcoin blocks only advance with `world.mine()`; Solana blocks also adva
 time. The fake clock reports an error thrown in a timer as a console error, or as a failed
 `tick()` when the jump ran it, so both still fail the test.
 
-The Worker code reads `new Date()` and `Date.now()` itself (`handle()` takes no clock), so for
+The Worker code reads `new Date()` and `Date.now()` itself (the e2e Worker also passes the world
+clock as `handle()`'s `now` option, but the proxy and the scheduled handler read it directly), so for
 each awaited Worker call (`dispatch`, `runScheduled`) `src/worker/worker.ts` replaces the
 global `Date` with one that reads the world clock, and puts the real one back when the last
 overlapping call ends (the fixture also resets it between tests). Code in the test process
 that must not see world time uses `realNow()` from `src/world/clock.ts`; the harness measures
 quiet periods with `performance.now()`. The in-memory KV keeps each entry's `expirationTtl`,
 refuses one below 60 seconds like Cloudflare KV, and drops the entry once the world clock
-passes it, so the 14-day watch TTL, the quote deadline window and the 15-minute wallet prompt
+passes it, so the 14-day watch TTL, the end of a watch 24 hours after its quote deadline,
+the quote deadline window and the 15-minute wallet prompt
 window all behave as they would after that much real time.
 
 ### Adding a scenario
@@ -425,6 +433,41 @@ npx wrangler deploy
 
 Build the web app with `VITE_API_URL` set to the deployed API's URL; the
 Content-Security-Policy is generated from it.
+
+The two rate-limit bindings in `wrangler.toml` (`DEPOSIT_RATE_LIMITER`,
+`PROXY_RATE_LIMITER`) need no setup beyond the file: pick `namespace_id`s
+that no other Worker on the account uses. They are written as
+`[[unsafe.bindings]]` because the pinned Wrangler 3 predates the
+`[[ratelimits]]` key. Their limits must match `DEPOSIT_RATE` and `PROXY_RATE`
+in `apps/api/src/http/rate-limit.ts`. Without the bindings the Worker falls
+back to a per-isolate counter, which is much weaker.
+
+What `POST /deposits` accepts, and what it costs:
+
+- Body: `{ depositScript, reclaimScript, swapDepositAddress }`, at most 2 KiB
+  (413 above). `swapDepositAddress` (the 1Click deposit address) is required.
+- Checked in this order, cheapest first: script shape (the deposit script
+  carries `maxSignerFeeSats` and a standard principal, the reclaim script
+  carries `reclaimLockBlocks`), then the per-IP rate limit (429 with
+  `Retry-After`), then the signer key (it must be the current aggregate key
+  from the sBTC registry; cached 10 minutes in memory and in KV), then
+  duplicates (409), then `GET /v0/status` at 1Click with the Worker's key
+  (the swap must pay the derived address in native BTC, not be refunded or
+  failed, and its deadline must not have passed), then the cap on watched
+  swaps (`MAX_ACTIVE_WATCHES`, counted per swap from KV key metadata in one
+  list call; 503 with `Retry-After` when full), then the mempool.space snapshot
+  and one KV write. Invalid requests make no outbound call; 503 means an
+  upstream (Hiro, 1Click) could not be read. When 1Click does not know the swap
+  the 400 body carries `code: "unknown-swap"`; the web app retries that one
+  answer three times over about ten seconds in the background, since 1Click's
+  status can lag behind the quote it just created.
+- The scheduled run visits at most `MAX_ADDRESSES_PER_RUN` watches, in a window
+  that rotates over the sorted keys each run, and makes at most
+  `RUN_SUBREQUEST_BUDGET` fetch and KV calls (under the Workers Free limit of
+  50 subrequests). A watch ends when its payout is registered, or when every
+  swap on it is 24 hours past its deadline with no eligible payout unregistered,
+  and in any case after 14 days (the KV TTL). The constants live in
+  `apps/api/src/store/limits.ts`.
 
 ## Notes
 

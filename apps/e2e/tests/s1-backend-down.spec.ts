@@ -1,6 +1,6 @@
 import { PROGRESS, type PortageApp } from '../src/app/portage-app.js';
 import { expect, test } from '../src/fixtures.js';
-import { expectRegisteredWithEmily } from '../src/scenario/checks.js';
+import { expectRegisteredWithEmily, notifierRun } from '../src/scenario/checks.js';
 import {
   REFUSED,
   SEND_COPY,
@@ -115,12 +115,7 @@ test.describe('S1. our backend (the Worker) is down', () => {
     await app.sendFromWallet();
     const payout = await finishJourney(app, world);
     expectRegisteredWithEmily(world, started.receipt, payout.outpoint, 'page');
-    expect(await api.runScheduled()).toEqual({
-      watched: 0,
-      notified: [],
-      finished: [],
-      errors: [],
-    });
+    expect(await api.runScheduled()).toEqual(notifierRun({ watched: 0 }));
   });
 
   test('during tracking: the swap status becomes unknown, no send is offered, and it recovers when the backend returns', async ({

@@ -3,6 +3,7 @@ import { buildDepositAddress } from '@portage/core';
 
 import { API_ORIGIN, APP_ORIGIN } from '../src/config.js';
 import { expect, test } from '../src/fixtures.js';
+import { notifierRun } from '../src/scenario/checks.js';
 import { workerClockActive } from '../src/worker/worker.js';
 import { realNow } from '../src/world/clock.js';
 import { field } from '../src/world/http.js';
@@ -38,14 +39,19 @@ test.describe('harness self-checks: the Worker runs on the world clock', () => {
   }) => {
     world.advanceClock(3 * DAY_MS);
     const deposit = someDeposit(world);
+    const swap = world.liveSwapFor(deposit.address);
     const response = await api.dispatch(
       post('/deposits', {
         depositScript: deposit.depositScript,
         reclaimScript: deposit.reclaimScript,
-        swapDepositAddress: '0x1111111111111111111111111111111111111111',
+        swapDepositAddress: swap.depositAddress,
       })
     );
     expect(response.status).toBe(201);
+    expect(await response.json()).toEqual({
+      address: deposit.address,
+      deadline: field(field(swap.quote.response, 'quoteRequest'), 'deadline'),
+    });
     expect(workerClockActive()).toBe(false);
     expect(Math.abs(Date.now() - realNow())).toBeLessThan(1_000);
 
@@ -60,12 +66,7 @@ test.describe('harness self-checks: the Worker runs on the world clock', () => {
     expect(api.watched()).toEqual([deposit.address]);
     world.advanceClock(2 * 60_000);
     expect(api.watched()).toEqual([]);
-    expect(await api.runScheduled()).toEqual({
-      watched: 0,
-      notified: [],
-      finished: [],
-      errors: [],
-    });
+    expect(await api.runScheduled()).toEqual(notifierRun({ watched: 0 }));
   });
 
   test('a quote deadline set by a page clock hours ahead is accepted; the real clock would refuse it', async ({

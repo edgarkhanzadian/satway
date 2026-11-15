@@ -4,6 +4,13 @@ import { APP_ORIGIN, TEST_ONECLICK_JWT } from '../config.js';
 import { RealDate } from '../world/clock.js';
 import type { FetchLike, World } from '../world/world.js';
 import { MemoryKv } from './kv.js';
+import { FakeRateLimiter } from './rate-limiter.js';
+
+type HandleOptions = NonNullable<Parameters<typeof handle>[3]>;
+type SignerKeyState = NonNullable<HandleOptions['signerState']>;
+
+export const DEPOSIT_RATE = { limit: 5, periodSeconds: 60 };
+export const PROXY_RATE = { limit: 120, periodSeconds: 60 };
 
 export interface WorkerRequestLog {
   method: string;
@@ -85,23 +92,44 @@ export class ApiWorker {
   readonly requests: WorkerRequestLog[] = [];
   readonly notifierReports: unknown[] = [];
   readonly env: Env;
+  readonly limiters: { deposit: FakeRateLimiter; proxy: FakeRateLimiter };
+  readonly signerState: SignerKeyState = { memory: null };
+  private readonly fallbackLimiters: { deposit: FakeRateLimiter; proxy: FakeRateLimiter };
   private readonly world: World;
 
   constructor(world: World, env: WorkerEnvOverrides = {}) {
     this.world = world;
-    this.kv = new MemoryKv(() => world.now().getTime());
+    function now(): number {
+      return world.now().getTime();
+    }
+    this.kv = new MemoryKv(now);
+    this.limiters = {
+      deposit: new FakeRateLimiter(DEPOSIT_RATE, now),
+      proxy: new FakeRateLimiter(PROXY_RATE, now),
+    };
+    this.fallbackLimiters = {
+      deposit: new FakeRateLimiter(DEPOSIT_RATE, now),
+      proxy: new FakeRateLimiter(PROXY_RATE, now),
+    };
     this.env = {
       DEPOSITS: this.kv,
       ALLOWED_ORIGINS: APP_ORIGIN,
       ONECLICK_JWT: TEST_ONECLICK_JWT,
+      DEPOSIT_RATE_LIMITER: this.limiters.deposit,
+      PROXY_RATE_LIMITER: this.limiters.proxy,
       ...env,
     };
   }
 
   async dispatch(request: Request): Promise<Response> {
     const requestBody = request.method === 'GET' ? null : await request.clone().text();
+    const options: HandleOptions = {
+      now: () => this.world.now(),
+      signerState: this.signerState,
+      fallbackLimiters: this.fallbackLimiters,
+    };
     const response = await onWorldClock(this.world, () =>
-      handle(request, this.env, this.world.fetchFor('worker'))
+      handle(request, this.env, this.world.fetchFor('worker'), options)
     );
     const responseBody = await response.clone().text();
     this.requests.push({

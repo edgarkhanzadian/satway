@@ -52,6 +52,7 @@ import {
   type RouteUpdate,
   SendRecordView,
 } from '../../ui/index.js';
+import { registerForBackground } from './background-registration.js';
 import { type Prepared, prepareDeposit } from './flow.js';
 
 const POPULAR = ['USDC', 'USDT', 'ETH', 'SOL', 'BNB', 'TRX'];
@@ -201,13 +202,13 @@ export function Deposit(props: {
       const remembered = rememberReceipt(prepared.receipt);
       downloadReceipt(prepared.receipt);
       setReceiptUnsaved(!remembered);
-      await backend
-        .register(
-          prepared.receipt.depositScript,
-          prepared.receipt.reclaimScript,
-          prepared.receipt.quoteResponse.quote.depositAddress
-        )
-        .catch(() => 'left-to-the-open-tab');
+      const swapAddress = prepared.receipt.quoteResponse.quote.depositAddress;
+      if (swapAddress) {
+        const { depositScript, reclaimScript } = prepared.receipt;
+        await registerForBackground(() =>
+          backend.register(depositScript, reclaimScript, swapAddress)
+        );
+      }
       setPreview(prepared);
       setActive(prepared.receipt);
     } catch (err) {
