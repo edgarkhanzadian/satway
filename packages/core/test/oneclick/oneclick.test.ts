@@ -204,6 +204,27 @@ describe('assertQuoteMatchesRequest', () => {
     );
   });
 
+  function withInput(amountIn: string, minAmountIn: string): OneClickQuoteResponse {
+    const res = respond(sent);
+    res.quote.amountIn = amountIn;
+    res.quote.minAmountIn = minAmountIn;
+    return res;
+  }
+
+  it.each([
+    ['a doubled amountIn', '50000000', '25000000', /"amountIn" is not the requested amount/],
+    ['a smaller amountIn', '24999999', '24999999', /"amountIn" is not the requested amount/],
+    ['an amountIn with a decimal point', '25000000.0', '25000000', /whole numbers/],
+    ['a minAmountIn above amountIn', '25000000', '25000001', /minimum input/],
+    ['a minAmountIn that is not a number', '25000000', 'all', /whole numbers/],
+  ])('rejects %s, which the page would show and the wallet would send', (_n, a, min, message) => {
+    expect(() => assertQuoteMatchesRequest(sent, withInput(a, min))).toThrow(message);
+  });
+
+  it('accepts a minAmountIn below amountIn, since exactly amountIn is sent', () => {
+    expect(() => assertQuoteMatchesRequest(sent, withInput('25000000', '24750000'))).not.toThrow();
+  });
+
   it.each([
     ['the recorded dry quote', REAL_DRY_QUOTE, '2026-11-14T19:50:54.640Z'],
     ['a live probe with milliseconds echoed', LIVE_PROBE_QUOTE, '2026-11-15T10:15:02.350Z'],

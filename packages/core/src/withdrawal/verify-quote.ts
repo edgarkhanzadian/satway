@@ -66,16 +66,6 @@ export function checkWithdrawalQuoteEcho(
     );
   }
   const quote = response.quote;
-  if (wholeSats(quote.amountIn, 'amountIn') !== amountSats) {
-    throw new WithdrawalQuoteError(
-      'The quote expects a different BTC input than the amount the signers will pay'
-    );
-  }
-  if (wholeSats(quote.minAmountIn, 'minAmountIn') > amountSats) {
-    throw new WithdrawalQuoteError(
-      'The quote requires more BTC than the amount the signers will pay, so the swap would be refunded'
-    );
-  }
   if (quote.depositMemo !== undefined && quote.depositMemo !== '') {
     throw new WithdrawalQuoteError(
       'The quote needs a deposit memo, which an sBTC withdrawal cannot carry'

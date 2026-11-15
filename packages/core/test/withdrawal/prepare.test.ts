@@ -220,7 +220,7 @@ describe('prepareWithdrawal', () => {
     const d = deps({
       quote: r => ({ ...quoteFor(r), quote: { ...quoteFor(r).quote, amountIn: '9999' } }),
     });
-    await expect(prepareWithdrawal(C, input, d.deps)).rejects.toThrow(/different BTC input/);
+    await expect(prepareWithdrawal(C, input, d.deps)).rejects.toThrow(/"amountIn" is not the requested amount/);
     const bad = deps({ quote: () => ({ nope: true }) });
     await expect(prepareWithdrawal(C, input, bad.deps)).rejects.toThrow(
       /Unexpected data from 1Click quote/

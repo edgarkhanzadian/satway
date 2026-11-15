@@ -149,9 +149,9 @@ describe('verifyWithdrawalQuote on the real BTC-origin quote', () => {
       /is the refund address/,
     ],
     ['a memo', q => (q.quote.depositMemo = '12345'), /deposit memo/],
-    ['another amountIn', q => (q.quote.amountIn = '10001'), /different BTC input/],
+    ['another amountIn', q => (q.quote.amountIn = '10001'), /"amountIn" is not the requested/],
     ['a decimal amountIn', q => (q.quote.amountIn = '10000.0'), /whole number/],
-    ['a higher minAmountIn', q => (q.quote.minAmountIn = '10001'), /requires more BTC/],
+    ['a higher minAmountIn', q => (q.quote.minAmountIn = '10001'), /would be refunded/],
     [
       'an earlier quote deadline',
       q => (q.quote.deadline = '2026-11-21T16:41:30.000Z'),

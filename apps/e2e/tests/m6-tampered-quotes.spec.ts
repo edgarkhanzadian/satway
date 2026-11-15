@@ -154,29 +154,30 @@ test.describe('M6. a tampered live quote is refused before anything is saved or 
     });
   }
 
-  test.fail(
-    'APP ISSUE: quote.amountIn is never compared with the requested amount, so a changed amountIn is accepted and would be sent from the wallet (correct: refuse)',
-    async ({ app, world, api }) => {
-      world.oneClick.tamper = (response, { dry }) => {
-        if (dry) return;
-        const quote = part(response, 'quote');
-        quote.amountIn = String(BigInt(String(quote.amountIn)) * 2n);
-        quote.amountInFormatted = '200.0';
-      };
-      const downloads: Download[] = [];
-      app.page.on('download', d => downloads.push(d));
-      await app.open();
-      await app.connectStacksWallet();
-      await app.connectEvmWallet();
-      await app.fillDeposit({ amount: '100' });
-      await app.getQuote();
-      await app.page.getByRole('button', { name: 'Continue' }).click();
-      const tracking = app.page.getByRole('heading', { name: 'Deposit in progress' });
-      await expect(app.sendError.or(tracking).first()).toBeVisible();
-      await expect(app.sendError).toBeVisible({ timeout: 500 });
-      await expect(app.page.getByText('200.0 USDC on base', { exact: true })).toHaveCount(0);
-      expect(downloads).toEqual([]);
-      expect(api.depositPosts()).toEqual([]);
-    }
-  );
+  test('a quote whose amountIn differs from the requested amount is refused before anything is shown or sent', async ({
+    app,
+    world,
+    api,
+  }) => {
+    world.oneClick.tamper = (response, { dry }) => {
+      if (dry) return;
+      const quote = part(response, 'quote');
+      quote.amountIn = String(BigInt(String(quote.amountIn)) * 2n);
+      quote.amountInFormatted = '200.0';
+    };
+    const downloads: Download[] = [];
+    app.page.on('download', d => downloads.push(d));
+    await app.open();
+    await app.connectStacksWallet();
+    await app.connectEvmWallet();
+    await app.fillDeposit({ amount: '100' });
+    await app.getQuote();
+    await app.page.getByRole('button', { name: 'Continue' }).click();
+    const tracking = app.page.getByRole('heading', { name: 'Deposit in progress' });
+    await expect(app.sendError.or(tracking).first()).toBeVisible();
+    await expect(app.sendError).toBeVisible({ timeout: 500 });
+    await expect(app.page.getByText('200.0 USDC on base', { exact: true })).toHaveCount(0);
+    expect(downloads).toEqual([]);
+    expect(api.depositPosts()).toEqual([]);
+  });
 });

@@ -207,6 +207,7 @@ export function assertQuoteMatchesRequest(
     throw new Error('Quote does not match the request: "deadline" was changed');
   }
   providerFeesOf(sent, response);
+  assertExactInput(response.quote, sent.amount);
   assertMinimumMatchesSlippage(response.quote, sent.slippageTolerance);
   if (!sent.dry && !response.quote.depositAddress) {
     throw new Error('Quote has no deposit address');
@@ -226,6 +227,22 @@ export const MIN_AMOUNT_OUT_ROUNDING_UNITS = 1n;
 
 function baseUnits(text: string): bigint | null {
   return /^\d+$/.test(text) ? BigInt(text) : null;
+}
+
+function assertExactInput(quote: Pick<OneClickQuote, 'amountIn' | 'minAmountIn'>, amount: string) {
+  const amountIn = baseUnits(quote.amountIn);
+  const minAmountIn = baseUnits(quote.minAmountIn);
+  if (amountIn === null || minAmountIn === null) {
+    throw new Error('Quote amounts are not whole numbers');
+  }
+  if (amountIn !== baseUnits(amount)) {
+    throw new Error('Quote does not match the request: "amountIn" is not the requested amount');
+  }
+  if (minAmountIn > amountIn) {
+    throw new Error(
+      'Quote does not add up: its minimum input is above the amount it asks for, so the swap would be refunded'
+    );
+  }
 }
 
 function assertMinimumMatchesSlippage(
