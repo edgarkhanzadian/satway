@@ -343,16 +343,21 @@ export function Deposit(props: {
       <div className={actions()}>
         <button
           className={button()}
-          disabled={busy || !token || !amount || !refundTo}
-          onClick={() => void run(true)}
+          disabled={!token || !amount || !refundTo}
+          aria-disabled={busy}
+          onClick={() => {
+            if (!busy) void run(true);
+          }}
         >
           {busy ? 'Working…' : 'Get quote'}
         </button>
         {preview && (
           <button
             className={button({ variant: 'primary' })}
-            disabled={busy}
-            onClick={() => void run(false)}
+            aria-disabled={busy}
+            onClick={() => {
+              if (!busy) void run(false);
+            }}
           >
             Continue
           </button>
@@ -383,6 +388,17 @@ function Tracking(props: {
   const [stale, setStale] = useState(false);
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
+  const sendButtonRef = useRef<HTMLButtonElement>(null);
+  const sendResultRef = useRef<HTMLDivElement>(null);
+  const progressRef = useRef<HTMLParagraphElement>(null);
+  const [focusAfterSend, setFocusAfterSend] = useState(0);
+
+  useEffect(() => {
+    if (focusAfterSend === 0) return;
+    const button = sendButtonRef.current;
+    if (button !== null && document.activeElement === button) return;
+    (sendResultRef.current ?? progressRef.current)?.focus();
+  }, [focusAfterSend]);
   const family = chainFamily(receipt.origin.chain);
   const sendFamily: SendFamily | null = family === 'other' ? null : family;
   const quote = receipt.quoteResponse.quote;
@@ -541,6 +557,8 @@ function Tracking(props: {
 
   async function sendFromWallet() {
     if (!token || !target || sendingRef.current) return;
+    const keepFocus =
+      sendButtonRef.current !== null && document.activeElement === sendButtonRef.current;
     sendingRef.current = true;
     setSending(true);
     setSendError(null);
@@ -585,6 +603,7 @@ function Tracking(props: {
       sendingRef.current = false;
       setSending(false);
       setRecord(readRecord());
+      if (keepFocus) setFocusAfterSend(tick => tick + 1);
     }
   }
 
@@ -656,8 +675,9 @@ function Tracking(props: {
           {walletReady && (panel.kind === 'offer' || panel.kind === 'sending') && (
             <div className={sendActions}>
               <button
+                ref={sendButtonRef}
                 className={button({ variant: 'primary' })}
-                disabled={panel.kind === 'sending'}
+                aria-disabled={panel.kind === 'sending'}
                 onClick={() => void sendFromWallet()}
               >
                 {panel.kind === 'sending'
@@ -692,25 +712,29 @@ function Tracking(props: {
               up-to-date browser.
             </p>
           )}
-          {panel.kind === 'record' && (
-            <SendRecordView
-              record={panel.record}
-              note={checkNote}
-              resending={resending}
-              now={new Date()}
-              onResend={() => void resendSame(panel.record)}
-              onConfirmNothingSent={() => confirmNothing(panel.record)}
-            />
-          )}
-          {sendInfo && (
-            <p className={sendStatus} role="status">
-              {sendInfo}
-            </p>
-          )}
-          {sendError && (
-            <p className={sendFailure} role="alert">
-              {sendError}
-            </p>
+          {(panel.kind === 'record' || sendInfo || sendError) && (
+            <div ref={sendResultRef} tabIndex={-1}>
+              {panel.kind === 'record' && (
+                <SendRecordView
+                  record={panel.record}
+                  note={checkNote}
+                  resending={resending}
+                  now={new Date()}
+                  onResend={() => void resendSame(panel.record)}
+                  onConfirmNothingSent={() => confirmNothing(panel.record)}
+                />
+              )}
+              {sendInfo && (
+                <p className={sendStatus} role="status">
+                  {sendInfo}
+                </p>
+              )}
+              {sendError && (
+                <p className={sendFailure} role="alert">
+                  {sendError}
+                </p>
+              )}
+            </div>
           )}
           <p className={refundNote}>
             A different asset, chain or amount will be refunded to {receipt.refundTo}, minus the
@@ -719,7 +743,7 @@ function Tracking(props: {
         </div>
       )}
 
-      <p className={notice({ tone: 'status' })} role="status">
+      <p ref={progressRef} tabIndex={-1} className={notice({ tone: 'status' })} role="status">
         {progress?.message ?? 'Checking…'}
       </p>
       {problem && <p className={notice()}>{problem}</p>}

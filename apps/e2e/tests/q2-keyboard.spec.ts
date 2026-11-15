@@ -92,7 +92,7 @@ test.describe('Q2. keyboard only', () => {
     await tabTo(app, /^Get quote$/);
     await press(app, 'Enter');
     await expect(app.definition('You receive about')).toBeVisible();
-    expect(await activeFocus(app.page)).toBeNull();
+    expect((await activeFocus(app.page))?.name).toBe('Get quote');
     await tabTo(app, /^Continue$/, { max: 2 });
     const downloaded = app.page.waitForEvent('download');
     await press(app, 'Enter');
@@ -117,36 +117,34 @@ test.describe('Q2. keyboard only', () => {
     ).toBeVisible();
   });
 
-  test.fail(
-    'APP ISSUE: pressing "Get quote" with the keyboard disables the focused button while it works, so focus falls back to the document body (correct: focus stays on the button or moves to the result)',
-    async ({ app }) => {
-      await app.open();
-      await app.connectStacksWallet();
-      await app.connectEvmWallet();
-      await app.fillDeposit({ amount: '100' });
-      await app.page.getByRole('button', { name: 'Get quote' }).focus();
-      await press(app, 'Enter');
-      await expect(app.definition('You receive about')).toBeVisible();
-      expect(await activeFocus(app.page)).not.toBeNull();
-    }
-  );
+  test('pressing "Get quote" with the keyboard keeps focus on the button while it works and after the quote arrives', async ({
+    app,
+  }) => {
+    await app.open();
+    await app.connectStacksWallet();
+    await app.connectEvmWallet();
+    await app.fillDeposit({ amount: '100' });
+    await app.page.getByRole('button', { name: 'Get quote' }).focus();
+    await press(app, 'Enter');
+    await expect(app.definition('You receive about')).toBeVisible();
+    expect((await activeFocus(app.page))?.name).toBe('Get quote');
+  });
 
-  test.fail(
-    'APP ISSUE: when the send button disappears after a keyboard send, focus falls back to the document body (correct: focus moves to the payment status that replaced it)',
-    async ({ app }) => {
-      await app.open();
-      await app.connectStacksWallet();
-      await app.connectEvmWallet();
-      await app.fillDeposit({ amount: '100' });
-      await app.getQuote();
-      await app.continue();
-      await app.waitForProgress(PROGRESS.awaitingFunds);
-      await app.sendButton.focus();
-      await press(app, 'Enter');
-      await expect(app.progress('Sent from your wallet.')).toBeVisible();
-      expect(await activeFocus(app.page)).not.toBeNull();
-    }
-  );
+  test('when the send button disappears after a keyboard send, focus moves to the payment status that replaced it', async ({
+    app,
+  }) => {
+    await app.open();
+    await app.connectStacksWallet();
+    await app.connectEvmWallet();
+    await app.fillDeposit({ amount: '100' });
+    await app.getQuote();
+    await app.continue();
+    await app.waitForProgress(PROGRESS.awaitingFunds);
+    await app.sendButton.focus();
+    await press(app, 'Enter');
+    await expect(app.progress('Sent from your wallet.')).toBeVisible();
+    expect((await activeFocus(app.page))?.name).toMatch(/^Sent from your wallet\. Transaction /);
+  });
 
   test('a full reclaim, from a fresh page, with the keyboard only', async ({
     app,
