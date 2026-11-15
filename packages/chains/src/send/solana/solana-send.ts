@@ -12,7 +12,12 @@ import {
   walletFailure,
 } from '../source-wallet.js';
 import { solanaPayUrl } from './solana-pay.js';
-import { type SimulationResult, type SolanaRpc, createSolanaRpc } from './solana-rpc.js';
+import {
+  type SignatureStatus,
+  type SimulationResult,
+  type SolanaRpc,
+  createSolanaRpc,
+} from './solana-rpc.js';
 import {
   buildSolanaTransfer,
   checkSolanaTarget,
@@ -157,15 +162,22 @@ export async function checkSolanaSend(
   rpc: SolanaRpc = defaultRpc()
 ): Promise<SolanaSendCheck> {
   const status = await rpc.signatureStatus(sent.signature);
-  if (status !== null)
-    return status.err === null ? { status: 'landed' } : { status: 'failed', reason: status.err };
+  if (status !== null) return settledCheck(status);
   if (sent.lastValidBlockHeight === null) return { status: 'pending' };
   const height = await rpc.blockHeight();
   if (height <= sent.lastValidBlockHeight) return { status: 'pending' };
   const again = await rpc.signatureStatus(sent.signature);
-  if (again !== null)
-    return again.err === null ? { status: 'landed' } : { status: 'failed', reason: again.err };
+  if (again !== null) return settledCheck(again);
   return { status: 'expired' };
+}
+
+const SETTLED_COMMITMENTS: ReadonlySet<string> = new Set(['confirmed', 'finalized']);
+
+function settledCheck(status: SignatureStatus): SolanaSendCheck {
+  if (status.confirmation === null || !SETTLED_COMMITMENTS.has(status.confirmation)) {
+    return { status: 'pending' };
+  }
+  return status.err === null ? { status: 'landed' } : { status: 'failed', reason: status.err };
 }
 
 export type SolanaPayOffer =

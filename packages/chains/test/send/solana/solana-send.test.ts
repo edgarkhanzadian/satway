@@ -279,6 +279,17 @@ describe('checkSolanaSend', () => {
     ).toBe('failed');
   });
 
+  it('keeps a signature that is only processed, or has no commitment, pending: it can still be dropped', async () => {
+    for (const confirmation of ['processed', null]) {
+      for (const err of [null, '{"InstructionError":[0,"x"]}']) {
+        const rpc = fakeRpc({ statuses: [{ err, confirmation }], height: 99n }).rpc;
+        expect(await checkSolanaSend({ signature: SIG, lastValidBlockHeight: 10n }, rpc)).toEqual({
+          status: 'pending',
+        });
+      }
+    }
+  });
+
   it('reports expiry only once the block height passed and the signature is still unknown', async () => {
     const before = fakeRpc({ statuses: [null], height: 10n }).rpc;
     expect(await checkSolanaSend({ signature: SIG, lastValidBlockHeight: 10n }, before)).toEqual({
