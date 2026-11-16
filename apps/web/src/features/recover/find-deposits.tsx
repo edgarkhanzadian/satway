@@ -31,7 +31,7 @@ function countText(n: number, one: string, many: string): string {
 }
 
 function foundLabel(d: FoundDeposit): string {
-  const index = d.depositIndex === null ? '' : ` (deposit ${d.depositIndex})`;
+  const index = d.depositIndex === null ? '' : ` (index ${d.depositIndex})`;
   return `${d.depositAddress}${index}`;
 }
 
@@ -133,7 +133,7 @@ export function FindDeposits(props: {
   return (
     <>
       <styled.h3 textStyle="emphasis" marginTop="space.12" marginBottom="space.04">
-        No receipt? Find deposits with your wallet
+        No receipt? Search with your wallet
       </styled.h3>
       <p className={notice()}>
         The connected wallet can find the deposits it made. This page asks the sBTC signers’ API for
@@ -146,11 +146,11 @@ export function FindDeposits(props: {
           disabled={!account || phase === 'asking' || phase === 'scanning'}
           onClick={() => void search()}
         >
-          {phase === 'asking' ? 'Asking the sBTC signers’ API…' : 'Find my deposits'}
+          {phase === 'asking' ? 'Asking the sBTC signers’ API…' : 'Search with my wallet'}
         </button>
         {phase === 'done' && source === 'emily' && (
           <button className={button()} onClick={scanInstead}>
-            Check my deposit addresses on Bitcoin
+            Also check my addresses on Bitcoin
           </button>
         )}
       </div>
@@ -189,7 +189,7 @@ export function FindDeposits(props: {
         </p>
       )}
       {found.length > 0 && (
-        <ul aria-label="Deposits found">
+        <ul aria-label="Found with your wallet">
           {found.map(d => (
             <li key={d.depositAddress}>
               <button

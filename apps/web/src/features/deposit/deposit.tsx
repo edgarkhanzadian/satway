@@ -95,6 +95,9 @@ const refundNote = cx(
   css({ marginBlock: 'space.02', '.satway-actions + &': { marginTop: 'space.08' } })
 );
 
+export const NEW_ADDRESS_NOTE =
+  'A new Bitcoin deposit address for this deposit only, built from your keys when you continue.';
+
 function sats(n: number): string {
   return `${n.toLocaleString('en-US')} sats`;
 }
@@ -377,9 +380,7 @@ export function Deposit(props: {
           <dt>Typical time</dt>
           <dd>40 to 60 minutes; sBTC waits for Bitcoin confirmations</dd>
           <dt>Pays out to</dt>
-          <dd>
-            <code>{preview.receipt.depositAddress}</code>
-          </dd>
+          <dd>{NEW_ADDRESS_NOTE}</dd>
           {preview.warnings.map(w => (
             <dd key={w} className={notice({ tone: 'warn' })}>
               {w}
