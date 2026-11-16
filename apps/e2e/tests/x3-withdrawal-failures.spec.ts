@@ -131,6 +131,24 @@ test.describe('X3. a withdrawal that fails after it was signed', () => {
     await expect(app.progress(WITHDRAW_PROGRESS.done)).toHaveCount(0);
   });
 
+  test('a hard mismatch stays on screen even if the data later looks healthy', async ({
+    app,
+    world,
+    wallets,
+  }) => {
+    const { withdraw } = await startWithdrawal(app, world, wallets);
+    await toAwaitingSigners(withdraw, world);
+    const [record] = [...world.withdrawals.stacks.requests.values()];
+    if (!record) throw new Error('No withdrawal request on chain');
+    const amount = record.amountSats;
+    record.amountSats = amount + 1;
+    await withdraw.waitFor(WITHDRAW_PROGRESS.mismatch);
+    record.amountSats = amount;
+    for (let i = 0; i < 3; i += 1) await app.fastForward(130_000);
+    await expect(app.progress(WITHDRAW_PROGRESS.mismatch)).toBeVisible();
+    await expect(app.progress(WITHDRAW_PROGRESS.awaitingSigners)).toHaveCount(0);
+  });
+
   test('NEAR Intents refunds the swap: the BTC went to the refund address and the page says how much', async ({
     app,
     world,

@@ -301,7 +301,7 @@ function Following(props: {
         setSnapshot(next);
         setProblem(null);
         const progress = next.observation.progress;
-        if (progress.stage === 'done') return;
+        if (progress.stage === 'done' || progress.stage === 'mismatch') return;
         delay = progress.terminal ? SETTLED_POLL_INTERVAL_MS : POLL_INTERVAL_MS;
       } catch (err) {
         if (!live) return;
