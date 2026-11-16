@@ -13,6 +13,7 @@ import {
   type BackgroundRegistration,
   type Receipt,
   checkProgress,
+  realUnmount,
   sendRecords,
   useFlow,
 } from '../../shared/index.js';
@@ -107,13 +108,16 @@ export function useTracking(input: TrackingInput): Tracking {
     dispatch({ type: 'wallet-changed' });
   }, [dispatch, provider]);
 
-  useEffect(
-    () => () => {
+  const [latch] = useState(() =>
+    realUnmount(() => {
       runner.current?.dispose();
       runner.current = null;
-    },
-    []
+    })
   );
+  useEffect(() => {
+    latch.mount();
+    return () => latch.unmount();
+  }, [latch]);
 
   return { state: flow.state, dispatch };
 }

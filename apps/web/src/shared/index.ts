@@ -4,6 +4,7 @@ export * from './browser-storage.js';
 export * from './flow-store.js';
 export * from './latest-request.js';
 export * from './progress.js';
+export * from './real-unmount.js';
 export * from './receipt.js';
 export * from './send-records.js';
 export * from './stacks-wallet-rejection.js';

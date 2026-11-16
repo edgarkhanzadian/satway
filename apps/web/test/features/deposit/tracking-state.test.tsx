@@ -45,6 +45,7 @@ import {
   ProgressReadError,
   type Snapshot,
   createBackend,
+  realUnmount,
 } from '../../../src/shared/index.js';
 import { PayoutNotices } from '../../../src/ui/index.js';
 import { RECEIPT, TOKEN } from './deposit-fixtures.js';
@@ -326,13 +327,54 @@ describe('tracking: polling', () => {
     });
   });
 
+  function strictMount(h: ReturnType<typeof harness>, first?: BackgroundRegistration) {
+    const latch = realUnmount(() => h.runner.dispose());
+    function mount() {
+      latch.mount();
+      h.store.attach();
+      h.store.dispatch({ type: 'shown', first, registered: false });
+    }
+    mount();
+    latch.unmount();
+    h.store.detach();
+    mount();
+  }
+
   it('showing twice, as a StrictMode remount does, starts one poll and one registration', async () => {
     const h = harness();
-    h.store.dispatch({ type: 'shown', first: undefined, registered: false });
-    h.store.dispatch({ type: 'shown', first: undefined, registered: false });
+    strictMount(h);
     await settle();
     expect(h.calls.polls).toBe(1);
     expect(h.calls.registrations).toHaveLength(1);
+  });
+
+  it('after a StrictMode remount, a failed first registration is still retried and polls go on', async () => {
+    const unavailable: BackgroundRegistration = {
+      kind: 'unavailable',
+      status: 503,
+      message: 'down',
+    };
+    const h = harness({ first: unavailable });
+    strictMount(h, unavailable);
+    await settle(10_000);
+    expect(h.calls.registrations).toHaveLength(1);
+    await settle(POLL_INTERVAL_MS);
+    expect(h.calls.polls).toBeGreaterThan(1);
+  });
+
+  it('after a StrictMode remount, the prompt window of a started payment still runs out', async () => {
+    if (!TARGET) throw new Error('no target');
+    const record = attemptingRecord({
+      target: TARGET,
+      account: WALLET.address,
+      now: new Date(BEFORE_DEADLINE.getTime() - 60_000),
+    });
+    const h = harness({ record });
+    strictMount(h);
+    await settle();
+    const before = h.store.get().send.promptTicks;
+    await settle(20 * 60_000);
+    expect(h.store.get().send.promptTicks).toBeGreaterThan(before);
   });
 
   it('the mint-unknown and foreign-payout notices come with the snapshot', () => {
