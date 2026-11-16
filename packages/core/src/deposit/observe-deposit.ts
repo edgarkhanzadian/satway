@@ -72,6 +72,7 @@ function spenderNeeded(payout: AddressOutput, mint: MintStatus | undefined): boo
 }
 
 export const MAX_SPEND_READS_PER_CHECK = 6;
+export const SPEND_ROTATION_MS = 60_000;
 
 export type RegistrationFailureKind = 'transient' | 'rejected';
 
@@ -284,9 +285,12 @@ export async function observeDeposit(
   const spenders = new Map<string, PayoutSpender | null>();
   const stillUnspent = new Set<string>();
   let spendReads = 0;
-  for (const payout of first.payouts) {
+  const nowMs = (options.now ?? new Date()).getTime();
+  const needed = first.payouts.filter(p => spenderNeeded(p, mints.get(outpointOf(p))));
+  const turn = Math.floor(nowMs / SPEND_ROTATION_MS) * MAX_SPEND_READS_PER_CHECK;
+  const offset = needed.length === 0 ? 0 : turn % needed.length;
+  for (const payout of [...needed.slice(offset), ...needed.slice(0, offset)]) {
     const key = outpointOf(payout);
-    if (!spenderNeeded(payout, mints.get(key))) continue;
     if (spendReads >= MAX_SPEND_READS_PER_CHECK) break;
     spendReads += 1;
     const spend = await optional(() => fetchPayoutSpend(config.btcApiUrl, payout, ctx, fetchFn));
@@ -315,7 +319,7 @@ export async function observeDeposit(
     tipHeight,
     spenders,
     ...swapTimesOf(status, options.swapDeadline),
-    now: (options.now ?? new Date()).getTime(),
+    now: nowMs,
   };
   return {
     ...observed,

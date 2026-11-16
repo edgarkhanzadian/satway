@@ -251,6 +251,31 @@ describe('observeDeposit: what the swap status tells the progress', () => {
   });
 });
 
+describe('observeDeposit: more spent-looking payouts than one check reads', () => {
+  it('reads every one of them across checks a minute apart', async () => {
+    const payments = Array.from({ length: 9 }, (_, i) => ({
+      n: i + 1,
+      confirmed: true,
+      spent: true,
+    }));
+    const w = chainWorld(payments, new Set(), { spent: true });
+    const read = new Set<string>();
+    function fetchFn(url: string) {
+      if (url.includes('/outspend/')) read.add(url);
+      return w.fetchFn(url);
+    }
+    const start = Date.parse('2026-11-14T12:00:00.000Z');
+    for (const minute of [0, 1]) {
+      await observeDeposit(config, ctx, null, {
+        fetchFn,
+        swapless: true,
+        now: new Date(start + minute * 60_000),
+      });
+    }
+    expect(read.size).toBe(9);
+  });
+});
+
 describe('observeDeposit: payouts past the mint-read cap', () => {
   it('are not taken as never registered, so the deposit is not called reclaimed', async () => {
     const payments = Array.from({ length: 14 }, (_, i) => ({
