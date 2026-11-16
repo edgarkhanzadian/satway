@@ -462,7 +462,12 @@ export class World {
       responseBody: reply.body.length > 4_000 ? `${reply.body.slice(0, 4_000)}…` : reply.body,
       ...(fault === undefined ? {} : { fault }),
     });
-    if (reply.status === 404 && service !== 'emily' && service !== 'oneclick') {
+    if (
+      reply.status === 404 &&
+      reply.modelled404 !== true &&
+      service !== 'emily' &&
+      service !== 'oneclick'
+    ) {
       this.unexpected.push(`${caller} ${request.method} ${request.url} -> 404 (no world route)`);
     }
     return this.withCors(service, reply);

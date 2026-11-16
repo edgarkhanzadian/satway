@@ -20,7 +20,6 @@ import {
 } from './clarity-values.js';
 import { fetchEmilyWithdrawal } from './emily-withdrawal.js';
 import {
-  type StacksContractCall,
   type StacksTransaction,
   callReadOnly,
   fetchStacksTransaction,
@@ -28,7 +27,7 @@ import {
   normalizeStacksTxid,
 } from './stacks-api.js';
 import { type WithdrawalRecipient, sameRecipient } from './withdrawal-recipient.js';
-import { decodeWithdrawalArguments } from './withdrawal-request.js';
+import { decodeWithdrawalArguments, encodeWithdrawalArguments } from './withdrawal-request.js';
 
 export type WithdrawalStatusConfig = Pick<
   NetworkConfig,
@@ -528,19 +527,50 @@ async function acceptedPayoutOf(
   };
 }
 
-function argsOf(call: StacksContractCall): string[] {
-  return (call.function_args ?? []).map(arg => arg.hex);
+export interface ContractCallIdentity {
+  contractId: string;
+  functionName: string;
+  sender: string;
+  args: readonly string[];
 }
 
-function sameContractCall(a: StacksTransaction, b: StacksTransaction): boolean {
-  const left = a.contract_call;
-  const right = b.contract_call;
-  if (!left || !right) return false;
+function plainArgs(args: readonly string[]): string {
+  return JSON.stringify(args.map(arg => arg.toLowerCase().replace(/^0x/, '')));
+}
+
+export function contractCallOf(tx: StacksTransaction): ContractCallIdentity | null {
+  const call = tx.contract_call;
+  if (tx.tx_type !== 'contract_call' || !call) return null;
+  return {
+    contractId: call.contract_id,
+    functionName: call.function_name,
+    sender: tx.sender_address,
+    args: (call.function_args ?? []).map(arg => arg.hex),
+  };
+}
+
+export function sameContractCall(a: ContractCallIdentity, b: ContractCallIdentity): boolean {
   return (
-    left.contract_id === right.contract_id &&
-    left.function_name === right.function_name &&
-    JSON.stringify(argsOf(left)) === JSON.stringify(argsOf(right))
+    a.contractId === b.contractId &&
+    a.functionName === b.functionName &&
+    a.sender === b.sender &&
+    plainArgs(a.args) === plainArgs(b.args)
   );
+}
+
+export function expectedWithdrawalCall(
+  config: Pick<
+    WithdrawalStatusConfig,
+    'sbtcContract' | 'withdrawalContractName' | 'withdrawalFunctionName'
+  >,
+  expected: ExpectedWithdrawal
+): ContractCallIdentity {
+  return {
+    contractId: contractIdOf(config, config.withdrawalContractName),
+    functionName: config.withdrawalFunctionName,
+    sender: expected.sender,
+    args: encodeWithdrawalArguments(expected.amountSats, expected.recipient, expected.maxFeeSats),
+  };
 }
 
 export async function findReplacementTransaction(
@@ -556,13 +586,17 @@ export async function findReplacementTransaction(
     dropped.nonce,
     fetchFn
   );
-  const match = candidates.find(
-    tx =>
+  const original = contractCallOf(dropped);
+  const match = candidates.find(tx => {
+    const call = contractCallOf(tx);
+    return (
       normalizeStacksTxid(tx.tx_id) !== droppedId &&
       !tx.tx_status.startsWith('dropped') &&
-      tx.tx_type === 'contract_call' &&
-      sameContractCall(dropped, tx)
-  );
+      original !== null &&
+      call !== null &&
+      sameContractCall(original, call)
+    );
+  });
   if (!match) return null;
   return (await fetchStacksTransaction(config.stxApiUrl, match.tx_id, fetchFn)) ?? match;
 }
@@ -653,4 +687,41 @@ export async function fetchWithdrawalStatus(
   fetchFn?: FetchLike
 ): Promise<WithdrawalStatus> {
   return (await followWithdrawalStatus(config, stacksTxid, expected, fetchFn)).status;
+}
+
+export type PastedWithdrawalCheck =
+  | { kind: 'matches'; stacksTxid: string }
+  | { kind: 'not-found' }
+  | { kind: 'different'; message: string };
+
+export async function checkPastedWithdrawalTransaction(
+  config: WithdrawalStatusConfig,
+  stacksTxid: string,
+  expected: ExpectedWithdrawal,
+  fetchFn?: FetchLike
+): Promise<PastedWithdrawalCheck> {
+  const id = normalizeStacksTxid(stacksTxid);
+  const tx = await fetchStacksTransaction(config.stxApiUrl, id, fetchFn);
+  if (!tx) return { kind: 'not-found' };
+  const want = expectedWithdrawalCall(config, expected);
+  const call = contractCallOf(tx);
+  if (!call || call.contractId !== want.contractId || call.functionName !== want.functionName) {
+    return {
+      kind: 'different',
+      message: `It is not a call to ${want.contractId}::${want.functionName}.`,
+    };
+  }
+  if (call.sender !== want.sender) {
+    return {
+      kind: 'different',
+      message: `It was sent from ${call.sender}, not from ${want.sender}.`,
+    };
+  }
+  if (!sameContractCall(call, want)) {
+    return {
+      kind: 'different',
+      message: 'It withdraws a different amount, fee cap or Bitcoin address than this withdrawal.',
+    };
+  }
+  return { kind: 'matches', stacksTxid: id };
 }

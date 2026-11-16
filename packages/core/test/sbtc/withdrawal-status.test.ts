@@ -7,6 +7,7 @@ import {
   type StacksTransaction,
   WithdrawalDataError,
   assertActiveWithdrawalContract,
+  checkPastedWithdrawalTransaction,
   describeWithdrawalTxFailure,
   fetchActiveWithdrawalContract,
   fetchOnChainWithdrawalRequest,
@@ -589,5 +590,74 @@ describe('following a dropped withdrawal transaction', () => {
       lookupError: null,
     });
     expect(api.urls).toHaveLength(1);
+  });
+});
+
+describe('checking a pasted withdrawal transaction', () => {
+  const w = defined(DIRECT[0]);
+  const id = w.requestTxid.replace(/^0x/, '');
+
+  function apisWithTx(tx: unknown) {
+    const routes = routesFor(w);
+    return fakeWithdrawalApis({ ...routes, stacksTxs: { [id]: tx } });
+  }
+
+  it('accepts the transaction that makes exactly this withdrawal’s call', async () => {
+    const api = apisWithTx(w.requestTx);
+    await expect(
+      checkPastedWithdrawalTransaction(C, `0x${id.toUpperCase()}`, expectedOf(w), api.fetchFn)
+    ).resolves.toEqual({ kind: 'matches', stacksTxid: id });
+  });
+
+  it('says when Stacks does not know the transaction yet', async () => {
+    const routes = routesFor(w);
+    const api = fakeWithdrawalApis({ ...routes, stacksTxs: {} });
+    await expect(
+      checkPastedWithdrawalTransaction(C, id, expectedOf(w), api.fetchFn)
+    ).resolves.toEqual({ kind: 'not-found' });
+  });
+
+  it('refuses a call to another contract or function', async () => {
+    const tx = txOf(w.requestTx);
+    const call = defined(tx.contract_call);
+    for (const contract_call of [
+      { ...call, contract_id: `${C.sbtcContract}.sbtc-deposit` },
+      { ...call, function_name: 'transfer' },
+    ]) {
+      const api = apisWithTx({ ...tx, contract_call });
+      const check = await checkPastedWithdrawalTransaction(C, id, expectedOf(w), api.fetchFn);
+      expect(check).toEqual({
+        kind: 'different',
+        message: `It is not a call to ${C.sbtcContract}.sbtc-withdrawal::initiate-withdrawal-request.`,
+      });
+    }
+  });
+
+  it('refuses a transaction sent from another account', async () => {
+    const api = apisWithTx({
+      ...txOf(w.requestTx),
+      sender_address: 'SP2J6ZY48GV1EZ5V2V5RB9MP66SW86PYKKNRV9EJ7',
+    });
+    await expect(
+      checkPastedWithdrawalTransaction(C, id, expectedOf(w), api.fetchFn)
+    ).resolves.toEqual({
+      kind: 'different',
+      message: `It was sent from SP2J6ZY48GV1EZ5V2V5RB9MP66SW86PYKKNRV9EJ7, not from ${w.sender}.`,
+    });
+  });
+
+  it('refuses the right call with a different amount, fee cap or Bitcoin address', async () => {
+    const tx = txOf(w.requestTx);
+    const call = defined(tx.contract_call);
+    const args = defined(call.function_args).map((a, i) =>
+      i === 0 ? { ...a, hex: `0x${serializeCV(Cl.uint(w.amountSats + 1))}` } : a
+    );
+    const api = apisWithTx({ ...tx, contract_call: { ...call, function_args: args } });
+    await expect(
+      checkPastedWithdrawalTransaction(C, id, expectedOf(w), api.fetchFn)
+    ).resolves.toEqual({
+      kind: 'different',
+      message: 'It withdraws a different amount, fee cap or Bitcoin address than this withdrawal.',
+    });
   });
 });

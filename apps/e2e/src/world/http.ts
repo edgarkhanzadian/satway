@@ -2,6 +2,11 @@ export interface Reply {
   status: number;
   headers: Record<string, string>;
   body: string;
+  modelled404?: true;
+}
+
+export function modelledNotFound(body: unknown): Reply {
+  return { ...json(body, 404), modelled404: true };
 }
 
 export function json(body: unknown, status = 200): Reply {

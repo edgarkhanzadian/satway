@@ -11,7 +11,7 @@ import {
 import { decodeWithdrawalArguments } from '@satway/core';
 
 import { SBTC_DEPLOYER } from './hiro.js';
-import { type Reply, field, json, parseJson } from './http.js';
+import { type Reply, field, json, modelledNotFound, parseJson } from './http.js';
 import type { Rng } from './random.js';
 
 export const WITHDRAWAL_CONTRACT = `${SBTC_DEPLOYER}.sbtc-withdrawal`;
@@ -371,7 +371,9 @@ export class StacksChain {
     const tx = TX.exec(path);
     if (tx?.[1] !== undefined) {
       const found = this.txs.get(tx[1]);
-      return found ? json(this.txJson(found)) : null;
+      return found
+        ? json(this.txJson(found))
+        : modelledNotFound({ error: `could not find transaction by ID 0x${tx[1]}` });
     }
     const balance = BALANCE.exec(path);
     if (balance?.[1] !== undefined && balance[2] !== undefined) {

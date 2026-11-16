@@ -139,6 +139,18 @@ function recipientCV(recipient: WithdrawalRecipient) {
   });
 }
 
+export function encodeWithdrawalArguments(
+  amountSats: number,
+  recipient: WithdrawalRecipient,
+  maxFeeSats: number
+): string[] {
+  return [
+    serializeCV(Cl.uint(amountSats)),
+    serializeCV(recipientCV(recipient)),
+    serializeCV(Cl.uint(maxFeeSats)),
+  ];
+}
+
 export function decodeWithdrawalArguments(functionArgs: readonly string[]): {
   amountSats: number;
   recipient: WithdrawalRecipient;
@@ -175,11 +187,11 @@ export function buildWithdrawalContractCall(
   assertRecipientRoundTrip(input.recipientAddress, encoded.recipient);
 
   const lockedSats = input.amountSats + input.maxFeeSats;
-  const functionArgs = [
-    serializeCV(Cl.uint(input.amountSats)),
-    serializeCV(recipientCV(encoded.recipient)),
-    serializeCV(Cl.uint(input.maxFeeSats)),
-  ];
+  const functionArgs = encodeWithdrawalArguments(
+    input.amountSats,
+    encoded.recipient,
+    input.maxFeeSats
+  );
   const postCondition: WithdrawalPostCondition = {
     type: 'ft-postcondition',
     address: input.sender,

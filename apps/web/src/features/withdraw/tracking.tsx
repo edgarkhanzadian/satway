@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 
 import { css, cx } from 'satway-styles/css';
 import { styled } from 'satway-styles/jsx';
 import { actions, button, details, field, notice, sheet } from 'satway-styles/recipes';
 
 import {
+  type WithdrawalStatus,
+  checkPastedWithdrawalTransaction,
   MAINNET_WITHDRAWAL_FLOW_CONFIG as config,
   errorMessage,
   normalizeStacksTxid,
@@ -16,6 +18,7 @@ import {
   type WithdrawalSnapshot,
   checkWithdrawal,
   downloadWithdrawalReceipt,
+  latestRequests,
   withStacksTxid,
   withdrawalAdvice,
   withdrawalHeading,
@@ -120,6 +123,95 @@ function WaitingForWallet(props: {
   );
 }
 
+function TxidEntry(props: {
+  receipt: WithdrawalReceiptFile;
+  onReceipt(receipt: WithdrawalReceiptFile): void;
+  children?: ReactNode;
+}) {
+  const { receipt } = props;
+  const [txid, setTxid] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [requests] = useState(latestRequests);
+
+  async function follow() {
+    let id: string;
+    try {
+      id = normalizeStacksTxid(txid);
+    } catch {
+      setError('That is not a Stacks transaction ID. It is 64 hex characters, often with 0x.');
+      return;
+    }
+    const isLatest = requests.begin();
+    setChecking(true);
+    setError(null);
+    try {
+      const check = await checkPastedWithdrawalTransaction(config, id, {
+        sender: receipt.sender,
+        amountSats: receipt.amountSats,
+        maxFeeSats: receipt.maxFeeSats,
+        recipient: receipt.recipient,
+      });
+      if (!isLatest()) return;
+      if (check.kind === 'matches') {
+        props.onReceipt(withStacksTxid(receipt, check.stacksTxid));
+        return;
+      }
+      setError(
+        check.kind === 'not-found'
+          ? 'Stacks does not know this transaction yet. If your wallet sent it just now, wait a minute and try again.'
+          : `That transaction is not this withdrawal. ${check.message} Check the ID in your wallet’s activity.`
+      );
+    } catch (err) {
+      if (isLatest()) {
+        setError(
+          `Could not check that transaction: ${errorMessage(err) ?? 'unknown error'}. Try again.`
+        );
+      }
+    } finally {
+      if (isLatest()) setChecking(false);
+    }
+  }
+
+  return (
+    <>
+      <label className={fields.label}>
+        Stacks transaction ID
+        <input
+          className={fields.control}
+          value={txid}
+          spellCheck={false}
+          placeholder="0x…"
+          onChange={e => {
+            requests.cancel();
+            setChecking(false);
+            setTxid(e.target.value);
+            setError(null);
+          }}
+        />
+      </label>
+      {error && (
+        <p className={notice({ tone: 'error' })} role="alert">
+          {error}
+        </p>
+      )}
+      <div className={actions()}>
+        <button
+          className={button({ variant: 'primary' })}
+          disabled={!txid}
+          aria-disabled={checking}
+          onClick={() => {
+            if (!checking) void follow();
+          }}
+        >
+          {checking ? 'Checking…' : 'Follow this transaction'}
+        </button>
+        {props.children}
+      </div>
+    </>
+  );
+}
+
 function UnconfirmedSignature(props: {
   receipt: WithdrawalReceiptFile;
   onRoute(route: WithdrawalRouteUpdate | null): void;
@@ -127,20 +219,10 @@ function UnconfirmedSignature(props: {
   onDiscard(receipt: WithdrawalReceiptFile): void;
 }) {
   const { receipt, onRoute } = props;
-  const [txid, setTxid] = useState('');
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     onRoute({ destination: destinationOf(receipt), milestones: null });
   }, [onRoute, receipt]);
-
-  function follow() {
-    try {
-      props.onReceipt(withStacksTxid(receipt, normalizeStacksTxid(txid)));
-    } catch {
-      setError('That is not a Stacks transaction ID. It is 64 hex characters, often with 0x.');
-    }
-  }
 
   return (
     <section className={sheet()}>
@@ -156,37 +238,22 @@ function UnconfirmedSignature(props: {
         its transaction ID here to follow it. If it sent nothing, discard this withdrawal; your sBTC
         has not moved.
       </p>
-      <label className={fields.label}>
-        Stacks transaction ID
-        <input
-          className={fields.control}
-          value={txid}
-          spellCheck={false}
-          placeholder="0x…"
-          onChange={e => {
-            setTxid(e.target.value);
-            setError(null);
-          }}
-        />
-      </label>
-      {error && (
-        <p className={notice({ tone: 'error' })} role="alert">
-          {error}
-        </p>
-      )}
-      <div className={actions()}>
-        <button className={button({ variant: 'primary' })} disabled={!txid} onClick={follow}>
-          Follow this transaction
-        </button>
+      <TxidEntry receipt={receipt} onReceipt={props.onReceipt}>
         <button className={button()} onClick={() => props.onDiscard(receipt)}>
           Nothing was sent. Discard it
         </button>
-      </div>
+      </TxidEntry>
       <dl className={details()}>
         <ReceiptFacts receipt={receipt} />
       </dl>
     </section>
   );
+}
+
+function mayBeTheWrongTransaction(status: WithdrawalStatus | null): boolean {
+  if (status === null) return false;
+  if (status.kind === 'mismatch') return status.requestId === null;
+  return status.kind === 'unknown-tx' || status.kind === 'not-a-withdrawal';
 }
 
 function Following(props: {
@@ -201,6 +268,7 @@ function Following(props: {
   const { backend, receipt, stacksTxid, onRoute } = props;
   const [snapshot, setSnapshot] = useState<WithdrawalSnapshot | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [changing, setChanging] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const onReceiptRef = useRef(props.onReceipt);
   onReceiptRef.current = props.onReceipt;
@@ -212,6 +280,7 @@ function Following(props: {
     let delay = POLL_INTERVAL_MS;
     setSnapshot(null);
     setProblem(null);
+    setChanging(false);
     async function tick() {
       try {
         const next = await checkWithdrawal(
@@ -260,6 +329,7 @@ function Following(props: {
   const progress = observation?.progress ?? null;
   const facts = observation?.facts ?? null;
   const stage = progress?.stage ?? null;
+  const changeable = mayBeTheWrongTransaction(observation?.stacks ?? null);
 
   return (
     <section className={sheet()}>
@@ -350,7 +420,29 @@ function Following(props: {
         )}
       </dl>
 
+      {changing && changeable && (
+        <section aria-labelledby="change-transaction">
+          <styled.h3 id="change-transaction" textStyle="emphasis" marginTop="space.10">
+            Change the transaction
+          </styled.h3>
+          <p className={advice}>
+            Paste the ID of the Stacks transaction your wallet sent for this withdrawal. It is
+            checked before it replaces the one above.
+          </p>
+          <TxidEntry receipt={receipt} onReceipt={props.onReceipt}>
+            <button className={button()} onClick={() => setChanging(false)}>
+              Cancel
+            </button>
+          </TxidEntry>
+        </section>
+      )}
+
       <div className={actions()}>
+        {changeable && !changing && (
+          <button className={button()} onClick={() => setChanging(true)}>
+            Change transaction
+          </button>
+        )}
         <button className={button()} onClick={() => downloadWithdrawalReceipt(receipt)}>
           Download receipt again
         </button>
