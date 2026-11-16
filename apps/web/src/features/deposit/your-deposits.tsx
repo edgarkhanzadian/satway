@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 import { css } from 'satway-styles/css';
 import { styled } from 'satway-styles/jsx';
@@ -12,7 +12,9 @@ import {
   type WalletAccount,
   abortableFetch,
   checkProgress,
+  emptyListNote,
   loadReceipts,
+  localStorageWorks,
   receiptId,
   sendAmountOf,
   sendAmountText,
@@ -49,6 +51,7 @@ export function YourDeposits(props: {
   visible: boolean;
 }) {
   const { backend, account, onRoute, visible } = props;
+  const [storageWorks] = useState(localStorageWorks);
   const flow = useFlow(
     listMachine,
     () => initialList(loadReceipts(), loadStages(), Date.now()),
@@ -178,7 +181,7 @@ export function YourDeposits(props: {
         Your deposits
       </styled.h2>
       {views.length === 0 ? (
-        <p className={notice()}>This browser does not remember any deposits yet.</p>
+        <p className={notice()}>{emptyListNote('deposits', storageWorks)}</p>
       ) : (
         <ul className={entries} aria-label="Your deposits">
           {views.map(view => (

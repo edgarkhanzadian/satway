@@ -66,6 +66,17 @@ test.describe('S3. browser storage is unavailable or full', () => {
     expect(harness.pageErrors).toEqual([]);
     await app.openYourDeposits();
     await expect(app.page.getByLabel('Receipt file')).toBeEnabled();
+    await expect(
+      app.page.getByText(
+        'This browser’s storage is unavailable, so it cannot remember your deposits here. Load a receipt file below to check one.'
+      )
+    ).toBeVisible();
+    await app.openTab('Withdraw');
+    await expect(
+      app.page.getByText(
+        'This browser’s storage is unavailable, so it cannot remember your withdrawals here. Load a receipt file below to check one.'
+      )
+    ).toBeVisible();
   });
 
   test('localStorage writes fail from the start (connect done first): sending is turned off, the receipt is the only copy, a manual payment completes', async ({

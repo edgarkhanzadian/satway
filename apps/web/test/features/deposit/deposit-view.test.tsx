@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { Deposit } from '../../../src/features/deposit/deposit.js';
 import type { Backend } from '../../../src/shared/index.js';
@@ -53,8 +53,19 @@ describe('Deposit without a connected Stacks wallet', () => {
     expect(html).toContain('Before you start');
   });
 
+  it('says the browser cannot remember deposits when its storage is unavailable', () => {
+    expect(render(false)).toContain('This browser’s storage is unavailable');
+  });
+
   it('still offers your deposits, a receipt file and the wallet search', () => {
+    const stored = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => stored.get(key) ?? null,
+      setItem: (key: string, value: string) => void stored.set(key, value),
+      removeItem: (key: string) => void stored.delete(key),
+    });
     const html = render(false);
+    vi.unstubAllGlobals();
     expect(html).toContain('Your deposits');
     expect(html).toContain('This browser does not remember any deposits yet.');
     expect(html).toContain('Load a receipt file');

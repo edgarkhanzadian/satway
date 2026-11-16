@@ -1,5 +1,14 @@
 const PROBE_KEY = 'satway:storage-probe';
 
+export function emptyListNote(what: 'deposits' | 'withdrawals', storageWorks: boolean): string {
+  if (storageWorks) {
+    return what === 'deposits'
+      ? 'This browser does not remember any deposits yet.'
+      : 'This browser does not remember any withdrawals.';
+  }
+  return `This browser’s storage is unavailable, so it cannot remember your ${what} here. Load a receipt file below to check one.`;
+}
+
 export function localStorageWorks(): boolean {
   try {
     const store = globalThis.localStorage;

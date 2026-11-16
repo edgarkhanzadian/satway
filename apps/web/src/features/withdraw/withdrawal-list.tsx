@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { styled } from 'satway-styles/jsx';
 import { actions, button, field, notice, sheet } from 'satway-styles/recipes';
@@ -14,8 +14,10 @@ import {
   abortableFetch,
   activeWithdrawal,
   checkWithdrawal,
+  emptyListNote,
   forgetWithdrawal,
   loadWithdrawals,
+  localStorageWorks,
   useFlow,
   withdrawalId,
 } from '../../shared/index.js';
@@ -86,6 +88,7 @@ export function WithdrawalList(props: {
   onLoaded(receipt: WithdrawalReceiptFile): void;
 }) {
   const { backend } = props;
+  const [storageWorks] = useState(localStorageWorks);
   const flow = useFlow(
     listMachine,
     () => initialList(loadWithdrawals(config), loadKnownStatuses()),
@@ -110,7 +113,7 @@ export function WithdrawalList(props: {
         Your withdrawals
       </styled.h2>
       {entries.length === 0 ? (
-        <p className={notice()}>This browser does not remember any withdrawals.</p>
+        <p className={notice()}>{emptyListNote('withdrawals', storageWorks)}</p>
       ) : (
         <styled.ul
           aria-labelledby="your-withdrawals-title"

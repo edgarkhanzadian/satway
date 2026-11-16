@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { localStorageWorks } from '../../src/shared/browser-storage.js';
+import { emptyListNote, localStorageWorks } from '../../src/shared/browser-storage.js';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -50,5 +50,19 @@ describe('localStorageWorks', () => {
       },
     });
     expect(localStorageWorks()).toBe(false);
+  });
+});
+
+describe('emptyListNote', () => {
+  it('says the list is empty when storage works, and that storage is unavailable when not', () => {
+    expect(emptyListNote('deposits', true)).toBe(
+      'This browser does not remember any deposits yet.'
+    );
+    expect(emptyListNote('withdrawals', true)).toBe(
+      'This browser does not remember any withdrawals.'
+    );
+    expect(emptyListNote('deposits', false)).toBe(
+      'This browser’s storage is unavailable, so it cannot remember your deposits here. Load a receipt file below to check one.'
+    );
   });
 });
