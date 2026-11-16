@@ -9,6 +9,7 @@ import {
   FindDeposits,
   afterEmily,
   foundText,
+  mergeFound,
 } from '../../../src/features/recover/find-deposits.js';
 
 const ACCOUNT = {
@@ -88,5 +89,12 @@ describe('FindDeposits: after the sBTC signers’ API answers', () => {
     expect(foundText(2, 'scan', true)).toBe(
       'Found 2 deposit addresses for this wallet. Checking was stopped early, so the list may be incomplete.'
     );
+  });
+});
+
+describe('FindDeposits: keep scanning', () => {
+  it('adds what a further scan finds to what was already found, once each', () => {
+    const other = { ...ONE, depositIndex: 300, depositAddress: 'bc1pfar' };
+    expect(mergeFound([ONE], [ONE, other])).toEqual([ONE, other]);
   });
 });

@@ -213,6 +213,47 @@ describe('scanDepositAddresses', () => {
     expect(result.deposits.map(d => d.depositIndex)).toEqual([1]);
   });
 
+  it('keeps scanning another window from where the last scan stopped', async () => {
+    const world = esplora(new Set([3, 300]));
+    const first = await scanDepositAddresses({ config, owner, fetchFn: world.fetchFn });
+    expect(first.deposits.map(d => d.depositIndex)).toEqual([3]);
+    expect(first.nextIndex).toBe(3 + 1 + DEPOSIT_INDEX_WINDOW);
+    const more = await scanDepositAddresses({
+      config,
+      owner,
+      fetchFn: world.fetchFn,
+      start: first.nextIndex,
+    });
+    expect(more.deposits.map(d => d.depositIndex)).toEqual([300]);
+    expect(Math.min(...world.asked.slice(first.nextIndex))).toBe(first.nextIndex);
+    expect(more.checked).toBe(300 + 1 + DEPOSIT_INDEX_WINDOW - first.nextIndex);
+    expect(more.nextIndex).toBe(300 + 1 + DEPOSIT_INDEX_WINDOW);
+    expect(more.exhausted).toBe(false);
+  });
+
+  it('a scan stopped early resumes from its stop point', async () => {
+    const controller = new AbortController();
+    const world = esplora(new Set([1, 10]));
+    const stopped = await scanDepositAddresses({
+      config,
+      owner,
+      fetchFn: world.fetchFn,
+      signal: controller.signal,
+      onProgress(p) {
+        if (p.checked >= 8) controller.abort();
+      },
+    });
+    expect(stopped).toMatchObject({ cancelled: true, nextIndex: 8 });
+    const resumed = await scanDepositAddresses({
+      config,
+      owner,
+      fetchFn: world.fetchFn,
+      start: stopped.nextIndex,
+      gap: 10,
+    });
+    expect(resumed.deposits.map(d => d.depositIndex)).toEqual([10]);
+  });
+
   it('surfaces an upstream failure', async () => {
     const world = esplora(new Set(), { failAt: 6 });
     await expect(scanDepositAddresses({ config, owner, fetchFn: world.fetchFn })).rejects.toThrow(

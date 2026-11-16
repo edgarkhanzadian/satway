@@ -174,4 +174,34 @@ test.describe('R9. one Bitcoin deposit address per deposit', () => {
     ).toBeVisible({ timeout: 60_000 });
     await expect(foundButton(app, started.receipt.depositAddress)).toBeVisible();
   });
+
+  test('“Keep scanning” checks the next window past where the gap scan stopped', async ({
+    app,
+    world,
+    wallets,
+    harness,
+  }) => {
+    harness.allowConsoleErrors(FAILED_TO_LOAD);
+    const far = addressAt(world, wallets, 300);
+    world.payTo(far, 20_000);
+    world.mine(1);
+    await reopenWithoutReceipts(app);
+    world.addFault({
+      service: 'emily',
+      path: /^\/deposit\/reclaim-pubkeys\//,
+      outcome: json({ message: 'Service unavailable' }, 503),
+    });
+    await app.page.getByRole('button', { name: 'Search with my wallet' }).click();
+    await expect(
+      app.progress(/^No deposits were found at your possible deposit addresses on Bitcoin\./)
+    ).toBeVisible({ timeout: 60_000 });
+    expect(world.bitcoin.addressLookups).not.toContain(far);
+    await app.page.getByRole('button', { name: 'Keep scanning' }).click();
+    await expect(app.progress(/^Found 1 deposit address for this wallet\./)).toBeVisible({
+      timeout: 60_000,
+    });
+    await expect(foundButton(app, far)).toBeVisible();
+    const first = addressAt(world, wallets, 0);
+    expect(world.bitcoin.addressLookups.filter(a => a === first)).toHaveLength(1);
+  });
 });

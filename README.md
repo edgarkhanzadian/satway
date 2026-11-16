@@ -113,7 +113,8 @@ The rules, in plain words:
   the address is listed as such without replacing the payment instructions. Without a receipt, the Recover tab finds a wallet's registered
   deposits through Emily; when Emily knows none or cannot be reached (a payout
   that was never registered is known only to Bitcoin), it checks the wallet's
-  addresses for index 0, 1, 2… until 256 in a row are unused.
+  addresses for index 0, 1, 2… until 256 in a row are unused, and "Keep
+  scanning" goes on from where that stopped for another 256.
 - The Bitcoin chain decides whether BTC arrived. The swap provider's status and
   our own backend records are never the source of truth.
 - The signer key is not trusted from one API: Hiro and a second Stacks node

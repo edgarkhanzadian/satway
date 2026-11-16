@@ -58,6 +58,14 @@ export function afterEmily(answer: EmilyAnswer): AfterEmily {
   return { found: deposits, scan: false, note: truncated ? EMILY_TRUNCATED_NOTE : null };
 }
 
+export function mergeFound(
+  kept: readonly FoundDeposit[],
+  more: readonly FoundDeposit[]
+): FoundDeposit[] {
+  const seen = new Set(kept.map(d => d.depositAddress));
+  return [...kept, ...more.filter(d => !seen.has(d.depositAddress))];
+}
+
 function foundHead(count: number, source: Source | null): string {
   const registered = source === 'emily' ? 'registered ' : '';
   if (count > 0) {
@@ -98,6 +106,7 @@ export function FindDeposits(props: {
   const [error, setError] = useState<string | null>(null);
   const [scan, setScan] = useState<ScanProgress | null>(null);
   const [cancelled, setCancelled] = useState(false);
+  const [resumeAt, setResumeAt] = useState<number | null>(null);
   const [requests] = useState(latestRequests);
   const abort = useRef<AbortController | null>(null);
   useEffect(
@@ -108,12 +117,18 @@ export function FindDeposits(props: {
     [requests]
   );
 
-  async function scanAddresses(wallet: WalletAccount, isLatest: () => boolean) {
+  async function scanAddresses(
+    wallet: WalletAccount,
+    isLatest: () => boolean,
+    from = 0,
+    kept: readonly FoundDeposit[] = []
+  ) {
     const controller = new AbortController();
     abort.current = controller;
     setPhase('scanning');
-    setScan({ checked: 0, found: 0, nextIndex: 0 });
+    setScan({ checked: 0, found: kept.length, nextIndex: from });
     setCancelled(false);
+    setResumeAt(null);
     try {
       const signers = await fetchVerifiedSigners(config);
       const result = await scanDepositAddresses({
@@ -123,15 +138,17 @@ export function FindDeposits(props: {
           reclaimPublicKey: wallet.reclaimPublicKey,
           signersPublicKey: signers.signersPublicKey,
         },
+        start: from,
         signal: controller.signal,
         onProgress(p) {
-          if (isLatest()) setScan(p);
+          if (isLatest()) setScan({ ...p, found: kept.length + p.found });
         },
       });
       if (!isLatest()) return;
-      setFound(result.deposits);
+      setFound(mergeFound(kept, result.deposits));
       setSource('scan');
       setCancelled(result.cancelled);
+      setResumeAt(result.exhausted ? null : result.nextIndex);
       setPhase('done');
     } catch (err) {
       if (!isLatest()) return;
@@ -172,6 +189,13 @@ export function FindDeposits(props: {
     await scanAddresses(account, isLatest);
   }
 
+  function keepScanning() {
+    if (!account || resumeAt === null) return;
+    const isLatest = requests.begin();
+    setError(null);
+    void scanAddresses(account, isLatest, resumeAt, found);
+  }
+
   function scanInstead() {
     if (!account) return;
     const isLatest = requests.begin();
@@ -201,6 +225,11 @@ export function FindDeposits(props: {
         {phase === 'done' && source === 'emily' && (
           <button className={button()} onClick={scanInstead}>
             Also check my addresses on Bitcoin
+          </button>
+        )}
+        {phase === 'done' && source === 'scan' && resumeAt !== null && (
+          <button className={button()} onClick={keepScanning}>
+            Keep scanning
           </button>
         )}
       </div>

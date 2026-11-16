@@ -58,7 +58,9 @@ export interface ScanProgress {
 export interface ScanResult {
   deposits: FoundDeposit[];
   checked: number;
+  nextIndex: number;
   cancelled: boolean;
+  exhausted: boolean;
 }
 
 export const SCAN_CONCURRENCY = 4;
@@ -66,6 +68,7 @@ export const SCAN_CONCURRENCY = 4;
 export interface ScanInput {
   config: DepositIndexEndpoints;
   owner: DepositIndexOwner;
+  start?: number;
   gap?: number;
   concurrency?: number;
   fetchFn?: FetchLike;
@@ -92,11 +95,22 @@ function foundAt(input: ScanInput, n: number): FoundDeposit {
 export async function scanDepositAddresses(input: ScanInput): Promise<ScanResult> {
   const gap = Math.max(1, input.gap ?? DEPOSIT_INDEX_WINDOW);
   const width = Math.max(1, input.concurrency ?? SCAN_CONCURRENCY);
+  const asked = input.start === undefined ? 0 : Math.floor(input.start);
+  const start = Math.min(Math.max(0, asked), DEPOSIT_INDEX_LIMIT);
   const deposits: FoundDeposit[] = [];
   let unusedRun = 0;
-  let next = 0;
+  let next = start;
+  function result(cancelled: boolean): ScanResult {
+    return {
+      deposits,
+      checked: next - start,
+      nextIndex: next,
+      cancelled,
+      exhausted: next >= DEPOSIT_INDEX_LIMIT,
+    };
+  }
   while (unusedRun < gap && next < DEPOSIT_INDEX_LIMIT) {
-    if (input.signal?.aborted) return { deposits, checked: next, cancelled: true };
+    if (input.signal?.aborted) return result(true);
     const batch = Array.from(
       { length: Math.min(width, gap - unusedRun, DEPOSIT_INDEX_LIMIT - next) },
       (_, i) => foundAt(input, next + i)
@@ -112,7 +126,7 @@ export async function scanDepositAddresses(input: ScanInput): Promise<ScanResult
         )
       );
     } catch (err) {
-      if (input.signal?.aborted) return { deposits, checked: next, cancelled: true };
+      if (input.signal?.aborted) return result(true);
       throw err;
     }
     batch.forEach((d, i) => {
@@ -124,7 +138,7 @@ export async function scanDepositAddresses(input: ScanInput): Promise<ScanResult
       }
     });
     next += batch.length;
-    input.onProgress?.({ checked: next, found: deposits.length, nextIndex: next });
+    input.onProgress?.({ checked: next - start, found: deposits.length, nextIndex: next });
   }
-  return { deposits, checked: next, cancelled: false };
+  return result(false);
 }
