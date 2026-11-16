@@ -1,6 +1,12 @@
 import { notice } from 'satway-styles/recipes';
 
-import { type AddressOutput, MINT_UNKNOWN, type MintStatus, outpointOf } from '@satway/core';
+import {
+  type AddressOutput,
+  MINT_UNKNOWN,
+  type MintStatus,
+  SWAP_AWAITING_FUNDS,
+  outpointOf,
+} from '@satway/core';
 
 import type { RegistrationErrorNote, Snapshot } from '../shared/index.js';
 
@@ -29,6 +35,21 @@ function Where(props: { output: AddressOutput }) {
 export function PayoutDetails(props: { snapshot: Snapshot }) {
   const { snapshot } = props;
   const [only] = snapshot.payouts;
+  const early = snapshot.swap !== null && SWAP_AWAITING_FUNDS.has(snapshot.swap);
+  if (early && snapshot.payouts.length > 0) {
+    return (
+      <>
+        <dt>Paid to this address before your swap paid out</dt>
+        {snapshot.payouts.map(o => (
+          <dd key={outpointOf(o)}>
+            {sats(o.amountSats)}
+            <Where output={o} />. {payoutNote(o, snapshot.mints.get(outpointOf(o)) ?? null)}
+          </dd>
+        ))}
+        <BelowMinimum snapshot={snapshot} />
+      </>
+    );
+  }
   return (
     <>
       {only && snapshot.payouts.length === 1 && (
@@ -51,18 +72,24 @@ export function PayoutDetails(props: { snapshot: Snapshot }) {
           ))}
         </>
       )}
-      {snapshot.belowMinimum.length > 0 && (
-        <>
-          <dt>Too small to mint</dt>
-          {snapshot.belowMinimum.map(o => (
-            <dd key={outpointOf(o)}>
-              {sats(o.amountSats)}
-              <Where output={o} />. Below the sBTC minimum, so it cannot be minted; it can be
-              reclaimed after the timelock if it is worth more than the fee.
-            </dd>
-          ))}
-        </>
-      )}
+      <BelowMinimum snapshot={snapshot} />
+    </>
+  );
+}
+
+function BelowMinimum(props: { snapshot: Snapshot }) {
+  const { snapshot } = props;
+  if (snapshot.belowMinimum.length === 0) return null;
+  return (
+    <>
+      <dt>Too small to mint</dt>
+      {snapshot.belowMinimum.map(o => (
+        <dd key={outpointOf(o)}>
+          {sats(o.amountSats)}
+          <Where output={o} />. Below the sBTC minimum, so it cannot be minted; it can be reclaimed
+          after the timelock if it is worth more than the fee.
+        </dd>
+      ))}
     </>
   );
 }

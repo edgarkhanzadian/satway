@@ -109,7 +109,8 @@ The rules, in plain words:
   minimum at the address is registered and listed. The deposit is done only
   when its swap has succeeded and the payout 1Click names (or, if it names
   none, every output at the address) is minted; a refunded or failed swap shows
-  that outcome. Without a receipt, the Recover tab finds a wallet's registered
+  that outcome, and while the swap still waits for funds an early payment at
+  the address is listed as such without replacing the payment instructions. Without a receipt, the Recover tab finds a wallet's registered
   deposits through Emily; when Emily knows none or cannot be reached (a payout
   that was never registered is known only to Bitcoin), it checks the wallet's
   addresses for index 0, 1, 2… until 256 in a row are unused.

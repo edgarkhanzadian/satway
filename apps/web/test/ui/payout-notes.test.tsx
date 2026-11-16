@@ -241,3 +241,28 @@ describe('SendRecordView', () => {
     expect(out).toContain('I checked my wallet and nothing was sent. Let me try again');
   });
 });
+
+describe('PayoutDetails: a payment before the swap pays out', () => {
+  it.each(['PENDING_DEPOSIT', 'INCOMPLETE_DEPOSIT'] as const)(
+    'with the swap at %s an output at the address is listed as an early payment',
+    swap => {
+      const out = renderToStaticMarkup(
+        <dl>
+          <PayoutDetails snapshot={{ ...EMPTY, swap, payouts: [PAYOUT] }} />
+        </dl>
+      );
+      expect(out).toContain('<dt>Paid to this address before your swap paid out</dt>');
+      expect(out).not.toContain('<dt>Bitcoin payout</dt>');
+      expect(out).toContain('It is not registered with the sBTC signers yet.');
+    }
+  );
+
+  it('once the swap moves on, the same output is the payout', () => {
+    const out = renderToStaticMarkup(
+      <dl>
+        <PayoutDetails snapshot={{ ...EMPTY, swap: 'SUCCESS', payouts: [PAYOUT] }} />
+      </dl>
+    );
+    expect(out).toContain('<dt>Bitcoin payout</dt>');
+  });
+});

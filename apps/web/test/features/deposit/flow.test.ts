@@ -942,7 +942,14 @@ describe('checkProgress: payments to the deposit address', () => {
       expect(snap.payouts).toMatchObject([{ txid: D.txid }]);
       expect(snap.progress.terminal).toBe(false);
       expect(snap.progress.stage).toBe(swap === 'PROCESSING' ? 'swapping' : 'awaiting-funds');
-      expect(snap.progress.message).toMatch(/^sBTC was minted for a payment/);
+      expect(snap.progress.message).toMatch(
+        swap === 'PROCESSING'
+          ? /^sBTC was minted for a payment/
+          : /A payment arrived at this address before your swap paid out\./
+      );
+      if (swap !== 'PROCESSING') {
+        expect(paymentView({ swap, remaining: null }, snap.progress.stage)).toBe('pay');
+      }
     }
   );
 

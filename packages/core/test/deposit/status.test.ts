@@ -305,7 +305,7 @@ describe('deriveProgress: more than one payment to the deposit address', () => {
   });
 
   it('a minted payment while the swap is still in flight is not called done', () => {
-    for (const swap of ['PENDING_DEPOSIT', 'KNOWN_DEPOSIT_TX', 'PROCESSING'] as const) {
+    for (const swap of ['KNOWN_DEPOSIT_TX', 'PROCESSING'] as const) {
       const p = deriveProgress(obs({ swap, payout: first, mint: 'confirmed' }));
       expect(p.stage).not.toBe('done');
       expect(p.terminal).toBe(false);
@@ -422,4 +422,18 @@ describe('deriveProgress: a minted output that may not be this swap’s payout',
       /2 payments arrived at your deposit address anyway.*minted for 1 of them/
     );
   });
+});
+
+describe('deriveProgress: a payment before the swap pays out', () => {
+  it.each(['PENDING_DEPOSIT', 'INCOMPLETE_DEPOSIT'] as const)(
+    'with the swap at %s the send instructions stay and the output is listed as extra',
+    swap => {
+      for (const mint of [null, 'pending', 'confirmed'] as const) {
+        const p = deriveProgress(obs({ swap, payout: payout(), mint }));
+        expect(p).toMatchObject({ stage: 'awaiting-funds', terminal: false });
+        expect(p.needsNotification).toBe(mint === null);
+        expect(p.message).toMatch(/A payment arrived at this address before your swap paid out\./);
+      }
+    }
+  );
 });

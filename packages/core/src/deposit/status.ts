@@ -174,11 +174,11 @@ function payoutProgress(ctx: PayoutContext, o: PayoutObservation): Progress {
   };
 }
 
-const SWAP_IN_FLIGHT: ReadonlySet<OneClickSwapStatus> = new Set([
+const SWAP_IN_FLIGHT: ReadonlySet<OneClickSwapStatus> = new Set(['KNOWN_DEPOSIT_TX', 'PROCESSING']);
+
+export const SWAP_AWAITING_FUNDS: ReadonlySet<OneClickSwapStatus> = new Set([
   'PENDING_DEPOSIT',
   'INCOMPLETE_DEPOSIT',
-  'KNOWN_DEPOSIT_TX',
-  'PROCESSING',
 ]);
 
 function mintedEarlyNote(count: number): string {
@@ -247,6 +247,9 @@ export function deriveProgress(o: Observations): Progress {
   const each = o.payouts.map(p => payoutProgress(o, p));
   if (o.swap === 'REFUNDED' || o.swap === 'FAILED') {
     return alongside(swapProgress(o.swap), each, arrivedAnywayNote(each));
+  }
+  if (o.swap !== null && SWAP_AWAITING_FUNDS.has(o.swap)) {
+    return alongside(swapProgress(o.swap), each, arrivedEarlyNote(each.length));
   }
   const allDone = each.every(p => p.stage === 'done');
   if (allDone && o.swap !== null && SWAP_IN_FLIGHT.has(o.swap)) {
