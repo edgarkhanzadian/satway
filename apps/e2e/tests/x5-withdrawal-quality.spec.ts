@@ -50,11 +50,7 @@ async function expectWithdrawalRoute(app: SatwayApp, tracking: boolean): Promise
   await expect(route.locator('li[aria-current="step"]')).toHaveCount(tracking ? 1 : 0);
 }
 
-async function audit(
-  app: SatwayApp,
-  state: string,
-  tracking: boolean | 'deposit-route'
-): Promise<void> {
+async function audit(app: SatwayApp, state: string, tracking: boolean): Promise<void> {
   await app.harnessIdle();
   expect(
     await blockingFindings(app, state),
@@ -62,7 +58,7 @@ async function audit(
   ).toEqual([]);
   await expectPageStructure(app.page);
   await expectNamedControls(app.page);
-  if (tracking !== 'deposit-route') await expectWithdrawalRoute(app, tracking);
+  await expectWithdrawalRoute(app, tracking);
   expectVisibleFocus(await tabWalk(app.page));
 }
 
@@ -99,8 +95,9 @@ test.describe('X5. accessibility and keyboard use of the withdrawal', () => {
     world.withdrawals.signersReject();
     await withdraw.waitFor(WITHDRAW_PROGRESS.rejected);
     await audit(app, 'rejected', true);
-    await withdraw.openFollow();
-    await audit(app, 'recover with a remembered withdrawal', 'deposit-route');
+    await app.page.getByRole('button', { name: 'Start another' }).click();
+    await expect(withdraw.savedWithdrawals).toHaveCount(1);
+    await audit(app, 'your withdrawals with a remembered withdrawal', false);
   });
 
   test('done passes axe', async ({ app, world, wallets }) => {

@@ -321,8 +321,8 @@ function Following(props: {
         </button>
       </div>
       <p className={afterActions}>
-        You can close this page. The withdrawal continues, and you can follow it later from the
-        Recover tab or by loading the receipt file.
+        You can close this page. The withdrawal continues, and you can follow it later from Your
+        withdrawals on this tab or by loading the receipt file.
       </p>
     </section>
   );

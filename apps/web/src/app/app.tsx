@@ -12,7 +12,7 @@ import {
   requestWithdrawalWithWallet,
   signReclaimWithWallet,
 } from '../features/stacks-wallet/index.js';
-import { FollowWithdrawal, Withdraw, storedActiveWithdrawal } from '../features/withdraw/index.js';
+import { Withdraw, storedActiveWithdrawal } from '../features/withdraw/index.js';
 import {
   type ActiveDeposit,
   type ActiveWithdrawal,
@@ -176,18 +176,6 @@ export function App() {
               requestWithdrawal={requestWithdrawalWithWallet}
               onRoute={setWithdrawRoute}
             />
-          )}
-
-          {withdraw && (
-            <styled.div marginTop="space.10">
-              <FollowWithdrawal
-                backend={backend}
-                onTrack={receipt => {
-                  setActiveWithdrawal({ receipt, receiptUnsaved: false, walletPrompt: false });
-                  setTab('withdraw');
-                }}
-              />
-            </styled.div>
           )}
         </styled.main>
 

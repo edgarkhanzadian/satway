@@ -203,9 +203,9 @@ export class WithdrawPage {
     await expect(stop).toContainText(status);
   }
 
-  async openFollow(): Promise<void> {
+  async openWithdrawals(): Promise<void> {
     await this.app.openTab('Withdraw');
-    await expect(this.page.getByRole('heading', { name: 'Follow a withdrawal' })).toBeVisible();
+    await expect(this.page.getByRole('heading', { name: 'Your withdrawals' })).toBeVisible();
   }
 
   async uploadReceipt(path: string): Promise<void> {
@@ -215,21 +215,14 @@ export class WithdrawPage {
   }
 
   get savedWithdrawals(): Locator {
-    return this.page.getByLabel('Or pick a withdrawal remembered by this browser');
+    return this.page.getByRole('list', { name: 'Your withdrawals' }).getByRole('listitem');
   }
 
-  async pickSaved(startsWith: string): Promise<void> {
-    const options = this.savedWithdrawals.locator('option:not([disabled])');
-    const labels = await options.allInnerTexts();
-    const index = labels.findIndex(l => l.trim().startsWith(startsWith));
-    if (index < 0)
-      throw new Error(`No saved withdrawal starts with "${startsWith}": ${labels.join(' | ')}`);
-    const value = await options.nth(index).getAttribute('value');
-    if (value === null) throw new Error('The saved withdrawal option has no value');
-    await this.savedWithdrawals.selectOption(value);
+  savedWithdrawal(startsWith: string): Locator {
+    return this.savedWithdrawals.filter({ hasText: startsWith });
   }
 
-  async follow(): Promise<void> {
-    await this.page.getByRole('button', { name: 'Follow this withdrawal' }).click();
+  async followSaved(startsWith: string): Promise<void> {
+    await this.savedWithdrawal(startsWith).getByRole('button', { name: 'Follow' }).click();
   }
 }

@@ -35,7 +35,7 @@ test.describe('X4. resuming a withdrawal, and slow or lost answers', () => {
     ).toBeVisible();
   });
 
-  test('the downloaded receipt, in a browser that lost its storage, is followed from the Withdraw tab', async ({
+  test('the downloaded receipt, in a browser that lost its storage, is loaded on the Withdraw tab', async ({
     app,
     world,
     wallets,
@@ -44,11 +44,10 @@ test.describe('X4. resuming a withdrawal, and slow or lost answers', () => {
     await toAwaitingSigners(withdraw, world);
     await app.page.evaluate(() => localStorage.clear());
     await app.page.reload();
-    await withdraw.openFollow();
+    await withdraw.openWithdrawals();
     await expect(withdraw.savedWithdrawals).toHaveCount(0);
     await withdraw.uploadReceipt(started.receiptPath);
     await expect(app.progress(WITHDRAW_PROGRESS.awaitingSigners)).toBeVisible();
-    await withdraw.follow();
     await expect(app.page.getByRole('heading', { name: 'Withdrawal in progress' })).toBeVisible();
     await deliverFromSigners(withdraw, world);
     await expect(app.page.getByRole('heading', { name: 'Withdrawal complete' })).toBeVisible();
@@ -62,22 +61,18 @@ test.describe('X4. resuming a withdrawal, and slow or lost answers', () => {
     const { withdraw, started } = await startWithdrawal(app, world, wallets);
     await toAwaitingSigners(withdraw, world);
     await app.page.getByRole('button', { name: 'Hide' }).click();
-    await withdraw.openFollow();
-    await withdraw.pickSaved('50,000 sats to USDC on base');
-    await expect(app.progress(WITHDRAW_PROGRESS.awaitingSigners)).toBeVisible();
     await expect(
-      app.page.getByText(
-        'This was a single check and is not refreshed here. Select Follow this withdrawal to keep checking.'
-      )
+      withdraw
+        .savedWithdrawal('50,000 sats to USDC on base')
+        .getByText(WITHDRAW_PROGRESS.awaitingSigners)
     ).toBeVisible();
     await app.openYourDeposits();
     await app.uploadReceipt(started.receiptPath);
     await expect(app.page.getByRole('alert')).toHaveText(
       'This is a withdrawal receipt. Load it on the Withdraw tab, under “Your withdrawals”.'
     );
-    await withdraw.openFollow();
-    await withdraw.pickSaved('50,000 sats to USDC on base');
-    await withdraw.follow();
+    await withdraw.openWithdrawals();
+    await withdraw.followSaved('50,000 sats to USDC on base');
     await expect(app.progress(WITHDRAW_PROGRESS.awaitingSigners)).toBeVisible();
   });
 
