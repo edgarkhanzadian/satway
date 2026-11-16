@@ -16,20 +16,14 @@ export function useFlow<S, E, X>(
 ): Flow<S, E> {
   const runRef = useRef(run);
   runRef.current = run;
-  const mounted = useRef(true);
   const [store] = useState(() =>
-    createFlowStore(machine, initial(), effect => {
-      if (mounted.current) runRef.current?.(effect);
-    })
+    createFlowStore(machine, initial(), effect => runRef.current?.(effect))
   );
   const state = useSyncExternalStore(store.subscribe, store.get, store.get);
 
   useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-      store.abortAll();
-    };
+    store.attach();
+    return () => store.detach();
   }, [store]);
 
   return useMemo(

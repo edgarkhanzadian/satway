@@ -6,6 +6,7 @@ export interface Transition<S, X> {
 export interface FlowMachine<S, E, X> {
   reduce(state: S, event: E): Transition<S, X>;
   pending?(state: S): readonly number[];
+  durable?(effect: X): boolean;
 }
 
 export interface FlowStore<S, E> {
@@ -13,6 +14,8 @@ export interface FlowStore<S, E> {
   dispatch(event: E): void;
   signal(request: number): AbortSignal;
   subscribe(listener: () => void): () => void;
+  attach(): void;
+  detach(): void;
   abortAll(): void;
 }
 
@@ -34,12 +37,20 @@ export function nextRequest(last: number): number {
   return last + 1;
 }
 
+interface Queued<E> {
+  event: E;
+}
+
 export function createFlowStore<S, E, X>(
   machine: FlowMachine<S, E, X>,
   initial: S,
   run: (effect: X) => void
 ): FlowStore<S, E> {
   let state = initial;
+  let attached = true;
+  let teardown = 0;
+  let draining = false;
+  const queue: Queued<E>[] = [];
   const listeners = new Set<() => void>();
   const controllers = new Map<number, AbortController>();
 
@@ -56,19 +67,40 @@ export function createFlowStore<S, E, X>(
     }
   }
 
+  function abortAll(): void {
+    for (const controller of controllers.values()) controller.abort();
+    controllers.clear();
+  }
+
+  function apply(event: E): void {
+    const next = machine.reduce(state, event);
+    const changed = next.state !== state;
+    state = next.state;
+    if (changed) {
+      reconcile();
+      for (const listener of [...listeners]) listener();
+    }
+    for (const effect of next.effects) {
+      if (attached || machine.durable?.(effect) === true) run(effect);
+    }
+  }
+
   return {
     get() {
       return state;
     },
     dispatch(event) {
-      const next = machine.reduce(state, event);
-      const changed = next.state !== state;
-      state = next.state;
-      if (changed) {
-        reconcile();
-        for (const listener of [...listeners]) listener();
+      queue.push({ event });
+      if (draining) return;
+      draining = true;
+      try {
+        for (let item = queue.shift(); item !== undefined; item = queue.shift()) apply(item.event);
+      } catch (err) {
+        queue.length = 0;
+        throw err;
+      } finally {
+        draining = false;
       }
-      for (const effect of next.effects) run(effect);
     },
     signal(request) {
       if (!pendingNow().includes(request)) return AbortSignal.abort();
@@ -84,9 +116,18 @@ export function createFlowStore<S, E, X>(
         listeners.delete(listener);
       };
     },
-    abortAll() {
-      for (const controller of controllers.values()) controller.abort();
-      controllers.clear();
+    attach() {
+      attached = true;
+      teardown += 1;
     },
+    detach() {
+      attached = false;
+      teardown += 1;
+      const mine = teardown;
+      queueMicrotask(() => {
+        if (!attached && teardown === mine) abortAll();
+      });
+    },
+    abortAll,
   };
 }

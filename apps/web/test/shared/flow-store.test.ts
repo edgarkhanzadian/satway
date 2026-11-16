@@ -163,6 +163,110 @@ describe('createFlowStore', () => {
     store.dispatch('ping');
     expect(store.get()).toEqual(['ping', 'pong']);
   });
+
+  it('finishes every effect of a transition before it applies an event an effect dispatched', () => {
+    const machine: FlowMachine<string[], string, string> = {
+      reduce(state, event) {
+        const next = [...state, event];
+        return transition(next, event === 'start' ? ['first', 'second'] : []);
+      },
+    };
+    const ran: string[] = [];
+    const store = createFlowStore<string[], string, string>(machine, [], effect => {
+      ran.push(`${effect} saw ${store.get().join(',')}`);
+      if (effect === 'first') store.dispatch('from-first');
+    });
+    store.dispatch('start');
+    expect(ran).toEqual(['first saw start', 'second saw start']);
+    expect(store.get()).toEqual(['start', 'from-first']);
+  });
+
+  it('keeps processing after an effect throws, dropping only the events queued behind it', () => {
+    const machine: FlowMachine<number, 'boom' | 'add', 'throw'> = {
+      reduce: (state, event) =>
+        event === 'boom' ? transition(state, ['throw']) : transition(state + 1),
+    };
+    const store = createFlowStore(machine, 0, () => {
+      store.dispatch('add');
+      throw new Error('effect failed');
+    });
+    expect(() => store.dispatch('boom')).toThrow('effect failed');
+    store.dispatch('add');
+    expect(store.get()).toBe(1);
+  });
+});
+
+describe('the store’s lifecycle, as React mounts and unmounts its component', () => {
+  type Effect = { kind: 'ui' } | { kind: 'save' };
+  const machine: FlowMachine<QuoteState, QuoteEvent | 'ping', Effect> = {
+    reduce: (state, event) =>
+      event === 'ping'
+        ? transition(state, [{ kind: 'ui' }, { kind: 'save' }])
+        : transition(reduceQuote(state, event)),
+    pending: pendingQuote,
+    durable: effect => effect.kind === 'save',
+  };
+
+  function mounted() {
+    const ran: string[] = [];
+    const store = createFlowStore(machine, { kind: 'editing', last: 0 }, effect => {
+      ran.push(effect.kind);
+    });
+    store.attach();
+    return { store, ran };
+  }
+
+  function flushMicrotasks(): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, 0));
+  }
+
+  it('StrictMode: a request started in a mount effect survives the simulated unmount', async () => {
+    const { store } = mounted();
+    store.dispatch({ type: 'requested', amount: '1' });
+    const signal = store.signal(requestOf(store.get()));
+    store.detach();
+    store.attach();
+    await flushMicrotasks();
+    expect(signal.aborted).toBe(false);
+    expect(store.signal(requestOf(store.get()))).toBe(signal);
+  });
+
+  it('a real unmount aborts every pending request', async () => {
+    const { store } = mounted();
+    store.dispatch({ type: 'requested', amount: '1' });
+    const signal = store.signal(requestOf(store.get()));
+    store.detach();
+    expect(signal.aborted).toBe(false);
+    await flushMicrotasks();
+    expect(signal.aborted).toBe(true);
+  });
+
+  it('a remount after a real unmount starts fresh requests that are not aborted', async () => {
+    const { store } = mounted();
+    store.detach();
+    await flushMicrotasks();
+    store.attach();
+    store.dispatch({ type: 'requested', amount: '1' });
+    expect(store.signal(requestOf(store.get())).aborted).toBe(false);
+  });
+
+  it('after unmount, runs durable effects and drops UI-only ones', async () => {
+    const { store, ran } = mounted();
+    store.dispatch('ping');
+    store.detach();
+    await flushMicrotasks();
+    store.dispatch('ping');
+    expect(ran).toEqual(['ui', 'save', 'save']);
+  });
+
+  it('while detached, even briefly, runs only durable effects', () => {
+    const { store, ran } = mounted();
+    store.detach();
+    store.dispatch('ping');
+    store.attach();
+    store.dispatch('ping');
+    expect(ran).toEqual(['save', 'ui', 'save']);
+  });
 });
 
 describe('nextRequest', () => {
