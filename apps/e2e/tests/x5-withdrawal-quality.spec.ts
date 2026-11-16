@@ -1,4 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
+import { writeFile } from 'node:fs/promises';
 
 import type { SatwayApp } from '../src/app/satway-app.js';
 import { WITHDRAW_PROGRESS, WithdrawPage } from '../src/app/withdraw-app.js';
@@ -98,6 +99,30 @@ test.describe('X5. accessibility and keyboard use of the withdrawal', () => {
     await app.page.getByRole('button', { name: 'Start another' }).click();
     await expect(withdraw.savedWithdrawals).toHaveCount(1);
     await audit(app, 'your withdrawals with a remembered withdrawal', false);
+  });
+
+  test('your withdrawals without a Stacks wallet, with a removal prompt and a refused file, passes axe', async ({
+    app,
+    world,
+    wallets,
+  }, testInfo) => {
+    const { withdraw } = await startWithdrawal(app, world, wallets);
+    await withdraw.waitFor(WITHDRAW_PROGRESS.awaitingTx);
+    await app.page.getByRole('button', { name: 'Hide' }).click();
+    await app.page.reload();
+    await withdraw.openWithdrawals();
+    await expect(app.page.getByRole('button', { name: 'Connect Stacks wallet' })).toBeVisible();
+    await audit(app, 'your withdrawals without a wallet', false);
+    const entry = withdraw.savedWithdrawal('50,000 sats to USDC on base');
+    await entry.getByRole('button', { name: 'Remove' }).click();
+    await expect(entry.getByRole('button', { name: 'Keep it' })).toBeVisible();
+    await audit(app, 'your withdrawals asking to remove', false);
+    await entry.getByRole('button', { name: 'Keep it' }).click();
+    const junk = testInfo.outputPath('junk.json');
+    await writeFile(junk, 'not json');
+    await withdraw.uploadReceipt(junk);
+    await expect(app.page.getByRole('alert')).toBeVisible();
+    await audit(app, 'your withdrawals with a refused file', false);
   });
 
   test('done passes axe', async ({ app, world, wallets }) => {
