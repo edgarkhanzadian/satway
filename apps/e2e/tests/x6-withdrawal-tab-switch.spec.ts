@@ -2,7 +2,7 @@ import type { SatwayApp } from '../src/app/satway-app.js';
 import { WITHDRAW_PROGRESS, withdrawalFileSchema } from '../src/app/withdraw-app.js';
 import { expect, test } from '../src/fixtures.js';
 import { openWithdraw, quoteWithdrawal, toDelivered } from '../src/scenario/withdrawal.js';
-import { XVERSE_USER_REJECTION } from '../src/wallets/behaviour.js';
+import { USER_REJECTED } from '../src/wallets/behaviour.js';
 
 const WAITING = 'Waiting for your wallet';
 const UNANSWERED = 'Did your wallet send the withdrawal?';
@@ -73,7 +73,7 @@ test.describe('X6. switching tabs while a withdrawal is in flight', () => {
     await quoteWithdrawal(withdraw);
     await withdraw.continueToConfirm();
     const late = wallets.stacks.behaviour.late('stx_callContract', {
-      reject: { code: XVERSE_USER_REJECTION },
+      reject: { code: USER_REJECTED },
     });
     await withdraw.signButton.click();
     await expect.poll(() => wallets.stacks.behaviour.calls('stx_callContract').length).toBe(1);

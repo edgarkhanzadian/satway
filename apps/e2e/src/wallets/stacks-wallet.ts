@@ -9,6 +9,9 @@ import { type CapturedContractCall, approveContractCall } from './stacks-contrac
 
 export const STACKS_WALLET_ID = 'SatwayTestStacksWallet';
 export const STACKS_WALLET_NAME = 'Test Stacks Wallet';
+export const XVERSE_WALLET_ID = 'XverseProviders.BitcoinProvider';
+export const XVERSE_WALLET_NAME = 'Xverse Wallet';
+export const STACKS_WALLET_NAMES = new RegExp(`^(${STACKS_WALLET_NAME}|${XVERSE_WALLET_NAME})`);
 
 export interface StacksAccount {
   stacksAddress: string;

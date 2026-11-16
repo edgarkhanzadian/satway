@@ -6,7 +6,7 @@ import { parseWith } from '@satway/core';
 import type { Harness } from '../browser/harness.js';
 import { APP_ORIGIN, POLL_INTERVAL_MS } from '../config.js';
 import { EVM_WALLET_NAME } from '../wallets/evm-wallet.js';
-import { STACKS_WALLET_NAME } from '../wallets/stacks-wallet.js';
+import { STACKS_WALLET_NAMES } from '../wallets/stacks-wallet.js';
 import type { World } from '../world/world.js';
 import { type ReceiptFile, receiptFileSchema } from './receipt.js';
 
@@ -112,7 +112,7 @@ export class SatwayApp {
     const modal = this.page.locator('connect-modal');
     await modal
       .getByRole('listitem')
-      .filter({ hasText: STACKS_WALLET_NAME })
+      .filter({ hasText: STACKS_WALLET_NAMES })
       .getByRole('button', { name: 'Connect' })
       .click();
     await expect(this.to.getByText('Connected', { exact: true })).toBeVisible();

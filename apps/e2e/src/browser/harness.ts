@@ -12,6 +12,8 @@ import {
   STACKS_WALLET_ID,
   STACKS_WALLET_NAME,
   type StacksWallet,
+  XVERSE_WALLET_ID,
+  XVERSE_WALLET_NAME,
 } from '../wallets/stacks-wallet.js';
 import type { ApiWorker } from '../worker/worker.js';
 import { type Gate, gate } from '../world/clock.js';
@@ -26,6 +28,12 @@ const ICON =
 export interface WalletSetup {
   evm: boolean;
   stacks: boolean;
+  stacksAs?: 'test' | 'xverse';
+}
+
+function stacksIdentity(as: 'test' | 'xverse'): { id: string; name: string; icon: string } {
+  if (as === 'xverse') return { id: XVERSE_WALLET_ID, name: XVERSE_WALLET_NAME, icon: ICON };
+  return { id: STACKS_WALLET_ID, name: STACKS_WALLET_NAME, icon: ICON };
 }
 
 export interface Wallets {
@@ -173,7 +181,7 @@ export class Harness {
             icon: ICON,
           }
         : null,
-      stacks: setup.stacks ? { id: STACKS_WALLET_ID, name: STACKS_WALLET_NAME, icon: ICON } : null,
+      stacks: setup.stacks ? stacksIdentity(setup.stacksAs ?? 'test') : null,
     };
   }
 

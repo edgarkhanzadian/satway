@@ -17,12 +17,12 @@ import {
 import {
   type ActiveWithdrawal,
   type Backend,
+  StacksWalletDeclinedError,
   type WalletAccount,
   type WithdrawalBackend,
   activeWithdrawal,
   downloadWithdrawalReceipt,
   forgetWithdrawalDraft,
-  isStacksWalletRejection,
   latestRequests,
   loadWithdrawals,
   rememberWithdrawal,
@@ -348,7 +348,7 @@ function WithdrawForm(
       downloadWithdrawalReceipt(receipt);
       show({ receipt, receiptUnsaved: !remembered, walletPrompt: false });
     } catch (err) {
-      if (isStacksWalletRejection(err)) {
+      if (err instanceof StacksWalletDeclinedError) {
         forgetWithdrawalDraft(config, draft);
         setActiveWithdrawal(null);
         show(null);

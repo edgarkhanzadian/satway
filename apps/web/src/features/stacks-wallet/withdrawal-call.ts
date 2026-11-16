@@ -2,6 +2,8 @@ import { request } from '@stacks/connect';
 
 import { type WithdrawalContractCall, normalizeStacksTxid } from '@satway/core';
 
+import { stacksWalletError } from './wallet.js';
+
 export interface WalletCallParams {
   contract: `${string}.${string}`;
   functionName: string;
@@ -28,7 +30,12 @@ export function walletCallParams(call: WithdrawalContractCall): WalletCallParams
 }
 
 export async function requestWithdrawalWithWallet(call: WithdrawalContractCall): Promise<string> {
-  const result = await request('stx_callContract', walletCallParams(call));
+  let result;
+  try {
+    result = await request('stx_callContract', walletCallParams(call));
+  } catch (err) {
+    throw stacksWalletError(err);
+  }
   const txid = result.txid;
   if (typeof txid !== 'string' || txid === '') {
     throw new Error('The wallet did not return a transaction id');

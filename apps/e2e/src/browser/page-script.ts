@@ -94,7 +94,16 @@ export function installSatwayPage(options: PageScriptOptions): void {
         return reply;
       },
     };
-    Reflect.set(window, stacks.id, provider);
+    const path = stacks.id.split('.');
+    const leaf = path.pop() ?? stacks.id;
+    let holder: object = window;
+    for (const part of path) {
+      const next: unknown = Reflect.get(holder, part);
+      const object = typeof next === 'object' && next !== null ? next : {};
+      Reflect.set(holder, part, object);
+      holder = object;
+    }
+    Reflect.set(holder, leaf, provider);
     const existing: unknown = Reflect.get(window, 'wbip_providers');
     const registered: unknown[] = Array.isArray(existing) ? existing : [];
     Reflect.set(window, 'wbip_providers', [

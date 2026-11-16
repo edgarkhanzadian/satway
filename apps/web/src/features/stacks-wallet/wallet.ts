@@ -1,9 +1,13 @@
 import { base64, hex } from '@scure/base';
-import { connect, disconnect, request } from '@stacks/connect';
+import { connect, disconnect, getSelectedProviderId, request } from '@stacks/connect';
 
 import { assertMainnetStandardAddress, toXOnly } from '@satway/core';
 
-import type { WalletAccount } from '../../shared/index.js';
+import { type WalletAccount, declinedOr } from '../../shared/index.js';
+
+export function stacksWalletError(err: unknown): unknown {
+  return declinedOr(err, getSelectedProviderId());
+}
 
 interface Entry {
   address: string;
@@ -28,7 +32,12 @@ export function pickAccount(addresses: Entry[]): WalletAccount {
 }
 
 export async function connectWallet(): Promise<WalletAccount> {
-  const result = await connect({ network: 'mainnet' });
+  let result;
+  try {
+    result = await connect({ network: 'mainnet' });
+  } catch (err) {
+    throw stacksWalletError(err);
+  }
   return pickAccount(result.addresses);
 }
 
@@ -40,12 +49,17 @@ export async function signReclaimWithWallet(
   psbtHex: string,
   account: WalletAccount
 ): Promise<Uint8Array> {
-  const result = await request('signPsbt', {
-    psbt: base64.encode(hex.decode(psbtHex)),
-    signInputs: [{ index: 0, address: account.reclaimKeyAddress }],
-    broadcast: false,
-    network: 'mainnet',
-  });
+  let result;
+  try {
+    result = await request('signPsbt', {
+      psbt: base64.encode(hex.decode(psbtHex)),
+      signInputs: [{ index: 0, address: account.reclaimKeyAddress }],
+      broadcast: false,
+      network: 'mainnet',
+    });
+  } catch (err) {
+    throw stacksWalletError(err);
+  }
   const signed = result.psbt.trim();
   return /^[0-9a-fA-F]+$/.test(signed) ? hex.decode(signed.toLowerCase()) : base64.decode(signed);
 }

@@ -6,8 +6,8 @@ import { actions, button, details, notice } from 'satway-styles/recipes';
 import { errorMessage } from '@satway/core';
 
 import {
+  StacksWalletDeclinedError,
   type WalletAccount,
-  isStacksWalletRejection,
   localStorageWorks,
 } from '../../shared/index.js';
 import { connected, end, endLede, endTitle, short } from '../../ui/index.js';
@@ -33,7 +33,7 @@ export function StacksWalletPanel(props: {
       props.onChange(await connectWallet());
     } catch (err) {
       setError(
-        isStacksWalletRejection(err)
+        err instanceof StacksWalletDeclinedError
           ? 'The wallet was closed without connecting. Connect again when you are ready.'
           : errorMessage(err) || 'Wallet connection was cancelled'
       );

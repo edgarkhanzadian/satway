@@ -25,9 +25,9 @@ import {
   type Backend,
   type Receipt,
   type Snapshot,
+  StacksWalletDeclinedError,
   type WalletAccount,
   checkProgress,
-  isStacksWalletRejection,
   latestRequests,
   loadReceipts,
   receiptId,
@@ -199,7 +199,7 @@ export function Recover(props: {
       if (isCurrent()) setSnapshot(next);
     } catch (err) {
       setError(
-        isStacksWalletRejection(err)
+        err instanceof StacksWalletDeclinedError
           ? 'You declined the request in your wallet, so nothing was signed or broadcast.'
           : (errorMessage(err) ?? null)
       );
