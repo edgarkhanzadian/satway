@@ -1,22 +1,25 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 
 import {
+  type FetchLike,
   checkPastedWithdrawalTransaction,
   MAINNET_WITHDRAWAL_FLOW_CONFIG as config,
-  errorMessage,
 } from '@satway/core';
 
 import {
   type ActiveWithdrawal,
   type Backend,
+  type WithdrawalReceiptFile,
   checkWithdrawal,
   downloadWithdrawalReceipt,
   forgetWithdrawalDraft,
   rememberWithdrawal,
   setActiveWithdrawal,
   useFlow,
+  withdrawalId,
 } from '../../shared/index.js';
 import { storedWithdrawal } from './stored-withdrawal.js';
+import { type TrackingIo, trackingRunner } from './tracking-effects.js';
 import {
   type TrackingEffect,
   type TrackingEvent,
@@ -38,9 +41,74 @@ export interface Tracking {
   discard(): void;
 }
 
+export function abortableFetch(signal: AbortSignal): FetchLike {
+  return (input, init) =>
+    fetch(input, {
+      ...init,
+      signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal,
+    });
+}
+
+export function abortableStatus(backend: Pick<Backend, 'status'>, signal: AbortSignal) {
+  return {
+    status(depositAddress: string) {
+      if (signal.aborted) return Promise.reject(new Error('This check was stopped.'));
+      return backend.status(depositAddress);
+    },
+  };
+}
+
+export function trackingIo(deps: Omit<TrackingDeps, 'active'>): TrackingIo {
+  const { backend, onActive } = deps;
+  function show(receipt: WithdrawalReceiptFile, receiptUnsaved: boolean) {
+    const id = withdrawalId(receipt);
+    onActive(current =>
+      current === null || withdrawalId(current.receipt) === id
+        ? { receipt, receiptUnsaved, walletPrompt: false }
+        : current
+    );
+  }
+  return {
+    check(effect, signal) {
+      return checkWithdrawal(
+        config,
+        abortableStatus(backend, signal),
+        effect.receipt,
+        effect.stacksTxid,
+        abortableFetch(signal),
+        effect.softMismatches
+      );
+    },
+    checkTxid(effect) {
+      return checkPastedWithdrawalTransaction(config, effect.txid, {
+        sender: effect.receipt.sender,
+        amountSats: effect.receipt.amountSats,
+        maxFeeSats: effect.receipt.maxFeeSats,
+        recipient: effect.receipt.recipient,
+      });
+    },
+    adopt(receipt) {
+      const remembered = rememberWithdrawal(config, receipt);
+      setActiveWithdrawal(receipt);
+      downloadWithdrawalReceipt(receipt);
+      show(receipt, !remembered);
+    },
+    resume(receipt) {
+      setActiveWithdrawal(receipt);
+      show(receipt, false);
+    },
+    forget(receipt) {
+      forgetWithdrawalDraft(config, receipt);
+      setActiveWithdrawal(null);
+      onActive(current =>
+        current === null || withdrawalId(current.receipt) === withdrawalId(receipt) ? null : current
+      );
+    },
+  };
+}
+
 export function useTracking(deps: TrackingDeps): Tracking {
-  const { backend, active, onActive } = deps;
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const { active } = deps;
   const flow = useFlow(
     trackingMachine,
     () => initialTracking(active.receipt, active.walletPrompt),
@@ -48,89 +116,13 @@ export function useTracking(deps: TrackingDeps): Tracking {
   );
   const { dispatch } = flow;
 
-  async function poll(effect: Extract<TrackingEffect, { type: 'check' }>) {
-    try {
-      const snapshot = await checkWithdrawal(
-        config,
-        backend,
-        effect.receipt,
-        effect.stacksTxid,
-        undefined,
-        effect.softMismatches
-      );
-      dispatch({ type: 'polled', request: effect.request, snapshot });
-    } catch (err) {
-      dispatch({
-        type: 'poll-failed',
-        request: effect.request,
-        message: errorMessage(err) ?? 'unknown error',
-      });
-    }
-  }
-
-  async function checkTxid(effect: Extract<TrackingEffect, { type: 'check-txid' }>) {
-    try {
-      const check = await checkPastedWithdrawalTransaction(config, effect.txid, {
-        sender: effect.receipt.sender,
-        amountSats: effect.receipt.amountSats,
-        maxFeeSats: effect.receipt.maxFeeSats,
-        recipient: effect.receipt.recipient,
-      });
-      dispatch({ type: 'txid-checked', request: effect.request, check });
-    } catch (err) {
-      dispatch({
-        type: 'txid-check-failed',
-        request: effect.request,
-        message: errorMessage(err) ?? 'unknown error',
-      });
-    }
-  }
-
   function run(effect: TrackingEffect) {
-    switch (effect.type) {
-      case 'check':
-        void poll(effect);
-        return;
-      case 'wait':
-        clearTimeout(timer.current);
-        timer.current = setTimeout(
-          () => dispatch({ type: 'poll-due', request: effect.request }),
-          effect.delayMs
-        );
-        return;
-      case 'check-txid':
-        void checkTxid(effect);
-        return;
-      case 'adopt': {
-        const remembered = rememberWithdrawal(config, effect.receipt);
-        setActiveWithdrawal(effect.receipt);
-        downloadWithdrawalReceipt(effect.receipt);
-        onActive(() => ({
-          receipt: effect.receipt,
-          receiptUnsaved: !remembered,
-          walletPrompt: false,
-        }));
-        return;
-      }
-      case 'resume':
-        setActiveWithdrawal(effect.receipt);
-        onActive(() => ({ receipt: effect.receipt, receiptUnsaved: false, walletPrompt: false }));
-        return;
-      case 'forget':
-        forgetWithdrawalDraft(config, effect.receipt);
-        setActiveWithdrawal(null);
-        onActive(() => null);
-        return;
-      default:
-        throw new Error(`Unknown tracking effect ${String(effect satisfies never)}`);
-    }
+    trackingRunner(trackingIo(deps), flow)(effect);
   }
 
   useEffect(() => {
     dispatch({ type: 'shown', receipt: active.receipt, walletPrompt: active.walletPrompt });
   }, [dispatch, active.receipt, active.walletPrompt]);
-
-  useEffect(() => () => clearTimeout(timer.current), []);
 
   return {
     view: trackingView(flow.state),

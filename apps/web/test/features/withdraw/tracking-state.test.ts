@@ -10,7 +10,9 @@ import {
   type TrackingEffect,
   type TrackingEvent,
   type TrackingState,
+  durableTrackingEffect,
   initialTracking,
+  pendingPoll,
   reduceTracking,
   trackingView,
 } from '../../../src/features/withdraw/tracking-state.js';
@@ -385,6 +387,17 @@ describe('discarding an unconfirmed withdrawal', () => {
     }
   });
 
+  it('is ignored while a pasted txid is being checked, so a verified answer cannot be lost', () => {
+    const asked = run(
+      initialTracking(DRAFT, false),
+      { type: 'txid-typed', text: OTHER_TXID },
+      { type: 'txid-submitted' }
+    );
+    const discarded = run(asked.state, { type: 'discard-requested', stored: DRAFT });
+    expect(discarded.state).toBe(asked.state);
+    expect(discarded.effects).toEqual([]);
+  });
+
   it('is ignored outside the unconfirmed screen', () => {
     const state = initialTracking(DRAFT, true);
     const result = run(state, { type: 'discard-requested', stored: null });
@@ -432,5 +445,26 @@ describe('trackingView', () => {
       milestones: null,
       changeable: false,
     });
+  });
+});
+
+describe('what the store aborts and what it always runs', () => {
+  it('names the poll in flight or waiting as pending, and nothing once polling stopped', () => {
+    const first = started();
+    expect(pendingPoll(first.state)).toEqual([pollRequest(first.state)]);
+    const waiting = polledWith(first.state, PENDING);
+    expect(pendingPoll(waiting.state)).toEqual([pollRequest(waiting.state)]);
+    expect(pendingPoll(polledWith(first.state, HARD_MISMATCH).state)).toEqual([]);
+    expect(pendingPoll(initialTracking(DRAFT, false))).toEqual([]);
+  });
+
+  it('marks saving, resuming and forgetting a withdrawal as durable, and network effects as not', () => {
+    expect(durableTrackingEffect({ type: 'adopt', receipt: SENT })).toBe(true);
+    expect(durableTrackingEffect({ type: 'resume', receipt: SENT })).toBe(true);
+    expect(durableTrackingEffect({ type: 'forget', receipt: DRAFT })).toBe(true);
+    expect(durableTrackingEffect({ type: 'wait', request: 1, delayMs: 1 })).toBe(false);
+    expect(
+      durableTrackingEffect({ type: 'check-txid', request: 1, receipt: DRAFT, txid: OTHER_TXID })
+    ).toBe(false);
   });
 });

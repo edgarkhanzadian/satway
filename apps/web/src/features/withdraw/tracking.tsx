@@ -176,7 +176,13 @@ function UnconfirmedSignature(props: {
         has not moved.
       </p>
       <TxidEntry entry={props.entry} dispatch={props.dispatch}>
-        <button className={button()} onClick={props.onDiscard}>
+        <button
+          className={button()}
+          aria-disabled={props.entry.checking}
+          onClick={() => {
+            if (!props.entry.checking) props.onDiscard();
+          }}
+        >
           Nothing was sent. Discard it
         </button>
       </TxidEntry>

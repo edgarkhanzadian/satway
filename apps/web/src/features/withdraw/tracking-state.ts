@@ -292,7 +292,9 @@ function txidCheckFailed(state: TrackingState, request: number, message: string)
 }
 
 function discardRequested(state: TrackingState, stored: WithdrawalReceiptFile | null): Step {
-  if (state.kind !== 'unconfirmed') return transition(state);
+  if (state.kind !== 'unconfirmed' || state.entry.check.kind === 'checking') {
+    return transition(state);
+  }
   const sent =
     stored !== null && withdrawalId(stored) === withdrawalId(state.receipt)
       ? stored.stacksTxid
@@ -338,8 +340,21 @@ export function reduceTracking(state: TrackingState, event: TrackingEvent): Step
   }
 }
 
+export function pendingPoll(state: TrackingState): readonly number[] {
+  if (state.kind !== 'following') return [];
+  return state.poll.kind === 'checking' || state.poll.kind === 'waiting'
+    ? [state.poll.request]
+    : [];
+}
+
+export function durableTrackingEffect(effect: TrackingEffect): boolean {
+  return effect.type === 'adopt' || effect.type === 'resume' || effect.type === 'forget';
+}
+
 export const trackingMachine: FlowMachine<TrackingState, TrackingEvent, TrackingEffect> = {
   reduce: reduceTracking,
+  pending: pendingPoll,
+  durable: durableTrackingEffect,
 };
 
 export interface TxidEntryView {
