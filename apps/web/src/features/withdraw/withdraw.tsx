@@ -4,12 +4,7 @@ import { css, cx } from 'satway-styles/css';
 import { styled } from 'satway-styles/jsx';
 import { actions, button, details, field, notice, sheet } from 'satway-styles/recipes';
 
-import {
-  type SourceWallet,
-  isUserRejection,
-  nextRefundField,
-  walletAddressFor,
-} from '@satway/chains';
+import { type SourceWallet, nextRefundField, walletAddressFor } from '@satway/chains';
 import {
   type OneClickToken,
   type WithdrawalContractCall,
@@ -27,6 +22,7 @@ import {
   activeWithdrawal,
   downloadWithdrawalReceipt,
   forgetWithdrawalDraft,
+  isStacksWalletRejection,
   latestRequests,
   rememberWithdrawal,
   setActiveWithdrawal,
@@ -326,7 +322,7 @@ function WithdrawForm(
       downloadWithdrawalReceipt(receipt);
       props.onStarted(receipt, !remembered);
     } catch (err) {
-      if (isUserRejection(err)) {
+      if (isStacksWalletRejection(err)) {
         forgetWithdrawalDraft(config, draft);
         setActiveWithdrawal(null);
         setError('You declined the request in your wallet, so nothing was signed or sent.');

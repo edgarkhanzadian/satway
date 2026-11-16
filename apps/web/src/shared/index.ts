@@ -4,6 +4,7 @@ export * from './latest-request.js';
 export * from './progress.js';
 export * from './receipt.js';
 export * from './send-records.js';
+export * from './stacks-wallet-rejection.js';
 export * from './wallet-account.js';
 export * from './withdrawal-backend.js';
 export * from './withdrawal-progress.js';

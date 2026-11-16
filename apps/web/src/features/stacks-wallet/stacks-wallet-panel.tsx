@@ -5,7 +5,11 @@ import { actions, button, details, notice } from 'satway-styles/recipes';
 
 import { errorMessage } from '@satway/core';
 
-import { type WalletAccount, localStorageWorks } from '../../shared/index.js';
+import {
+  type WalletAccount,
+  isStacksWalletRejection,
+  localStorageWorks,
+} from '../../shared/index.js';
 import { connected, end, endLede, endTitle, short } from '../../ui/index.js';
 import { connectWallet, disconnectWallet } from './wallet.js';
 
@@ -28,7 +32,11 @@ export function StacksWalletPanel(props: {
     try {
       props.onChange(await connectWallet());
     } catch (err) {
-      setError(errorMessage(err) || 'Wallet connection was cancelled');
+      setError(
+        isStacksWalletRejection(err)
+          ? 'The wallet was closed without connecting. Connect again when you are ready.'
+          : errorMessage(err) || 'Wallet connection was cancelled'
+      );
     } finally {
       setBusy(false);
     }

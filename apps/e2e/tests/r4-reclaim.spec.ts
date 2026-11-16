@@ -15,6 +15,7 @@ import {
   reclaimFromRecover,
   reviewReclaim,
 } from '../src/scenario/reclaim.js';
+import { USER_REJECTED, XVERSE_USER_REJECTION } from '../src/wallets/behaviour.js';
 import { outpointKey } from '../src/world/bitcoin.js';
 import { json } from '../src/world/http.js';
 import type { PayoutResult, World } from '../src/world/world.js';
@@ -177,30 +178,34 @@ test.describe('R4. the mint never happens, so the user reclaims after the timelo
     expect(world.bitcoin.isSpent(payout.outpoint)).toBe(true);
   });
 
-  test('the user rejects the PSBT in the wallet: nothing is broadcast and a retry works', async ({
-    app,
-    world,
-    wallets,
-  }) => {
-    const { started, payout } = await toReclaimable(app, world);
-    await openInRecover(app, started);
-    wallets.stacks.behaviour.reject('signPsbt', {
-      code: 4001,
-      message: 'User rejected the request.',
-    });
-    const to = wallets.stacks.account.paymentAddress;
-    await reclaimFromRecover(app, to);
-    await expect(app.sendError).toHaveText('User rejected the request.');
-    expect(world.bitcoin.broadcasts).toEqual([]);
-    expect(world.bitcoin.isSpent(payout.outpoint)).toBe(false);
-    await expect(reclaimControls(app).confirm).toBeEnabled();
+  for (const [wallet, code] of [
+    ['Leather', USER_REJECTED],
+    ['Xverse', XVERSE_USER_REJECTION],
+  ] as const) {
+    test(`the user rejects the PSBT in ${wallet} (${code}): nothing is broadcast and a retry works`, async ({
+      app,
+      world,
+      wallets,
+    }) => {
+      const { started, payout } = await toReclaimable(app, world);
+      await openInRecover(app, started);
+      wallets.stacks.behaviour.reject('signPsbt', { code, message: 'User rejected the request.' });
+      const to = wallets.stacks.account.paymentAddress;
+      await reclaimFromRecover(app, to);
+      await expect(app.sendError).toHaveText(
+        'You declined the request in your wallet, so nothing was signed or broadcast.'
+      );
+      expect(world.bitcoin.broadcasts).toEqual([]);
+      expect(world.bitcoin.isSpent(payout.outpoint)).toBe(false);
+      await expect(reclaimControls(app).confirm).toBeEnabled();
 
-    await reclaimControls(app).confirm.click();
-    await expect(app.progress(/^Reclaim sent for /)).toBeVisible();
-    expect(wallets.stacks.behaviour.calls('signPsbt')).toHaveLength(2);
-    expect(world.bitcoin.broadcasts).toHaveLength(1);
-    expect(world.bitcoin.isSpent(payout.outpoint)).toBe(true);
-  });
+      await reclaimControls(app).confirm.click();
+      await expect(app.progress(/^Reclaim sent for /)).toBeVisible();
+      expect(wallets.stacks.behaviour.calls('signPsbt')).toHaveLength(2);
+      expect(world.bitcoin.broadcasts).toHaveLength(1);
+      expect(world.bitcoin.isSpent(payout.outpoint)).toBe(true);
+    });
+  }
 
   test('the signers sweep the output between "reclaimable" and the click: already spent, then minted', async ({
     app,

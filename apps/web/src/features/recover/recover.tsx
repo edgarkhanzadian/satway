@@ -27,6 +27,7 @@ import {
   type Snapshot,
   type WalletAccount,
   checkProgress,
+  isStacksWalletRejection,
   latestRequests,
   loadReceipts,
   receiptId,
@@ -197,7 +198,11 @@ export function Recover(props: {
       const next = await checkProgress(config, props.backend, receipt);
       if (isCurrent()) setSnapshot(next);
     } catch (err) {
-      setError(errorMessage(err) ?? null);
+      setError(
+        isStacksWalletRejection(err)
+          ? 'You declined the request in your wallet, so nothing was signed or broadcast.'
+          : (errorMessage(err) ?? null)
+      );
     } finally {
       setBusy(false);
     }

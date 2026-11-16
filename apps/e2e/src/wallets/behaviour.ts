@@ -1,6 +1,8 @@
 import { realNow } from '../world/clock.js';
 
 export const USER_REJECTED = 4001;
+export const XVERSE_USER_REJECTION = -32000;
+export const STACKS_CONNECT_USER_CANCELED = -31001;
 
 export type Reaction =
   | { kind: 'approve' }
