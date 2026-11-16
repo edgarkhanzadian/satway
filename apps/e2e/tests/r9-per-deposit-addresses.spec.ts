@@ -185,6 +185,7 @@ test.describe('R9. one Bitcoin deposit address per deposit', () => {
     const far = addressAt(world, wallets, 300);
     world.payTo(far, 20_000);
     world.mine(1);
+    await app.open();
     await reopenWithoutReceipts(app);
     world.addFault({
       service: 'emily',
