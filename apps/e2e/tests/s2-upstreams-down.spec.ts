@@ -16,7 +16,6 @@ import {
 import { openReceiptInRecover, toMinting, toReclaimable } from '../src/scenario/states.js';
 import { outpointKey } from '../src/world/bitcoin.js';
 import { json } from '../src/world/http.js';
-import { TOKENS } from '../src/world/oneclick.js';
 import type { FaultOutcome, Service, World } from '../src/world/world.js';
 
 const MARKER = 'MALFORMED-PAYLOAD-MARKER-7f3a';
@@ -236,67 +235,5 @@ test.describe('S2. an upstream is down while a deposit is tracked', () => {
     await expect(problem(app)).toHaveCount(0);
     await expect(app.sendButton).toBeVisible();
     held.release();
-  });
-
-  test.describe('a Solana deposit', () => {
-    test.use({ walletSetup: { evm: false, stacks: true, solana: { features: ['signAndSend'] } } });
-
-    async function startSol(app: SatwayApp): Promise<void> {
-      await app.open();
-      await app.connectStacksWallet();
-      await app.connectSolanaWallet();
-      await app.fillDeposit({ asset: 'SOL on sol', amount: '0.5' });
-      await app.getQuote();
-      await app.continue();
-      await app.waitForProgress(PROGRESS.awaitingFunds);
-      await expect(app.sendButton).toBeVisible();
-    }
-
-    for (const failure of FAILURES) {
-      test(`the Solana RPC fails at send (${failure.name}): the wallet is never asked, nothing is recorded as sent, a retry works`, async ({
-        app,
-        world,
-        wallets,
-      }) => {
-        await startSol(app);
-        world.addFault({ service: 'solana', outcome: failure.outcome });
-        await app.clickSend();
-        await expect(app.sendError).toBeVisible();
-        await expectNoPayload(app);
-        expect(wallets.solana.signRequests).toEqual([]);
-        expect(world.solana.submissions).toEqual([]);
-        expect(await app.sendRecords()).toEqual([]);
-        await expect(app.sendButton).toBeVisible();
-
-        world.clearFaults();
-        await app.sendFromWallet();
-        expect(world.solana.submissions).toHaveLength(1);
-        expect(world.swap().token.assetId).toBe(TOKENS.sol.assetId);
-      });
-    }
-
-    test('a held Solana RPC call at send: no second send is offered while it hangs, it times out before the wallet is asked, and a retry works', async ({
-      app,
-      world,
-      wallets,
-    }) => {
-      await startSol(app);
-      const held = world.hold({ service: 'solana', rpcMethod: 'getLatestBlockhash' });
-      await app.clickSend();
-      await expect(
-        app.page.getByRole('button', { name: 'Confirm in your wallet…' })
-      ).toBeDisabled();
-      await app.fastForward(14_000);
-      await expectNoSendOffered(app);
-      expect(wallets.solana.signRequests).toEqual([]);
-      await app.fastForward(1_000);
-      await expect(app.sendError).toHaveText(/within 15 seconds/);
-      expect(wallets.solana.signRequests).toEqual([]);
-      expect(world.solana.submissions).toEqual([]);
-      expect(await app.sendRecords()).toEqual([]);
-      held.release();
-      await app.sendFromWallet();
-      expect(world.solana.submissions).toHaveLength(1);
-    });
   });
 });

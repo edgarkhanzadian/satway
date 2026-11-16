@@ -51,15 +51,12 @@ describe('checkDestinationAddress', () => {
     expect(check.ok ? '' : check.message).toMatch(message);
   });
 
-  it('accepts a Solana address and refuses EVM addresses or the system program on Solana', () => {
-    expect(checkDestinationAddress('sol', SOLANA_WALLET)).toEqual({
-      ok: true,
-      address: SOLANA_WALLET,
-    });
-    const evm = checkDestinationAddress('sol', FIRST);
-    expect(evm.ok ? '' : evm.message).toMatch(/not a Solana address/);
-    const system = checkDestinationAddress('sol', '11111111111111111111111111111111');
-    expect(system.ok ? '' : system.message).toMatch(/program address/);
+  it('refuses withdrawals to Solana, whatever the address', () => {
+    for (const address of [SOLANA_WALLET, FIRST]) {
+      const check = checkDestinationAddress('sol', address);
+      expect(check.ok).toBe(false);
+      expect(check.ok ? '' : check.message).toMatch(/to sol are not supported/);
+    }
   });
 
   it('refuses empty input and spaces', () => {
@@ -78,10 +75,10 @@ describe('checkDestinationAddress', () => {
 });
 
 describe('destinationSupported', () => {
-  it('supports EVM chains and Solana only', () => {
+  it('supports EVM chains only', () => {
     expect(destinationSupported('base')).toBe(true);
     expect(destinationSupported('eth')).toBe(true);
-    expect(destinationSupported('sol')).toBe(true);
+    expect(destinationSupported('sol')).toBe(false);
     expect(destinationSupported('tron')).toBe(false);
     expect(destinationSupported('btc')).toBe(false);
     expect(destinationSupported('near')).toBe(false);

@@ -30,15 +30,11 @@ export const UPSTREAM = {
   mempool: 'https://mempool.space',
   emily: 'https://sbtc-emily.com',
   oneClick: 'https://1click.chaindefuser.com',
-  solanaRpc: 'https://rpc.walletconnect.org',
 } as const;
-
-export const SOLANA_MAINNET_CAIP2 = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
 
 export const PAGE_REACHABLE_UPSTREAMS: readonly string[] = [
   UPSTREAM.hiro,
   UPSTREAM.alex,
   UPSTREAM.mempool,
   UPSTREAM.emily,
-  UPSTREAM.solanaRpc,
 ];

@@ -141,7 +141,7 @@ describe('withdrawalDestinations', () => {
       ],
       W.btcAssetId
     );
-    expect(list.map(t => t.assetId)).toEqual([BASE_USDC, 'sol', 'a']);
+    expect(list.map(t => t.assetId)).toEqual([BASE_USDC, 'a']);
   });
 });
 

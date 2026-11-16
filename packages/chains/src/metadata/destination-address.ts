@@ -1,16 +1,15 @@
 import { keccak_256 } from '@noble/hashes/sha3';
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils';
 
-import { chainFamily, isSolanaAddress } from './chain-metadata.js';
+import { isEvmChain } from './chain-metadata.js';
 
 export type DestinationCheck = { ok: true; address: string } | { ok: false; message: string };
 
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const EVM_ZERO = `0x${'0'.repeat(40)}`;
-const SOLANA_SYSTEM_PROGRAM = '11111111111111111111111111111111';
 
 export function destinationSupported(blockchain: string): boolean {
-  return chainFamily(blockchain) !== 'other';
+  return isEvmChain(blockchain);
 }
 
 export function evmChecksumAddress(address: string): string {
@@ -44,34 +43,17 @@ function checkEvm(address: string): DestinationCheck {
   return { ok: true, address };
 }
 
-function checkSolana(address: string): DestinationCheck {
-  if (!isSolanaAddress(address)) {
-    return { ok: false, message: 'This is not a Solana address.' };
-  }
-  if (address === SOLANA_SYSTEM_PROGRAM) {
-    return { ok: false, message: 'This is a Solana program address, not a wallet.' };
-  }
-  return { ok: true, address };
-}
-
 export function checkDestinationAddress(blockchain: string, input: string): DestinationCheck {
   const address = input.trim();
   if (address === '') return { ok: false, message: 'Enter the address that receives the funds.' };
   if (address !== input || /\s/.test(address)) {
     return { ok: false, message: 'The address has spaces in it. Copy it again from your wallet.' };
   }
-  const family = chainFamily(blockchain);
-  switch (family) {
-    case 'evm':
-      return checkEvm(address);
-    case 'solana':
-      return checkSolana(address);
-    case 'other':
-      return {
-        ok: false,
-        message: `Withdrawals to ${blockchain} are not supported, because addresses on it cannot be checked here.`,
-      };
-    default:
-      throw new Error(`Unknown chain family ${String(family satisfies never)}`);
+  if (!destinationSupported(blockchain)) {
+    return {
+      ok: false,
+      message: `Withdrawals to ${blockchain} are not supported, because addresses on it cannot be checked here.`,
+    };
   }
+  return checkEvm(address);
 }

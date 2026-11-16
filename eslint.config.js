@@ -12,9 +12,8 @@ const coreDeepImport = {
 };
 
 const chainsDeepImport = {
-  group: ['@satway/chains/*', '!@satway/chains/solana'],
-  message:
-    'Import from the package entry @satway/chains, or @satway/chains/solana for the lazily loaded Solana send code, not from its internal files.',
+  group: ['@satway/chains/*'],
+  message: 'Import from the package entry @satway/chains, not from its internal files.',
 };
 
 const zodThroughCore = {
@@ -306,14 +305,7 @@ export default defineConfig([
                 'apps/web/src/ui is presentational. Read from the network in a feature or in shared, and pass the result down.',
             },
           ],
-          patterns: [
-            ...webRestrictedPatterns,
-            {
-              group: ['@satway/chains/solana'],
-              message:
-                'apps/web/src/ui is presentational. The Solana send code reads the Solana RPC; call it from a feature.',
-            },
-          ],
+          patterns: webRestrictedPatterns,
         },
       ],
     },

@@ -100,8 +100,6 @@ describe('mint status notes', () => {
 });
 
 describe('SendRecordView', () => {
-  const SIG =
-    '4QMdVtgtZcuygfB7RnGhZvrPxVDjXU7WgaKCaYEd2XSeQYMGKSrthoiV4GmL6pq2fu5gHaoiHofNEYTNSJuryyr';
   const base = {
     version: 1 as const,
     swap: { address: 'x', memo: null },
@@ -116,15 +114,13 @@ describe('SendRecordView', () => {
       <SendRecordView
         record={record}
         note={null}
-        resending={false}
         now={now}
-        onResend={() => undefined}
         onConfirmNothingSent={() => undefined}
       />
     );
   }
 
-  const attempting: SendRecord = { ...base, state: 'attempting', family: 'evm', signed: null };
+  const attempting: SendRecord = { ...base, state: 'attempting' };
   const CONFIRM = 'I checked my wallet and nothing was sent. Let me try again';
 
   it.each([
@@ -148,7 +144,7 @@ describe('SendRecordView', () => {
 
   it('does not hold back the confirmation for an uncertain record, whatever its age', () => {
     const out = view(
-      { ...base, state: 'uncertain', family: 'evm', tx: null, message: 'x', signed: null },
+      { ...base, state: 'uncertain', tx: null, message: 'x' },
       new Date(STARTED + 1_000)
     );
     expect(out).toContain(CONFIRM);
@@ -158,7 +154,6 @@ describe('SendRecordView', () => {
     const out = view({
       ...base,
       state: 'sent',
-      family: 'evm',
       tx: `0x${'ab'.repeat(32)}`,
       via: 'wallet',
     });
@@ -168,7 +163,6 @@ describe('SendRecordView', () => {
     const confirmed = view({
       ...base,
       state: 'sent',
-      family: 'evm',
       tx: `0x${'ab'.repeat(32)}`,
       via: 'wallet',
       confirmed: true,
@@ -180,27 +174,10 @@ describe('SendRecordView', () => {
     const out = view({
       ...base,
       state: 'uncertain',
-      family: 'evm',
       tx: null,
       message: 'Request expired',
-      signed: null,
     });
     expect(out).toContain('Check your wallet’s activity');
     expect(out).toContain('I checked my wallet and nothing was sent. Let me try again');
-    expect(out).not.toContain('Send the same signed transaction again');
-  });
-
-  it('offers to resend the same signed Solana transaction and shows its signature', () => {
-    const out = view({
-      ...base,
-      state: 'uncertain',
-      family: 'solana',
-      tx: SIG,
-      message: 'Solana did not confirm',
-      signed: { signature: SIG, transaction: 'AQ==', lastValidBlockHeight: '5' },
-    });
-    expect(out).toContain(SIG);
-    expect(out).toContain('Send the same signed transaction again');
-    expect(out).not.toContain('I checked my wallet');
   });
 });

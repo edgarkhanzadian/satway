@@ -9,7 +9,6 @@ import {
   collectViolations,
 } from './browser/violations.js';
 import { EvmWallet } from './wallets/evm-wallet.js';
-import { SolanaWallet } from './wallets/solana-wallet.js';
 import { StacksWallet } from './wallets/stacks-wallet.js';
 import { ApiWorker, type WorkerEnvOverrides, resetWorkerClock } from './worker/worker.js';
 import { World } from './world/world.js';
@@ -35,7 +34,6 @@ interface WorkerFixtures {
 
 const DEFAULT_WALLETS: WalletSetup = {
   evm: true,
-  solana: { features: ['signAndSend', 'sign'] },
   stacks: true,
 };
 
@@ -85,7 +83,6 @@ export const test = base.extend<TestOptions & TestFixtures, WorkerFixtures>({
   async wallets({ world, evmStartChainId }, use) {
     await use({
       evm: new EvmWallet(world, { chainId: evmStartChainId }),
-      solana: new SolanaWallet(world),
       stacks: new StacksWallet(world),
     });
   },
@@ -117,7 +114,6 @@ export const test = base.extend<TestOptions & TestFixtures, WorkerFixtures>({
             browserNetwork: harness.network,
             wallets: {
               evm: wallets.evm.behaviour.requests,
-              solana: wallets.solana.behaviour.requests,
               stacks: wallets.stacks.behaviour.requests,
             },
           },

@@ -28,7 +28,6 @@ async function expectOneRecord(app: SatwayApp, started: StartedDeposit, state: s
   expect(records[0]).toMatchObject({
     version: 1,
     state,
-    family: 'evm',
     swap: { address: started.receipt.quoteResponse.quote.depositAddress, memo: null },
   });
   return records[0];
@@ -116,7 +115,7 @@ test.describe('M2. the EVM wallet broadcast the payment but its reply was lost',
     await waitUntilTheWalletIsAsked(app, wallets);
     await expectNoSendOffered(app);
     expect(world.evm.transactions.size).toBe(1);
-    expect(await expectOneRecord(app, started, 'attempting')).toMatchObject({ signed: null });
+    await expectOneRecord(app, started, 'attempting');
 
     await resumeIn(app, started);
     await expectAttemptingView(app);

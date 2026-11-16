@@ -9,7 +9,7 @@ export const WITHDRAW_FEE_SATS = 1_900;
 export const REFUND_FEE = '2400';
 export const BTC_PRICE_USD = 97_000;
 
-export type Family = 'evm' | 'solana' | 'tron' | 'bitcoin';
+export type Family = 'evm' | 'tron' | 'bitcoin';
 
 export interface WorldToken {
   assetId: string;
@@ -41,23 +41,6 @@ export const TOKENS = {
     price: 3_150.42,
     family: 'evm',
     chainId: 1,
-  },
-  sol: {
-    assetId: 'nep141:sol.omft.near',
-    decimals: 9,
-    blockchain: 'sol',
-    symbol: 'SOL',
-    price: 145.2,
-    family: 'solana',
-  },
-  usdcSol: {
-    assetId: 'nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near',
-    decimals: 6,
-    blockchain: 'sol',
-    symbol: 'USDC',
-    price: 0.999652,
-    contractAddress: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
-    family: 'solana',
   },
   usdtTron: {
     assetId: 'nep141:tron-d28a265909efecdcee7c5028585214ea0b96f015.omft.near',
@@ -163,7 +146,6 @@ function truncatedToSeconds(iso: string): string {
 }
 
 export function explorerUrlFor(token: WorldToken, hash: string): string {
-  if (token.family === 'solana') return `https://solscan.io/tx/${hash}`;
   if (token.blockchain === 'base') return `https://basescan.org/tx/${hash}`;
   return `https://etherscan.io/tx/${hash}`;
 }
@@ -357,7 +339,6 @@ export class OneClick {
 
   private newDepositAddress(token: WorldToken): string {
     if (token.family === 'evm') return this.rng.evmAddress();
-    if (token.family === 'solana') return this.rng.base58(32);
     return `T${this.rng.base58(24).slice(0, 33)}`;
   }
 

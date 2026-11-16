@@ -2,17 +2,24 @@
 
 Deposit to sBTC on Stacks from other chains in one flow.
 
-The user sends an asset on any chain NEAR Intents (1Click) supports. 1Click
+The user sends an asset on an EVM chain NEAR Intents (1Click) supports. 1Click
 swaps it to native BTC and pays it to a per-user sBTC deposit address that is
 built in the user's browser. The sBTC signers mint sBTC to the user's Stacks
 address. This project holds no funds and no user keys.
+
+For now only EVM chains are offered, both as deposit origins and as withdrawal
+destinations. The deposit asset list is limited by `SUPPORTED_ORIGIN_CHAINS` in
+`packages/chains/src/metadata/chain-metadata.ts`; adding a chain there lists its
+assets again (sent by hand, from the address, amount and memo the page shows).
+Withdrawal destinations also need an address check for the chain, in
+`destination-address.ts`.
 
 ## Layout
 
 | Path              | What it is                                                                                                                                           |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `packages/core`   | Pure logic: deposit address, signer key verification, quote building and checking, payout detection, status, reclaim. No UI, no keys.                |
-| `packages/chains` | The other chains: chain metadata and address checks, EVM and Solana transfer building, sending and send records. No UI and no browser globals.       |
+| `packages/chains` | The other chains: chain metadata and address checks, EVM transfer building, sending and send records. No UI and no browser globals.                  |
 | `apps/web`        | Browser app (Vite + React): deposit flow, status tracking, recovery page.                                                                            |
 | `apps/api`        | Cloudflare Worker: keeps the 1Click API key off the client, and notifies the sBTC signers of payouts if the user closed the tab.                     |
 | `apps/e2e`        | Playwright end-to-end tests: the production web build and the real Worker code against a simulated world. See [End-to-end tests](#end-to-end-tests). |
@@ -34,15 +41,14 @@ packages/core/src/
   deposit/     the deposit flow: quote request, payout selection, observing, progress, amount checks
   index.ts     the package entry, the only file other packages import
 packages/chains/src/
-  metadata/    chain families, EVM chain ids, native assets, Solana address checks, RPC config
+  metadata/    supported chains, EVM chain ids, native assets, address checks
   send/        wallet types, EVM transfers and sends, send records, send attempts
-  send/solana/ Solana transfer building, RPC client, Solana Pay, send (loaded lazily)
-  index.ts     the package entry; @satway/chains/solana is the second, lazy entry
+  index.ts     the package entry
 apps/web/src/
   app/         main.tsx, app.tsx, app.css: composes the page
   features/    deposit, recover, chain-wallets (From panel), stacks-wallet (To panel)
   ui/          presentational components and shared panel styles
-  shared/      backend client, receipts, progress checks, storage, config
+  shared/      backend client, receipts, progress checks, storage
 apps/api/src/
   http/        routes, the 1Click proxy, POST /deposits
   notifier/    the scheduled signer notifier
@@ -64,13 +70,11 @@ The rules, in plain words:
   are passed in.
 - `packages/chains` imports only the `@satway/core` entry among workspace packages, and no
   React, `@stacks/connect`, WalletConnect, apps, scripts or Panda output. `metadata` never
-  imports `send`. Outside `send/solana`, the package imports Solana send code for its types
-  only, so the web app can load it lazily through `@satway/chains/solana`.
+  imports `send`.
 - `apps/web`: `app` may import anything and nothing imports it. A feature may import `ui`,
   `shared`, `@satway/core` and `@satway/chains`, never another feature (any directory under
   `features/`, including future ones); `app` passes values and callbacks between them. `ui`
-  imports types only from `shared`, never a feature or `app`, never the Solana send code,
-  and never a network-reading export of `@satway/core`. `shared` never imports a feature,
+  imports types only from `shared`, never a feature or `app`, and never a network-reading export of `@satway/core`. `shared` never imports a feature,
   `ui` or `app`.
 - `apps/api`: `http` and `notifier` never import each other; both use `store`, and only
   `index.ts` wires them. Nothing imports `index.ts`.
@@ -191,16 +195,15 @@ isolated. Tests drive it through typed methods:
 
 | Service                         | File          | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | ------------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1Click                          | `oneclick.ts` | Token list (USDC on Base, ETH, SOL, USDC on Solana, USDT on Tron, BTC, plus `extraTokens` a test adds), dry and live quotes that echo the request like the real API (truncated deadline, provider fee entry, signature), one deposit address per live quote, status PENDING_DEPOSIT → PROCESSING → SUCCESS (and INCOMPLETE_DEPOSIT, REFUNDED, FAILED). `tamper` rewrites quote responses; `completeSwap({ reportHash: false })` withholds the payout hash until `revealPayout(swap)`.                                                                                                                                                                                                                                                                                                                                        |
+| 1Click                          | `oneclick.ts` | Token list (USDC on Base, ETH, USDT on Tron as a non-EVM asset the app must not offer, BTC, plus `extraTokens` a test adds), dry and live quotes that echo the request like the real API (truncated deadline, provider fee entry, signature), one deposit address per live quote, status PENDING_DEPOSIT → PROCESSING → SUCCESS (and INCOMPLETE_DEPOSIT, REFUNDED, FAILED). `tamper` rewrites quote responses; `completeSwap({ reportHash: false })` withholds the payout hash until `revealPayout(swap)`.                                                                                                                                                                                                                                                                                                                   |
 | Bitcoin (mempool.space Esplora) | `bitcoin.ts`  | A chain of blocks, mempool, address utxo and history paging, tx, hex, outspend, fee estimates and `POST /tx`. Payouts are real signed transactions from a treasury wallet; the signers' sweep is a real taproot script-path spend. Every spend is validated (`script-check.ts`): the output exists and is unspent, fee ≥ 1 sat/vB, BIP68 relative locks against the output's confirmation height (`non-BIP68-final`), p2wpkh and taproot key-path signatures, and for script paths the control block commitment, the sBTC deposit or reclaim leaf, the reclaim leaf's CSV against nSequence, and the Schnorr signature for the leaf's key. Rejections use Esplora's `sendrawtransaction RPC error: {"code":…,"message":…}` form. Blocks are mined only on command; `hexOverrides` serves a wrong raw transaction for a txid. |
 | Emily                           | `emily.ts`    | `/limits`, `GET /deposit?status=…`, `GET /deposit/:txid/:vout`, `POST /deposit` validating `transactionHex`, txid, output script and the deposit and reclaim scripts like the real service; statuses are set by the test.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | Hiro                            | `hiro.ts`     | The sBTC registry read of the current aggregate key, which the world generates (`keyOverride` replaces it). The world also seeds two confirmed deposits swept recently, which the app needs as evidence for that key: each sweep is a real signer sweep, spending the signers' own UTXO (120 BTC, taproot key path) as input 0 and the deposit through its deposit leaf as input 1, and carrying the UTXO forward to output 0, like `world.signers.sweep`. `world.replaceEvidence('unswept' \| 'only-one-swept' \| 'other-signer-key' \| 'without-signer-utxo')` swaps them; `world.evidence` lists them.                                                                                                                                                                                                                    |
 | ALEX Stacks node                | `alex.ts`     | The second Stacks source the app reads the same key from (`GET /v2/data_var/…/sbtc-registry/current-aggregate-pubkey?proof=0`); `world.alex.keyOverride` makes it disagree.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| Solana JSON-RPC (Reown URL)     | `solana.ts`   | Accounts, blockhash, rent, simulate, send (checks ed25519 signatures), signature statuses with `processed`/`confirmed`/`finalized` (`landAs`, `promote`), block height. A blockhash is valid for 150 blocks after it was issued; blocks advance with `solana.advance(n)` and with world time (one per 400 ms). `sendReplyFaults` makes the next `sendTransaction` accept-then-error or drop-then-error; every raw send is kept in `rpcSends`. Executes System transfers, associated token account creation and SPL `TransferChecked`.                                                                                                                                                                                                                                                                                        |
 | EVM                             | `evm.ts`      | Only reached through the wallet: records sent transactions and decodes native and ERC-20 transfers. With `autoMine = false` a transaction stays pending (no receipt) until `evm.mine()`, and only then credits 1Click; `revertNext` mines a reverted (`status: 0x0`) one that credits nothing.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
-Deposits reach 1Click the way they do in reality: an EVM wallet send or a Solana transaction
-landing credits the swap deposit address. Useful controls: `world.reportDeposit()` (a manual
+Deposits reach 1Click the way they do in reality: an EVM wallet send landing credits the
+swap deposit address. Useful controls: `world.reportDeposit()` (a manual
 send), `world.completeSwap()` (pays BTC and reports SUCCESS), `world.mine(n)`,
 `world.signers.accept|sweep|confirm|fail|mint(outpoint)`, `world.payTo(address, sats)` (dust
 and outsiders), `world.addFault({ service, method, path, rpcMethod, bodyIncludes, callers,
@@ -214,7 +217,7 @@ requests), and `world.log`, `world.requestsTo(service, filter)` for assertions.
 
 Every browser request goes through one route handler (`src/browser/harness.ts`): the app
 origin passes through to the static server, the API origin goes to the in-process Worker,
-Hiro, mempool.space, Emily and the Solana RPC go to the world, and anything else (including
+Hiro, the ALEX Stacks node, mempool.space and Emily go to the world, and anything else (including
 1Click from the page and every WebSocket) is aborted and recorded. On top of that the browser
 runs behind a proxy that does not exist
 (`127.0.0.1:9`, loopback excluded), so a request that escaped the routing layer would fail,
@@ -231,23 +234,19 @@ off the network for matching requests (connection refused, or held until `backen
 
 ### Wallets (`src/wallets`, `src/browser/page-script.ts`)
 
-An init script installs three wallets in every page and forwards each call to Node through one
+An init script installs two wallets in every page and forwards each call to Node through one
 binding, where the wallet logic, keys and request log live:
 
 - **Test EVM Wallet**: an EIP-1193 provider announced through EIP-6963 (`eth_requestAccounts`,
   `eth_chainId`, `wallet_switchEthereumChain`, `eth_sendTransaction`, receipts). It starts on
   chain 1 (`test.use({ evmStartChainId })`).
-- **Test Solana Wallet**: registered through the Wallet Standard events with `standard:connect`,
-  `solana:signAndSendTransaction` and `solana:signTransaction`, signing in Node with a real
-  ed25519 key. `test.use({ walletSetup: { solana: { features: ['sign'] } } })` makes it
-  sign-only.
 - **Test Stacks Wallet**: a WBIP004 provider registered in `window.wbip_providers`, so the
   `@stacks/connect` 8.2.7 modal lists it as installed. `connect()` always shows that modal
   (`forceWalletSelect`), so `app.connectStacksWallet()` clicks the wallet's "Connect" button
   in it. It answers `getAddresses` with a mainnet Stacks address and BTC payment (p2wpkh) and
   taproot addresses from real keys, and signs PSBTs for real (`signPsbt`).
 
-Script any wallet per test through `wallets.<evm|solana|stacks>.behaviour`: `reject(method,
+Script any wallet per test through `wallets.<evm|stacks>.behaviour`: `reject(method,
 { code: 4001 })`, `hang(method)`, `late(method)` (returns a gate to `release()`),
 `malformed(method, value)`, `loseReply(method, 'hang' | { code, message })` (the wallet does
 the work, for example broadcasts, and then the reply never comes or is an error); every request
@@ -262,8 +261,7 @@ The world clock is the real clock plus an offset. `app.fastForward(ms)` waits un
 is open, moves the world clock and then the page clock by `ms` (timers fire at most once) and
 waits again; `app.tick()` is a 20-second fast-forward, the app's poll interval.
 `app.waitForProgress(message)` checks the page and ticks until the message shows (at most 8
-ticks). Bitcoin blocks only advance with `world.mine()`; Solana blocks also advance with world
-time. The fake clock reports an error thrown in a timer as a console error, or as a failed
+ticks). Bitcoin blocks only advance with `world.mine()`. The fake clock reports an error thrown in a timer as a console error, or as a failed
 `tick()` when the jump ran it, so both still fail the test.
 
 The Worker code reads `new Date()` and `Date.now()` itself (the e2e Worker also passes the world
@@ -282,7 +280,7 @@ window all behave as they would after that much real time.
 
 Add `tests/<name>.spec.ts` and import `test` and `expect` from `../src/fixtures.js`. The
 fixtures give `app` (page object: `open`, `connectStacksWallet`, `connectEvmWallet`,
-`connectSolanaWallet`, `fillDeposit`, `getQuote`, `continue`, `sendFromWallet`, `clickSend`,
+`fillDeposit`, `getQuote`, `continue`, `sendFromWallet`, `clickSend`,
 `waitForProgress`, `tick`, `openRecover`, `pickSavedReceipt`, `uploadReceipt`, `followDeposit`,
 `newTab`, `expectComplete`), `world`, `api` (the Worker: `requests`, `kv`, `watch()`,
 `runScheduled()`), `wallets` and `harness`. Assert both what the page says and what the world
@@ -297,7 +295,7 @@ allowed per test with `harness.allowConsoleErrors(pattern)`.
 
 - `a-…` to `f-…`: the happy paths (phase 1).
 - `m1-…` to `m10-…`: money safety: unknown swap status, lost EVM wallet replies, wallet
-  rejections, two tabs, Solana sends whose RPC reply fails, tampered quotes, unverifiable
+  rejections, two tabs, tampered quotes, unverifiable
   signer keys, network and account guards, tokens the wallet must not send, dust and outsiders
   on the deposit address.
 - `r1-…` to `r8-…`: failure and recovery: refunded and failed swaps, short deposits, Emily
@@ -305,7 +303,7 @@ allowed per test with `harness.allowConsoleErrors(pattern)`.
   Worker watch lifecycle.
 - `harness-…`: self-checks for the guards and for every simulated behaviour the scenarios rely
   on (spend validation, world clock and KV expiry, EVM pending/reverted/lost replies and events,
-  Solana blockhash expiry, commitments and send faults, held requests).
+  faults, held requests).
 - `s1-…` to `s6-…` (phase 3, resilience): our backend down at each step, each upstream down,
   hanging or malformed while a deposit is tracked, browser storage blocked or full, reloads,
   history and tab switches mid-flow, and a deposit left open for hours (requests and timers per poll stay constant; terminal states
@@ -323,15 +321,14 @@ pnpm test:e2e:canary          # CANARY_ONECLICK_JWT=… optional; never printed
 ```
 
 `playwright.canary.config.ts` runs `apps/e2e/canary` against the real Hiro, the ALEX Stacks node, mempool.space,
-Emily, the Reown Solana RPC and 1Click, with the production build and the real Worker
-`handle` in-process (real `fetch`). It checks that signer verification, Emily limits,
-mempool.space tip and fees and the Solana RPC parse, that the token list loads through the
-Worker, and that dry quotes for USDC on Base, ETH, SOL and USDT on Tron pass the app's own
-verification (a Tron refusal on the provider's minimum is recorded, not failed). The fake wallets
+Emily and 1Click, with the production build and the real Worker
+`handle` in-process (real `fetch`). It checks that signer verification, Emily limits and
+mempool.space tip and fees parse, that the token list loads through the Worker, and that dry
+quotes for EVM assets pass the app's own verification. The fake wallets
 only hand out placeholder addresses. Safety rails in `src/canary/canary-fixtures.ts`: a click
 on Continue, Send, Reclaim or a resend button is swallowed and fails the test; a non-dry
 quote or any other `POST` to the backend is aborted before it reaches the Worker; any
-`POST` to Emily, `POST /tx`, or Solana RPC method outside a read-only list is aborted; wallet
+`POST` to Emily or `POST /tx` is aborted; wallet
 calls other than address requests are refused; every such attempt fails the test. The canary
 proves its own rails at the end of a run by pressing Continue and posting a non-dry quote.
 `.github/workflows/canary.yml` runs it daily and on manual dispatch, never on pull requests.
@@ -350,8 +347,7 @@ build and real services, checks that the wallets are discovered, waits for you t
 connections in the extensions, gets a dry quote, then asks you to press Continue and the send
 button yourself and to reject the request in MetaMask; it passes when the app shows the
 rejection and no send record is left. It never clicks Continue or a send button, never types
-into or approves anything in an extension, and blocks Emily registrations, `POST /tx` and
-Solana sends. It has not been run by its author (no extensions, no human at hand).
+into or approves anything in an extension, and blocks Emily registrations and `POST /tx`. It has not been run by its author (no extensions, no human at hand).
 
 Where the app does something that looks wrong, the test asserts the correct behaviour and is
 marked `test.fail` with a title starting `APP ISSUE:`; it starts failing the suite (as an

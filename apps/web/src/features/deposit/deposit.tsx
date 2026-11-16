@@ -2,33 +2,27 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { css, cx } from 'satway-styles/css';
 import { styled } from 'satway-styles/jsx';
-import { actions, button, details, field, link, notice, sheet } from 'satway-styles/recipes';
+import { actions, button, details, field, notice, sheet } from 'satway-styles/recipes';
 
 import {
   type AttemptOutcome,
-  type EvmTransfer,
-  type ResolveDeps,
-  type SendFamily,
   type SendRecord,
-  type SolanaPayOffer,
   type SourceWallet,
   attemptSend,
   buildEvmTransfer,
-  chainFamily,
   confirmNothingSent,
   evmTransactionState,
+  isEvmChain,
   needsChainCheck,
   nextRefundField,
   promptWaitMs,
   quoteExpired,
   recordTx,
   releaseIfCleared,
-  resendRecord,
   resolveRecord,
   sendFromEvm,
   sendPanel,
   settleFromProvider,
-  solanaSenderOf,
   swapTargetOf,
   walletAddressFor,
   walletCovers,
@@ -57,7 +51,6 @@ import {
 import {
   PayoutDetails,
   PayoutNotices,
-  QrCode,
   QuotedOutput,
   RefundNote,
   type RouteUpdate,
@@ -70,9 +63,7 @@ import {
   keepRegistering,
   registeredThisSession,
 } from './background-registration.js';
-import { type Prepared, liveQuoteWorse, prepareDeposit } from './flow.js';
-
-const POPULAR = ['USDC', 'USDT', 'ETH', 'SOL', 'BNB', 'TRX'];
+import { type Prepared, depositOrigins, liveQuoteWorse, prepareDeposit } from './flow.js';
 
 const fields = field();
 
@@ -104,12 +95,6 @@ const refundNote = cx(
   css({ marginBlock: 'space.02', '.satway-actions + &': { marginTop: 'space.08' } })
 );
 
-const solanaPay = css({ marginTop: 'space.08', '& svg': { maxWidth: 'qrCompact' } });
-const solanaPayOpen = cx(
-  link(),
-  css({ display: 'inline-flex', alignItems: 'center', minHeight: 'control', fontWeight: 'medium' })
-);
-
 function sats(n: number): string {
   return `${n.toLocaleString('en-US')} sats`;
 }
@@ -139,24 +124,7 @@ export function Deposit(props: {
     async function loadTokens() {
       try {
         const all = await backend.tokens();
-        const usable = all
-          .filter(
-            t =>
-              t.assetId !== config.btcAssetId &&
-              t.blockchain !== 'btc' &&
-              t.price > 0 &&
-              !/deprecated/i.test(t.symbol)
-          )
-          .sort((a, b) => {
-            function rank(t: OneClickToken) {
-              return POPULAR.indexOf(t.symbol) + 1 || POPULAR.length + 1;
-            }
-            return (
-              rank(a) - rank(b) ||
-              a.symbol.localeCompare(b.symbol) ||
-              a.blockchain.localeCompare(b.blockchain)
-            );
-          });
+        const usable = depositOrigins(all, config.btcAssetId);
         setTokens(usable);
         setAssetId(current => current || usable[0]?.assetId || '');
         setTokensFailed(false);
@@ -176,15 +144,14 @@ export function Deposit(props: {
     setAssetId(current => {
       const now = tokens.find(t => t.assetId === current);
       if (now && walletCovers(source, now)) return current;
-      return tokens.find(t => chainFamily(t.blockchain) === source.kind)?.assetId ?? current;
+      return tokens.find(t => walletCovers(source, t))?.assetId ?? current;
     });
   }, [source, tokens]);
 
   const refundRef = useRef(refundTo);
   refundRef.current = refundTo;
   const autofilledRefund = useRef<string | null>(null);
-  const walletRefund =
-    covered && token ? walletAddressFor(source, chainFamily(token.blockchain)) : null;
+  const walletRefund = walletAddressFor(source, token?.blockchain);
 
   useEffect(() => {
     const next = nextRefundField(
@@ -518,24 +485,21 @@ function Tracking(props: {
     if (button !== null && document.activeElement === button) return;
     (sendResultRef.current ?? progressRef.current)?.focus();
   }, [focusAfterSend]);
-  const family = chainFamily(receipt.origin.chain);
-  const sendFamily: SendFamily | null = family === 'other' ? null : family;
+  const evmOrigin = isEvmChain(receipt.origin.chain);
   const quote = receipt.quoteResponse.quote;
   const target = useMemo(
     () => swapTargetOf(quote.depositAddress, quote.depositMemo),
     [quote.depositAddress, quote.depositMemo]
   );
   const readRecord = useCallback(
-    () => (target && sendFamily ? sendRecords.read(target, sendFamily) : null),
-    [target, sendFamily]
+    () => (target && evmOrigin ? sendRecords.read(target) : null),
+    [target, evmOrigin]
   );
   const [record, setRecord] = useState<SendRecord | null>(readRecord);
   const [durable] = useState(() => sendRecords.durable());
   const [sendError, setSendError] = useState<string | null>(null);
   const [sendInfo, setSendInfo] = useState<string | null>(null);
   const [checkNote, setCheckNote] = useState<string | null>(null);
-  const [resending, setResending] = useState(false);
-  const solanaAccount = family === 'solana' ? solanaSenderOf(source) : null;
 
   useEffect(() => {
     setRecord(readRecord());
@@ -543,9 +507,9 @@ function Tracking(props: {
   }, [readRecord]);
 
   useEffect(() => {
-    if (record !== null || sending || !target || !sendFamily) return;
-    releaseIfCleared(sendRecords, target, sendFamily);
-  }, [record, sending, target, sendFamily]);
+    if (record !== null || sending || !target || !evmOrigin) return;
+    releaseIfCleared(sendRecords, target);
+  }, [record, sending, target, evmOrigin]);
 
   useEffect(() => {
     if (!reading || sendingRef.current) return;
@@ -565,28 +529,22 @@ function Tracking(props: {
 
   const recordStamp = record ? `${record.state}|${record.startedAt}|${recordTx(record) ?? ''}` : '';
   const checkable = record !== null && needsChainCheck(record);
-  const evmProvider = source?.kind === 'evm' ? source.provider : null;
+  const evmProvider = source?.provider ?? null;
 
   useEffect(() => {
     if (!checkable || sending) return;
     let live = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const deps: ResolveDeps = {
-      async checkSolana(sent) {
-        const { checkSolanaSend } = await import('@satway/chains/solana');
-        return checkSolanaSend(sent);
-      },
-      evmState(hash) {
-        if (!evmProvider)
-          return Promise.reject(new Error('connect the wallet you sent from to check it'));
-        return evmTransactionState(evmProvider, hash);
-      },
-    };
+    function evmState(hash: string) {
+      if (!evmProvider)
+        return Promise.reject(new Error('connect the wallet you sent from to check it'));
+      return evmTransactionState(evmProvider, hash);
+    }
     async function check() {
       const current = readRecord();
       if (current === null || !needsChainCheck(current)) return;
       try {
-        const result = await resolveRecord(sendRecords, current, deps);
+        const result = await resolveRecord(sendRecords, current, evmState);
         if (!live) return;
         if (result.kind === 'cleared') setSendInfo(result.message);
         setCheckNote(result.kind === 'unchanged' ? result.note : null);
@@ -662,26 +620,18 @@ function Tracking(props: {
       ? sendAmountOf(receipt, tokenDecimals, reading.remaining)
       : null;
   const sendAmount = owed ?? sendAmountOf(receipt, tokenDecimals);
-  const walletCanSend =
-    family === 'evm' ? source?.kind === 'evm' : family === 'solana' && solanaAccount !== null;
   const walletReady =
-    walletCanSend &&
+    evmOrigin &&
     target !== null &&
     token !== undefined &&
     token.blockchain === receipt.origin.chain &&
     walletCovers(source, token);
-  const solanaPayReady =
-    family === 'solana' &&
-    solanaAccount === null &&
-    token !== undefined &&
-    token.blockchain === 'sol' &&
-    !quote.depositMemo;
   const now = new Date();
   const expired = quoteExpired(quote.deadline, now);
   const panel = sendPanel({
     swap: stale ? null : reading?.swap,
     record,
-    walletCanSend: walletReady || solanaPayReady,
+    walletCanSend: walletReady,
     sending,
     durable: durable || !walletReady,
     lockable: sendRecords.lockable() || !walletReady,
@@ -699,7 +649,8 @@ function Tracking(props: {
   }
 
   async function sendFromWallet() {
-    if (!token || !target || sendingRef.current) return;
+    const wallet = source;
+    if (!token || !target || !wallet || sendingRef.current) return;
     if (quoteExpired(quote.deadline, new Date())) {
       setSendError('This quote has expired, so the wallet was not asked to send.');
       return;
@@ -711,39 +662,18 @@ function Tracking(props: {
     setSendError(null);
     setSendInfo(null);
     setCheckNote(null);
-    const swapAddress = target.address;
     try {
-      if (family === 'solana' && solanaAccount) {
-        const { sendSolanaDeposit } = await import('@satway/chains/solana');
-        showOutcome(
-          await attemptSend(
-            sendRecords,
-            { target, family: 'solana', account: solanaAccount.address, now: new Date() },
-            hooks =>
-              sendSolanaDeposit(
-                { token, recipient: swapAddress, amount: quote.amountIn, memo: quote.depositMemo },
-                solanaAccount,
-                undefined,
-                hooks
-              )
-          )
-        );
-      } else if (family === 'evm' && source?.kind === 'evm') {
-        const provider = source.provider;
-        const transfer: EvmTransfer = buildEvmTransfer({
-          token,
-          from: source.address,
-          to: swapAddress,
-          amount: quote.amountIn,
-        });
-        showOutcome(
-          await attemptSend(
-            sendRecords,
-            { target, family: 'evm', account: source.address, now: new Date() },
-            () => sendFromEvm(provider, transfer)
-          )
-        );
-      }
+      const transfer = buildEvmTransfer({
+        token,
+        from: wallet.address,
+        to: target.address,
+        amount: quote.amountIn,
+      });
+      showOutcome(
+        await attemptSend(sendRecords, { target, account: wallet.address, now: new Date() }, () =>
+          sendFromEvm(wallet.provider, transfer)
+        )
+      );
     } catch (err) {
       setSendError(errorMessage(err) || 'The wallet did not send the transaction');
     } finally {
@@ -751,23 +681,6 @@ function Tracking(props: {
       setSending(false);
       setRecord(readRecord());
       if (keepFocus) setFocusAfterSend(tick => tick + 1);
-    }
-  }
-
-  async function resendSame(current: SendRecord) {
-    setResending(true);
-    setSendError(null);
-    try {
-      const { resendSignedTransaction } = await import('@satway/chains/solana');
-      const outcome = await resendRecord(sendRecords, current, signed =>
-        resendSignedTransaction(signed)
-      );
-      if (outcome.kind === 'uncertain') setCheckNote(outcome.record.message);
-    } catch (err) {
-      setCheckNote(errorMessage(err) ?? 'The transaction could not be sent again.');
-    } finally {
-      setResending(false);
-      setRecord(readRecord());
     }
   }
 
@@ -870,14 +783,6 @@ function Tracking(props: {
                 </button>
               </div>
             )}
-          {payment === 'pay' &&
-            !walletReady &&
-            solanaPayReady &&
-            panel.kind === 'offer' &&
-            token &&
-            target && (
-              <SolanaPayLink token={token} recipient={target.address} amount={quote.amountIn} />
-            )}
           {payment === 'pay' && panel.kind === 'unknown' && (
             <p className={sendNote}>
               This page could not refresh, so sending from your wallet is paused until it can. You
@@ -904,9 +809,7 @@ function Tracking(props: {
                 <SendRecordView
                   record={panel.record}
                   note={checkNote}
-                  resending={resending}
                   now={new Date()}
-                  onResend={() => void resendSame(panel.record)}
                   onConfirmNothingSent={() => confirmNothing(panel.record)}
                 />
               )}
@@ -980,47 +883,5 @@ function Tracking(props: {
         {closingNote(registration, progress?.terminal ?? false)}
       </p>
     </section>
-  );
-}
-
-function SolanaPayLink(props: { token: OneClickToken; recipient: string; amount: string }) {
-  const { token, recipient, amount } = props;
-  const [offer, setOffer] = useState<SolanaPayOffer | null>(null);
-
-  useEffect(() => {
-    let live = true;
-    async function load() {
-      try {
-        const { solanaPayOffer } = await import('@satway/chains/solana');
-        const next = await solanaPayOffer({ token, recipient, amount });
-        if (live) setOffer(next);
-      } catch (err) {
-        if (live)
-          setOffer({
-            status: 'unavailable',
-            reason: `A Solana Pay link cannot be offered: ${errorMessage(err) ?? 'unknown error'}`,
-          });
-      }
-    }
-    void load();
-    return () => {
-      live = false;
-    };
-  }, [token, recipient, amount]);
-
-  if (!offer) return <p className={sendNote}>Checking whether a Solana Pay link can be offered…</p>;
-  if (offer.status === 'unavailable') return <p className={sendNote}>{offer.reason}</p>;
-  return (
-    <div className={solanaPay}>
-      <p className={sendLine}>
-        Or scan with a Solana Pay wallet. The link asks for exactly this amount.
-      </p>
-      <QrCode matrix={offer.matrix} label="Solana Pay transfer request" />
-      <div className={sendActions}>
-        <a className={solanaPayOpen} href={offer.url}>
-          Open in a Solana wallet
-        </a>
-      </div>
-    </div>
   );
 }

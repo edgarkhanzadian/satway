@@ -3,9 +3,8 @@ import { type OneClickToken, errorMessage, parseWith, z } from '@satway/core';
 import {
   EVM_CHAIN_IDS,
   EVM_NATIVE_DECIMALS,
-  chainFamily,
+  isEvmChain,
   isKnownEvmNative,
-  isSolanaSignature,
 } from '../metadata/index.js';
 
 export interface Eip1193Provider {
@@ -18,50 +17,25 @@ export interface EvmWalletOption {
   provider: Eip1193Provider;
 }
 
-export type SolanaSendResult =
-  | { kind: 'sent'; signature: string }
-  | { kind: 'signed'; transaction: Uint8Array };
-
-export interface SolanaSender {
-  send(transaction: Uint8Array): Promise<SolanaSendResult>;
-}
-
-export interface SolanaAccount {
+export interface SourceWallet {
+  name: string;
   address: string;
-  sender: SolanaSender;
+  provider: Eip1193Provider;
 }
-
-export type SourceWallet =
-  | {
-      kind: 'evm';
-      name: string;
-      address: string;
-      provider: Eip1193Provider;
-      solana?: SolanaAccount;
-    }
-  | { kind: 'solana'; name: string; address: string; sender?: SolanaSender };
 
 export function walletAddressFor(
   wallet: SourceWallet | null,
-  family: 'evm' | 'solana' | 'other'
+  blockchain: string | undefined
 ): string | null {
-  if (!wallet || family === 'other') return null;
-  if (wallet.kind === family) return wallet.address;
-  if (wallet.kind === 'evm' && family === 'solana') return wallet.solana?.address ?? null;
-  return null;
-}
-
-export function solanaSenderOf(wallet: SourceWallet | null): SolanaAccount | null {
-  if (wallet?.kind === 'solana')
-    return wallet.sender ? { address: wallet.address, sender: wallet.sender } : null;
-  return wallet?.solana ?? null;
+  if (!wallet || blockchain === undefined || !isEvmChain(blockchain)) return null;
+  return wallet.address;
 }
 
 export function walletCovers(
   wallet: SourceWallet | null,
   token: OneClickToken | undefined
 ): boolean {
-  return Boolean(token && walletAddressFor(wallet, chainFamily(token.blockchain)) !== null);
+  return walletAddressFor(wallet, token?.blockchain) !== null;
 }
 
 export interface RefundField {
@@ -78,10 +52,8 @@ export function nextRefundField(field: RefundField, walletAddress: string | null
 
 const TX_HASH = /^0x[0-9a-fA-F]{64}$/;
 
-export function isSentTxFor(family: 'evm' | 'solana' | 'other', value: string): boolean {
-  if (family === 'evm') return TX_HASH.test(value);
-  if (family === 'solana') return isSolanaSignature(value);
-  return false;
+export function isTxHash(value: string): boolean {
+  return TX_HASH.test(value);
 }
 
 export type SendPhase = 'not-sent' | 'rejected' | 'uncertain';
@@ -110,14 +82,6 @@ export function walletFailure(err: unknown, fallback: string, tx: string | null 
   const message = errorMessage(err) || fallback;
   if (isUserRejection(err)) return new SendError(message, 'rejected', null, { cause: err });
   return new SendError(message, 'uncertain', tx, { cause: err });
-}
-
-export function signOnlyFailure(err: unknown): SendError {
-  if (err instanceof SendError) return err;
-  const message = errorMessage(err) || 'The wallet did not sign the transaction';
-  return new SendError(message, isUserRejection(err) ? 'rejected' : 'not-sent', null, {
-    cause: err,
-  });
 }
 
 export function notSent(err: unknown): SendError {
@@ -280,5 +244,5 @@ export async function connectEvm(option: EvmWalletOption): Promise<SourceWallet>
   const address = accounts[0];
   if (!address || !EVM_ADDRESS.test(address))
     throw new Error('The wallet did not share an account');
-  return { kind: 'evm', name: option.name, address, provider: option.provider };
+  return { name: option.name, address, provider: option.provider };
 }

@@ -2,9 +2,6 @@ import { PROGRESS, type SatwayApp } from '../src/app/satway-app.js';
 import { expect, test } from '../src/fixtures.js';
 import { SEND_COPY, startDeposit } from '../src/scenario/journeys.js';
 import type { WorldToken } from '../src/world/oneclick.js';
-import { encodeMint } from '../src/world/solana.js';
-
-const TOKEN_2022 = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
 
 async function expectManualSendStillWorks(
   app: SatwayApp,
@@ -70,41 +67,4 @@ test.describe('M9. tokens the wallet must not send are quoted but left to a manu
       expect(world.evm.transactions.size).toBe(0);
     });
   }
-
-  test('a Solana mint owned by the Token-2022 program', async ({ app, world, wallets }) => {
-    const mint = world.rng.base58(32);
-    world.solana.accounts.set(mint, {
-      lamports: 1_461_600n,
-      owner: TOKEN_2022,
-      data: encodeMint({ decimals: 6, supply: 10n ** 12n, authority: world.rng.base58(32) }),
-      executable: false,
-    });
-    world.oneClick.extraTokens.push({
-      assetId: `nep141:sol-${world.rng.hex(20)}.omft.near`,
-      decimals: 6,
-      blockchain: 'sol',
-      symbol: 'HOOK',
-      price: 1,
-      contractAddress: mint,
-      family: 'solana',
-    });
-    await app.open();
-    await app.connectStacksWallet();
-    await app.connectSolanaWallet();
-    await app.fillDeposit({ asset: 'HOOK on sol', amount: '25' });
-    await app.getQuote();
-    const started = await app.continue();
-    await app.waitForProgress(PROGRESS.awaitingFunds);
-    await expectManualSendStillWorks(app, started, 'HOOK on sol');
-
-    await app.clickSend();
-    await expect(app.sendError).toHaveText(
-      `This token uses the Token-2022 program, whose fees and transfer hooks can change the amount that arrives. ${SEND_COPY.sendManually}`
-    );
-    await expect(app.sendButton).toHaveText('Send from Test Solana Wallet');
-    expect(wallets.solana.behaviour.requests.map(r => r.method)).toEqual(['connect']);
-    expect(wallets.solana.signRequests).toEqual([]);
-    expect(world.solana.simulations).toEqual([]);
-    expect(await app.sendRecords()).toEqual([]);
-  });
 });

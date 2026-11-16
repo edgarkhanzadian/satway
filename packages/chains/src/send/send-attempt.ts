@@ -1,8 +1,6 @@
-import { type OneClickSwapStatus, errorMessage } from '@satway/core';
+import type { OneClickSwapStatus } from '@satway/core';
 
 import {
-  type AttemptingRecord,
-  type SendFamily,
   type SendRecord,
   type SendRecords,
   type SentRecord,
@@ -10,17 +8,13 @@ import {
   type UncertainRecord,
   attemptingRecord,
   confirmedRecord,
-  lastValidBlockHeight,
   needsChainCheck,
   recordTx,
   sameAttempt,
   sendConfirmed,
   sentRecord,
-  signedBytes,
   uncertainRecord,
-  withSigned,
 } from './send-record.js';
-import type { SignedSolanaSend, SolanaSendCheck } from './solana/index.js';
 import { type EvmTransactionState, walletFailure } from './source-wallet.js';
 
 export const CANNOT_SAVE_MESSAGE =
@@ -33,13 +27,8 @@ export const NO_LOCK_MESSAGE =
 
 export interface AttemptStart {
   target: SwapTarget;
-  family: SendFamily;
   account: string;
   now: Date;
-}
-
-export interface AttemptHooks {
-  onSigned(signed: SignedSolanaSend): void;
 }
 
 export type AttemptOutcome =
@@ -51,27 +40,22 @@ export type AttemptOutcome =
 export async function attemptSend(
   records: SendRecords,
   start: AttemptStart,
-  send: (hooks: AttemptHooks) => Promise<string>
+  send: () => Promise<string>
 ): Promise<AttemptOutcome> {
   const claim = await records.claim(start.target);
   if (claim === 'unavailable') return { kind: 'refused', message: NO_LOCK_MESSAGE };
   if (claim === 'busy') return { kind: 'refused', message: ALREADY_RECORDED_MESSAGE };
-  if (records.read(start.target, start.family) !== null) {
+  if (records.read(start.target) !== null) {
     records.release(start.target);
     return { kind: 'refused', message: ALREADY_RECORDED_MESSAGE };
   }
-  let record: AttemptingRecord = attemptingRecord(start);
+  const record = attemptingRecord(start);
   if (!records.write(record)) {
     records.clear(start.target);
     return { kind: 'refused', message: CANNOT_SAVE_MESSAGE };
   }
   try {
-    const tx = await send({
-      onSigned(signed) {
-        record = withSigned(record, signed);
-        records.write(record);
-      },
-    });
+    const tx = await send();
     const sent = sentRecord(record, tx, 'wallet');
     records.write(sent);
     return { kind: 'sent', record: sent };
@@ -80,7 +64,7 @@ export async function attemptSend(
       err,
       'The wallet did not confirm whether it sent the transaction'
     );
-    if (failure.phase === 'uncertain' || record.signed !== null) {
+    if (failure.phase === 'uncertain') {
       const uncertain = uncertainRecord(record, failure.message, failure.tx);
       records.write(uncertain);
       return { kind: 'uncertain', record: uncertain };
@@ -90,14 +74,6 @@ export async function attemptSend(
   }
 }
 
-export interface ResolveDeps {
-  checkSolana(sent: {
-    signature: string;
-    lastValidBlockHeight: bigint | null;
-  }): Promise<SolanaSendCheck>;
-  evmState(hash: string): Promise<EvmTransactionState>;
-}
-
 export type Resolution =
   | { kind: 'sent'; record: SentRecord }
   | { kind: 'cleared'; message: string }
@@ -105,17 +81,13 @@ export type Resolution =
 
 export const LANDED_FAILED_MESSAGE =
   'Your earlier transaction reached the chain but failed, so nothing was transferred. You can send again.';
-export const EXPIRED_MESSAGE =
-  'Your earlier transaction expired before it reached Solana, so nothing was transferred. You can send again.';
-export const SOLANA_PENDING_NOTE =
-  'Solana has not seen this transaction yet. This page keeps checking until it lands or expires, which takes about two minutes at most.';
 export const EVM_PENDING_NOTE =
   'Your wallet reports this transaction as pending. This page keeps checking.';
 export const EVM_UNKNOWN_NOTE =
   'Your wallet does not know this transaction. It may not have been broadcast, or it may still be propagating.';
 
 function commit(records: SendRecords, record: SendRecord, resolution: Resolution): Resolution {
-  const current = records.read(record.swap, record.family);
+  const current = records.read(record.swap);
   if (!sameAttempt(current, record)) return { kind: 'unchanged', note: null };
   if (resolution.kind === 'sent') records.write(resolution.record);
   if (resolution.kind === 'cleared') records.clear(record.swap);
@@ -125,37 +97,18 @@ function commit(records: SendRecords, record: SendRecord, resolution: Resolution
 export async function resolveRecord(
   records: SendRecords,
   record: SendRecord,
-  deps: ResolveDeps
+  evmState: (hash: string) => Promise<EvmTransactionState>
 ): Promise<Resolution> {
   const tx = recordTx(record);
   if (tx === null || !needsChainCheck(record)) return { kind: 'unchanged', note: null };
-  function landed(): Resolution {
-    return {
-      kind: 'sent',
-      record: record.state === 'sent' ? confirmedRecord(record) : sentRecord(record, tx, 'chain'),
-    };
-  }
   const sent = record.state === 'sent';
-  if (record.family === 'solana') {
-    const check = await deps.checkSolana({
-      signature: tx,
-      lastValidBlockHeight: lastValidBlockHeight(record),
-    });
-    switch (check.status) {
-      case 'landed':
-        return commit(records, record, landed());
-      case 'failed':
-        return commit(records, record, { kind: 'cleared', message: LANDED_FAILED_MESSAGE });
-      case 'expired':
-        return commit(records, record, { kind: 'cleared', message: EXPIRED_MESSAGE });
-      default:
-        return { kind: 'unchanged', note: sent ? null : SOLANA_PENDING_NOTE };
-    }
-  }
-  const state = await deps.evmState(tx);
+  const state = await evmState(tx);
   switch (state) {
     case 'succeeded':
-      return commit(records, record, landed());
+      return commit(records, record, {
+        kind: 'sent',
+        record: record.state === 'sent' ? confirmedRecord(record) : sentRecord(record, tx, 'chain'),
+      });
     case 'reverted':
       return commit(records, record, { kind: 'cleared', message: LANDED_FAILED_MESSAGE });
     case 'pending':
@@ -196,49 +149,9 @@ export function confirmNothingSent(
 ): boolean {
   if (record.state === 'sent') return false;
   if (promptWaitMs(record, now) > 0) return false;
-  const current = records.read(record.swap, record.family);
+  const current = records.read(record.swap);
   if (!sameAttempt(current, record)) return false;
   return records.clear(record.swap);
-}
-
-export function needsConfirmation(record: SendRecord): boolean {
-  if (record.state === 'sent') return false;
-  return recordTx(record) === null || record.family === 'evm';
-}
-
-export function canResendSigned(record: SendRecord): boolean {
-  return record.state !== 'sent' && record.signed !== null;
-}
-
-export type ResendOutcome =
-  | { kind: 'sent'; record: SentRecord }
-  | { kind: 'uncertain'; record: UncertainRecord }
-  | { kind: 'skipped' };
-
-export async function resendRecord(
-  records: SendRecords,
-  record: SendRecord,
-  resend: (signed: { signature: string; transaction: Uint8Array }) => Promise<string>
-): Promise<ResendOutcome> {
-  if (record.state === 'sent' || record.signed === null) return { kind: 'skipped' };
-  const current = records.read(record.swap, record.family);
-  if (!sameAttempt(current, record)) return { kind: 'skipped' };
-  const transaction = signedBytes(record);
-  if (transaction === null) return { kind: 'skipped' };
-  try {
-    const signature = await resend({ signature: record.signed.signature, transaction });
-    const sent = sentRecord(record, signature, 'wallet');
-    records.write(sent);
-    return { kind: 'sent', record: sent };
-  } catch (err) {
-    const uncertain = uncertainRecord(
-      record,
-      `Solana did not confirm that it accepted the signed transaction: ${errorMessage(err) ?? 'unknown error'}`,
-      record.signed.signature
-    );
-    records.write(uncertain);
-    return { kind: 'uncertain', record: uncertain };
-  }
 }
 
 export function latestSwap(

@@ -1,30 +1,20 @@
-import { base58, base64 } from '@scure/base';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { OneClickToken } from '@satway/core';
 
-import {
-  type Eip1193Provider,
-  type SolanaSendResult,
-  buildEvmTransfer,
-  sendFromEvm,
-} from '../../src/index.js';
+import { type Eip1193Provider, buildEvmTransfer, sendFromEvm } from '../../src/index.js';
 import {
   ALREADY_RECORDED_MESSAGE,
   CANNOT_SAVE_MESSAGE,
-  EXPIRED_MESSAGE,
   LANDED_FAILED_MESSAGE,
   NO_LOCK_MESSAGE,
   QUOTE_EXPIRY_MARGIN_MS,
-  type ResolveDeps,
   WALLET_PROMPT_WINDOW_MS,
   attemptSend,
   confirmNothingSent,
   latestSwap,
-  needsConfirmation,
   promptWaitMs,
   quoteExpired,
-  resendRecord,
   resolveRecord,
   sendPanel,
   settleFromProvider,
@@ -46,22 +36,11 @@ import {
   uncertainRecord,
   watchSendRecords,
 } from '../../src/send/send-record.js';
-import type { SimulationResult, SolanaRpc } from '../../src/send/solana/solana-rpc.js';
-import {
-  checkSolanaSend,
-  resendSignedTransaction,
-  sendSolanaDeposit,
-} from '../../src/send/solana/solana-send.js';
 
 const FROM = '0x2527D02599Ba641c19FEa793cD0F167589a0f10D';
 const SWAP_ONE = '0x4352589330E4Ab9c40B2eaFBc125F4eeA38e260D';
 const SWAP_TWO = '0x1111111111111111111111111111111111111111';
 const HASH = '0x' + 'ab'.repeat(32);
-const SIG =
-  '4QMdVtgtZcuygfB7RnGhZvrPxVDjXU7WgaKCaYEd2XSeQYMGKSrthoiV4GmL6pq2fu5gHaoiHofNEYTNSJuryyr';
-const SOL_SENDER = '5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9';
-const SOL_DEPOSIT = '2CXBDfuKKrEmmo5vXnYbCEbUbDyweZcbL12gXC4vHC4G';
-const SYSTEM = '11111111111111111111111111111111';
 const NOW = new Date('2026-11-15T10:00:00.000Z');
 const USDC_BASE: OneClickToken = {
   assetId: 'nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near',
@@ -71,17 +50,9 @@ const USDC_BASE: OneClickToken = {
   price: 1,
   contractAddress: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
 };
-const SOL: OneClickToken = {
-  assetId: 'nep141:sol.omft.near',
-  decimals: 9,
-  blockchain: 'sol',
-  symbol: 'SOL',
-  price: 150,
-};
 
 const ONE: SwapTarget = { address: SWAP_ONE, memo: null };
 const TWO: SwapTarget = { address: SWAP_TWO, memo: null };
-const SOLANA_SWAP: SwapTarget = { address: SOL_DEPOSIT, memo: null };
 
 interface FakeStorage extends KeyValueStore {
   data: Map<string, string>;
@@ -136,8 +107,8 @@ function evmSend(provider: Eip1193Provider, to: string = SWAP_ONE) {
   return () => sendFromEvm(provider, transfer);
 }
 
-function start(target: SwapTarget, family: 'evm' | 'solana' = 'evm') {
-  return { target, family, account: family === 'evm' ? FROM : SOL_SENDER, now: NOW };
+function start(target: SwapTarget) {
+  return { target, account: FROM, now: NOW };
 }
 
 const rejection = Object.assign(new Error('User rejected the request.'), { code: 4001 });
@@ -195,10 +166,10 @@ describe('send record keys', () => {
       evmSend(fakeEvm({ log, send: () => Promise.resolve(HASH) }))
     );
     expect(first.kind).toBe('sent');
-    expect(records.read(ONE, 'evm')?.state).toBe('sent');
-    expect(records.read(TWO, 'evm')).toBeNull();
-    expect(offered(records.read(TWO, 'evm'), 'PENDING_DEPOSIT')).toBe('offer');
-    expect(offered(records.read(ONE, 'evm'), 'PENDING_DEPOSIT')).toBe('record');
+    expect(records.read(ONE)?.state).toBe('sent');
+    expect(records.read(TWO)).toBeNull();
+    expect(offered(records.read(TWO), 'PENDING_DEPOSIT')).toBe('offer');
+    expect(offered(records.read(ONE), 'PENDING_DEPOSIT')).toBe('record');
   });
 });
 
@@ -351,7 +322,7 @@ describe('attemptSend across tabs', () => {
     const locks = browserLocks();
     const tabA = createSendRecords(() => storage, locks.tab());
     await attemptSend(tabA, start(ONE), () => Promise.reject(new Error('socket closed')));
-    const record = tabA.read(ONE, 'evm');
+    const record = tabA.read(ONE);
     if (!record) throw new Error('expected a record');
     expect(locks.owners.size).toBe(1);
     expect(confirmNothingSent(tabA, record)).toBe(true);
@@ -364,14 +335,14 @@ describe('attemptSend across tabs', () => {
     const tabA = createSendRecords(() => storage, locks.tab());
     const tabB = createSendRecords(() => storage, locks.tab());
     await attemptSend(tabA, start(ONE), () => Promise.reject(new Error('socket closed')));
-    expect(releaseIfCleared(tabA, ONE, 'evm')).toBe(false);
+    expect(releaseIfCleared(tabA, ONE)).toBe(false);
     expect(locks.owners.size).toBe(1);
-    const record = tabB.read(ONE, 'evm');
+    const record = tabB.read(ONE);
     if (!record) throw new Error('expected a record');
     expect(confirmNothingSent(tabB, record)).toBe(true);
     expect(locks.owners.size).toBe(1);
 
-    expect(releaseIfCleared(tabA, ONE, 'evm')).toBe(true);
+    expect(releaseIfCleared(tabA, ONE)).toBe(true);
     expect(locks.owners.size).toBe(0);
     const outcome = await attemptSend(tabB, start(ONE), () => Promise.resolve(HASH));
     expect(outcome.kind).toBe('sent');
@@ -393,7 +364,7 @@ describe('attemptSend across tabs', () => {
     });
     expect(outcome).toEqual({ kind: 'refused', message: NO_LOCK_MESSAGE });
     expect(asked).toBe(false);
-    expect(records.read(ONE, 'evm')).toBeNull();
+    expect(records.read(ONE)).toBeNull();
   });
 });
 
@@ -414,7 +385,7 @@ describe('attemptSend on EVM', () => {
       'wallet eth_sendTransaction',
       'store sent',
     ]);
-    expect(records.read(ONE, 'evm')).toMatchObject({ state: 'sent', tx: HASH, via: 'wallet' });
+    expect(records.read(ONE)).toMatchObject({ state: 'sent', tx: HASH, via: 'wallet' });
   });
 
   it('survives a tab close and is visible to another tab', async () => {
@@ -430,19 +401,19 @@ describe('attemptSend on EVM', () => {
     const tabB = createSendRecords(() => storage, browserLocks().tab());
     const events = new EventTarget();
     const seen: (string | null)[] = [];
-    const stop = watchSendRecords(events, () => seen.push(tabB.read(ONE, 'evm')?.state ?? null));
+    const stop = watchSendRecords(events, () => seen.push(tabB.read(ONE)?.state ?? null));
     const sending = attemptSend(tabA, start(ONE), () => pending);
-    await vi.waitFor(() => expect(tabA.read(ONE, 'evm')).not.toBeNull());
+    await vi.waitFor(() => expect(tabA.read(ONE)).not.toBeNull());
     events.dispatchEvent(new Event('storage'));
-    expect(tabB.read(ONE, 'evm')?.state).toBe('attempting');
-    expect(offered(tabB.read(ONE, 'evm'), 'PENDING_DEPOSIT')).toBe('record');
+    expect(tabB.read(ONE)?.state).toBe('attempting');
+    expect(offered(tabB.read(ONE), 'PENDING_DEPOSIT')).toBe('record');
     release(HASH);
     await sending;
     events.dispatchEvent(new Event('storage'));
     stop();
     expect(seen).toEqual(['attempting', 'sent']);
     const reopened = createSendRecords(() => storage, browserLocks().tab());
-    expect(reopened.read(ONE, 'evm')).toMatchObject({ state: 'sent', tx: HASH });
+    expect(reopened.read(ONE)).toMatchObject({ state: 'sent', tx: HASH });
   });
 
   it('clears the record on a user rejection, so the button returns', async () => {
@@ -454,7 +425,7 @@ describe('attemptSend on EVM', () => {
       evmSend(fakeEvm({ log, send: () => Promise.reject(rejection) }))
     );
     expect(outcome).toMatchObject({ kind: 'cleared', rejected: true });
-    expect(records.read(ONE, 'evm')).toBeNull();
+    expect(records.read(ONE)).toBeNull();
     expect(offered(null, 'PENDING_DEPOSIT')).toBe('offer');
   });
 
@@ -468,7 +439,7 @@ describe('attemptSend on EVM', () => {
     };
     const outcome = await attemptSend(records, start(ONE), evmSend(provider));
     expect(outcome).toMatchObject({ kind: 'cleared', rejected: false });
-    expect(records.read(ONE, 'evm')).toBeNull();
+    expect(records.read(ONE)).toBeNull();
   });
 
   it('keeps an uncertain record and hides the button when the wallet fails after dispatch', async () => {
@@ -479,10 +450,9 @@ describe('attemptSend on EVM', () => {
       evmSend(fakeEvm({ log: [], send: () => Promise.reject(new Error('Request expired')) }))
     );
     expect(outcome.kind).toBe('uncertain');
-    const record = records.read(ONE, 'evm');
+    const record = records.read(ONE);
     expect(record).toMatchObject({ state: 'uncertain', tx: null, message: 'Request expired' });
     expect(offered(record, 'PENDING_DEPOSIT')).toBe('record');
-    expect(record && needsConfirmation(record)).toBe(true);
   });
 
   it('never asks the wallet twice for one swap', async () => {
@@ -515,7 +485,7 @@ describe('attemptSend on EVM', () => {
     });
     expect(outcome).toEqual({ kind: 'refused', message: CANNOT_SAVE_MESSAGE });
     expect(asked).toBe(false);
-    expect(records.read(ONE, 'evm')).toBeNull();
+    expect(records.read(ONE)).toBeNull();
     expect(createSendRecords(() => undefined).durable()).toBe(false);
   });
 
@@ -529,8 +499,8 @@ describe('attemptSend on EVM', () => {
       return Promise.resolve(HASH);
     });
     expect(outcome.kind).toBe('sent');
-    expect(records.read(ONE, 'evm')?.state).toBe('sent');
-    expect(createSendRecords(() => storage, browserLocks().tab()).read(ONE, 'evm')?.state).toBe(
+    expect(records.read(ONE)?.state).toBe('sent');
+    expect(createSendRecords(() => storage, browserLocks().tab()).read(ONE)?.state).toBe(
       'attempting'
     );
   });
@@ -540,53 +510,67 @@ describe('reading stored records', () => {
   it('treats an unreadable or mismatched record as uncertain rather than ignoring it', () => {
     const key = sendRecordKey(ONE);
     const corrupt = createSendRecords(() => fakeStorage([[key, '{not json']]));
-    expect(corrupt.read(ONE, 'evm')).toMatchObject({
+    expect(corrupt.read(ONE)).toMatchObject({
       state: 'uncertain',
       message: UNREADABLE_RECORD_MESSAGE,
     });
-    const wrongHash = JSON.stringify({
+    const sent = {
       version: 1,
       state: 'sent',
       swap: ONE,
-      family: 'evm',
       account: FROM,
       startedAt: NOW.toISOString(),
-      tx: SIG,
+      tx: HASH,
       via: 'wallet',
+    };
+    expect(
+      createSendRecords(() => fakeStorage([[key, JSON.stringify(sent)]])).read(ONE)
+    ).toMatchObject({ state: 'sent', tx: HASH });
+    for (const tx of [
+      '4QMdVtgtZcuygfB7RnGhZvrPxVDjXU7WgaKCaYEd2XSeQYMGKSrthoiV4GmL6pq2fu5gHaoiHofNEYTNSJuryyr',
+      HASH.slice(0, -2),
+    ]) {
+      const wrongHash = JSON.stringify({ ...sent, tx });
+      expect(createSendRecords(() => fakeStorage([[key, wrongHash]])).read(ONE)).toMatchObject({
+        state: 'uncertain',
+        message: UNREADABLE_RECORD_MESSAGE,
+      });
+    }
+    const otherSwap = JSON.stringify({ ...sent, swap: TWO });
+    expect(createSendRecords(() => fakeStorage([[key, otherSwap]])).read(ONE)).toMatchObject({
+      state: 'uncertain',
+      swap: ONE,
+      message: UNREADABLE_RECORD_MESSAGE,
     });
-    expect(createSendRecords(() => fakeStorage([[key, wrongHash]])).read(ONE, 'evm')?.state).toBe(
-      'uncertain'
-    );
   });
 });
 
 describe('resolving an uncertain record', () => {
-  const noChecks: ResolveDeps = {
-    checkSolana: () => Promise.reject(new Error('not used')),
-    evmState: () => Promise.reject(new Error('not used')),
-  };
+  function noCheck() {
+    return Promise.reject(new Error('not used'));
+  }
 
   it('lets the user clear a record nothing can prove, after checking their wallet', async () => {
     const records = freshRecords();
     await attemptSend(records, start(ONE), () => Promise.reject(new Error('socket closed')));
-    const record = records.read(ONE, 'evm');
+    const record = records.read(ONE);
     if (!record) throw new Error('expected a record');
-    expect(await resolveRecord(records, record, noChecks)).toEqual({
+    expect(await resolveRecord(records, record, noCheck)).toEqual({
       kind: 'unchanged',
       note: null,
     });
     expect(confirmNothingSent(records, record)).toBe(true);
-    expect(records.read(ONE, 'evm')).toBeNull();
-    expect(offered(records.read(ONE, 'evm'), 'PENDING_DEPOSIT')).toBe('offer');
+    expect(records.read(ONE)).toBeNull();
+    expect(offered(records.read(ONE), 'PENDING_DEPOSIT')).toBe('offer');
   });
 
   it('treats the deposit as sent once 1Click reports it, and keeps the button hidden', async () => {
     const records = freshRecords();
     await attemptSend(records, start(ONE), () => Promise.reject(new Error('socket closed')));
-    const settled = settleFromProvider(records, records.read(ONE, 'evm'), 'KNOWN_DEPOSIT_TX');
+    const settled = settleFromProvider(records, records.read(ONE), 'KNOWN_DEPOSIT_TX');
     expect(settled).toMatchObject({ state: 'sent', via: 'provider' });
-    expect(records.read(ONE, 'evm')?.state).toBe('sent');
-    expect(offered(records.read(ONE, 'evm'), 'PENDING_DEPOSIT')).toBe('record');
+    expect(records.read(ONE)?.state).toBe('sent');
+    expect(offered(records.read(ONE), 'PENDING_DEPOSIT')).toBe('record');
     expect(settleFromProvider(records, null, null)).toBeNull();
   });
 
@@ -597,33 +581,21 @@ describe('resolving an uncertain record', () => {
       version: 1,
       state: 'uncertain',
       swap: ONE,
-      family: 'evm',
       account: FROM,
       startedAt: NOW.toISOString(),
       tx: HASH,
       message: 'lost',
-      signed: null,
     };
     records.write(uncertain);
-    const pending = await resolveRecord(records, uncertain, {
-      ...noChecks,
-      evmState: () => Promise.resolve('pending'),
-    });
+    const pending = await resolveRecord(records, uncertain, () => Promise.resolve('pending'));
     expect(pending.kind).toBe('unchanged');
-    const done = await resolveRecord(records, uncertain, {
-      ...noChecks,
-      evmState: () => Promise.resolve('succeeded'),
-    });
+    const done = await resolveRecord(records, uncertain, () => Promise.resolve('succeeded'));
     expect(done.kind).toBe('sent');
-    expect(records.read(ONE, 'evm')).toMatchObject({ state: 'sent', tx: HASH, via: 'chain' });
+    expect(records.read(ONE)).toMatchObject({ state: 'sent', tx: HASH, via: 'chain' });
   });
 });
 
 describe('checking a send the wallet acknowledged', () => {
-  function noSolana(): ReturnType<ResolveDeps['checkSolana']> {
-    return Promise.reject(new Error('not used'));
-  }
-
   async function walletSent() {
     const records = freshRecords();
     const log: string[] = [];
@@ -632,7 +604,7 @@ describe('checking a send the wallet acknowledged', () => {
       start(ONE),
       evmSend(fakeEvm({ log, send: () => Promise.resolve(HASH) }))
     );
-    const record = records.read(ONE, 'evm');
+    const record = records.read(ONE);
     if (!record) throw new Error('expected a record');
     return { records, record };
   }
@@ -647,44 +619,34 @@ describe('checking a send the wallet acknowledged', () => {
 
   it('clears a send that reverted on chain, so the user can send again', async () => {
     const { records, record } = await walletSent();
-    const result = await resolveRecord(records, record, {
-      checkSolana: noSolana,
-      evmState: () => Promise.resolve('reverted'),
-    });
+    const result = await resolveRecord(records, record, () => Promise.resolve('reverted'));
     expect(result).toEqual({ kind: 'cleared', message: LANDED_FAILED_MESSAGE });
-    expect(records.read(ONE, 'evm')).toBeNull();
-    expect(offered(records.read(ONE, 'evm'), 'PENDING_DEPOSIT')).toBe('offer');
+    expect(records.read(ONE)).toBeNull();
+    expect(offered(records.read(ONE), 'PENDING_DEPOSIT')).toBe('offer');
   });
 
   it.each(['pending', 'unknown'] as const)(
     'never clears a send the chain reports as %s',
     async state => {
       const { records, record } = await walletSent();
-      const result = await resolveRecord(records, record, {
-        checkSolana: noSolana,
-        evmState: () => Promise.resolve(state),
-      });
+      const result = await resolveRecord(records, record, () => Promise.resolve(state));
       expect(result.kind).toBe('unchanged');
-      expect(records.read(ONE, 'evm')).toMatchObject({ state: 'sent', confirmed: false });
+      expect(records.read(ONE)).toMatchObject({ state: 'sent', confirmed: false });
     }
   );
 
   it('confirms a send that succeeded and then stops checking it', async () => {
     const { records, record } = await walletSent();
-    const result = await resolveRecord(records, record, {
-      checkSolana: noSolana,
-      evmState: () => Promise.resolve('succeeded'),
-    });
+    const result = await resolveRecord(records, record, () => Promise.resolve('succeeded'));
     expect(result.kind).toBe('sent');
-    const confirmed = records.read(ONE, 'evm');
+    const confirmed = records.read(ONE);
     expect(confirmed).toMatchObject({ state: 'sent', confirmed: true });
     if (!confirmed) throw new Error('expected a record');
     expect(needsChainCheck(confirmed)).toBe(false);
     expect(
-      await resolveRecord(records, confirmed, {
-        checkSolana: noSolana,
-        evmState: () => Promise.reject(new Error('should not be asked')),
-      })
+      await resolveRecord(records, confirmed, () =>
+        Promise.reject(new Error('should not be asked'))
+      )
     ).toEqual({ kind: 'unchanged', note: null });
   });
 
@@ -707,7 +669,6 @@ describe('checking a send the wallet acknowledged', () => {
       version: 1 as const,
       state: 'sent' as const,
       swap: ONE,
-      family: 'evm' as const,
       account: FROM,
       startedAt: NOW.toISOString(),
       tx: HASH,
@@ -717,210 +678,12 @@ describe('checking a send the wallet acknowledged', () => {
       [sendRecordKey(TWO), JSON.stringify({ ...base, swap: TWO, via: 'chain' })],
     ]);
     const records = createSendRecords(() => storage, browserLocks().tab());
-    const wallet = records.read(ONE, 'evm');
-    const chain = records.read(TWO, 'evm');
+    const wallet = records.read(ONE);
+    const chain = records.read(TWO);
     if (!wallet || !chain) throw new Error('expected records');
     expect(wallet.state).toBe('sent');
     expect(needsChainCheck(wallet)).toBe(true);
     expect(needsChainCheck(chain)).toBe(false);
-  });
-});
-
-describe('Solana sign-only sends', () => {
-  const OK: SimulationResult = { err: null, logs: [], unitsConsumed: 150 };
-
-  function chain(opts: { send(wire: string): Promise<string>; height?: bigint }) {
-    const sent: string[] = [];
-    const built: string[] = [];
-    let landed = false;
-    const rpc: SolanaRpc = {
-      latestBlockhash() {
-        built.push('latestBlockhash');
-        return Promise.resolve({
-          blockhash: 'BL2sQysVf3SYJqtmRgfXG6oUWf7RUSN4sHXM582sjJsZ',
-          lastValidBlockHeight: 500n,
-        });
-      },
-      accounts: addresses =>
-        Promise.resolve(
-          addresses.map(a =>
-            a === SOL_SENDER
-              ? { owner: SYSTEM, lamports: 10n ** 10n, data: new Uint8Array(0), executable: false }
-              : null
-          )
-        ),
-      rentExemptMinimum: () => Promise.resolve(890_880n),
-      simulate: () => Promise.resolve(OK),
-      async send(wire) {
-        sent.push(wire);
-        const result = await opts.send(wire);
-        landed = true;
-        return result;
-      },
-      signatureStatus: () =>
-        Promise.resolve(landed ? { err: null, confirmation: 'confirmed' } : null),
-      blockHeight: () => Promise.resolve(opts.height ?? 100n),
-    };
-    return { rpc, sent, built };
-  }
-
-  const signer = {
-    address: SOL_SENDER,
-    sender: {
-      send(tx: Uint8Array): Promise<SolanaSendResult> {
-        const signed = Uint8Array.from(tx);
-        signed.set(base58.decode(SIG), 1);
-        return Promise.resolve({ kind: 'signed', transaction: signed });
-      },
-    },
-  };
-
-  const input = { token: SOL, recipient: SOL_DEPOSIT, amount: '1000000000' };
-
-  async function failedFirstSend() {
-    const storage = fakeStorage();
-    const records = createSendRecords(() => storage, browserLocks().tab());
-    let fail = true;
-    const net = chain({
-      send() {
-        if (fail) return Promise.reject(new Error('Could not reach the Solana RPC: reset'));
-        return Promise.resolve(SIG);
-      },
-    });
-    const outcome = await attemptSend(records, start(SOLANA_SWAP, 'solana'), hooks =>
-      sendSolanaDeposit(input, signer, net.rpc, hooks)
-    );
-    fail = false;
-    return { storage, records, net, outcome };
-  }
-
-  it('persists the signature and signed bytes when the RPC send throws', async () => {
-    const { storage, records, net, outcome } = await failedFirstSend();
-    expect(outcome.kind).toBe('uncertain');
-    const record = createSendRecords(() => storage, browserLocks().tab()).read(
-      SOLANA_SWAP,
-      'solana'
-    );
-    expect(record).toMatchObject({ state: 'uncertain', tx: SIG });
-    if (!record || record.state === 'sent' || !record.signed) throw new Error('expected bytes');
-    expect(record.signed.lastValidBlockHeight).toBe('500');
-    expect(record.signed.transaction).toBe(net.sent[0]);
-    expect(offered(records.read(SOLANA_SWAP, 'solana'), 'PENDING_DEPOSIT')).toBe('record');
-  });
-
-  it('retries by resending the same signed bytes, never a new transaction', async () => {
-    const { records, net } = await failedFirstSend();
-    const record = records.read(SOLANA_SWAP, 'solana');
-    if (!record) throw new Error('expected a record');
-    const builtBefore = net.built.length;
-    const resent = await resendRecord(records, record, signed =>
-      resendSignedTransaction(signed, net.rpc)
-    );
-    expect(resent.kind).toBe('sent');
-    expect(net.sent).toHaveLength(2);
-    expect(base64.decode(String(net.sent[1]))).toEqual(base64.decode(String(net.sent[0])));
-    expect(net.built.length).toBe(builtBefore);
-    expect(records.read(SOLANA_SWAP, 'solana')).toMatchObject({ state: 'sent', tx: SIG });
-  });
-
-  it('becomes sent when the signature is found on chain', async () => {
-    const { records, net } = await failedFirstSend();
-    await net.rpc.send('landed-elsewhere');
-    const record = records.read(SOLANA_SWAP, 'solana');
-    if (!record) throw new Error('expected a record');
-    const result = await resolveRecord(records, record, {
-      checkSolana: sent => checkSolanaSend(sent, net.rpc),
-      evmState: () => Promise.reject(new Error('not used')),
-    });
-    expect(result.kind).toBe('sent');
-    expect(records.read(SOLANA_SWAP, 'solana')).toMatchObject({ state: 'sent', via: 'chain' });
-  });
-
-  it('keeps checking a send the RPC accepted, and clears it if it expires unlanded', async () => {
-    const storage = fakeStorage();
-    const records = createSendRecords(() => storage, browserLocks().tab());
-    const accepted = chain({ send: () => Promise.resolve(SIG) });
-    const outcome = await attemptSend(records, start(SOLANA_SWAP, 'solana'), hooks =>
-      sendSolanaDeposit(input, signer, accepted.rpc, hooks)
-    );
-    expect(outcome.kind).toBe('sent');
-    const record = records.read(SOLANA_SWAP, 'solana');
-    if (!record) throw new Error('expected a record');
-    expect(record).toMatchObject({
-      state: 'sent',
-      tx: SIG,
-      confirmed: false,
-      lastValidBlockHeight: '500',
-    });
-    const unseen: SolanaRpc = {
-      ...accepted.rpc,
-      signatureStatus: () => Promise.resolve(null),
-      blockHeight: () => Promise.resolve(500n),
-    };
-    const waiting = await resolveRecord(records, record, {
-      checkSolana: sent => checkSolanaSend(sent, unseen),
-      evmState: () => Promise.reject(new Error('not used')),
-    });
-    expect(waiting.kind).toBe('unchanged');
-    expect(records.read(SOLANA_SWAP, 'solana')).not.toBeNull();
-    const result = await resolveRecord(records, record, {
-      checkSolana: sent =>
-        checkSolanaSend(sent, { ...unseen, blockHeight: () => Promise.resolve(501n) }),
-      evmState: () => Promise.reject(new Error('not used')),
-    });
-    expect(result).toEqual({ kind: 'cleared', message: EXPIRED_MESSAGE });
-    expect(records.read(SOLANA_SWAP, 'solana')).toBeNull();
-  });
-
-  it('never expires a sent signature whose validity window is unknown', async () => {
-    const records = freshRecords();
-    const sent: SendRecord = {
-      version: 1,
-      state: 'sent',
-      swap: SOLANA_SWAP,
-      family: 'solana',
-      account: SOL_SENDER,
-      startedAt: NOW.toISOString(),
-      tx: SIG,
-      via: 'wallet',
-      confirmed: false,
-    };
-    records.write(sent);
-    const net = chain({ send: () => Promise.resolve(SIG), height: 10_000n });
-    const unseen: SolanaRpc = { ...net.rpc, signatureStatus: () => Promise.resolve(null) };
-    const result = await resolveRecord(records, sent, {
-      checkSolana: s => checkSolanaSend(s, unseen),
-      evmState: () => Promise.reject(new Error('not used')),
-    });
-    expect(result.kind).toBe('unchanged');
-    expect(records.read(SOLANA_SWAP, 'solana')).toMatchObject({ state: 'sent' });
-  });
-
-  it('clears the record once the blockhash expired with the signature unseen, and allows a fresh attempt', async () => {
-    const { records } = await failedFirstSend();
-    const expired = chain({ send: () => Promise.resolve(SIG), height: 501n });
-    const record = records.read(SOLANA_SWAP, 'solana');
-    if (!record) throw new Error('expected a record');
-    const notYet = chain({ send: () => Promise.resolve(SIG), height: 500n });
-    expect(
-      (
-        await resolveRecord(records, record, {
-          checkSolana: sent => checkSolanaSend(sent, notYet.rpc),
-          evmState: () => Promise.reject(new Error('not used')),
-        })
-      ).kind
-    ).toBe('unchanged');
-    const result = await resolveRecord(records, record, {
-      checkSolana: sent => checkSolanaSend(sent, expired.rpc),
-      evmState: () => Promise.reject(new Error('not used')),
-    });
-    expect(result).toEqual({ kind: 'cleared', message: EXPIRED_MESSAGE });
-    expect(records.read(SOLANA_SWAP, 'solana')).toBeNull();
-    expect(offered(null, 'PENDING_DEPOSIT')).toBe('offer');
-    const fresh = await attemptSend(records, start(SOLANA_SWAP, 'solana'), hooks =>
-      sendSolanaDeposit(input, signer, expired.rpc, hooks)
-    );
-    expect(fresh.kind).toBe('sent');
   });
 });
 
@@ -951,12 +714,12 @@ describe('a wallet request that may still be open', () => {
     vi.setSystemTime(new Date(NOW.getTime() + 3_000));
     const { records, record } = recordInProgress();
     expect(confirmNothingSent(records, record)).toBe(false);
-    expect(records.read(ONE, 'evm')?.state).toBe('attempting');
+    expect(records.read(ONE)?.state).toBe('attempting');
     vi.setSystemTime(new Date(NOW.getTime() + WALLET_PROMPT_WINDOW_MS - 1));
     expect(confirmNothingSent(records, record)).toBe(false);
     vi.setSystemTime(new Date(NOW.getTime() + WALLET_PROMPT_WINDOW_MS));
     expect(confirmNothingSent(records, record)).toBe(true);
-    expect(records.read(ONE, 'evm')).toBeNull();
+    expect(records.read(ONE)).toBeNull();
   });
 
   it('never holds back an uncertain or unreadable record', () => {

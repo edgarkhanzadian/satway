@@ -7,7 +7,7 @@ import {
   encodeWithdrawalRecipient,
 } from '@satway/core';
 
-import { STEP_NAMES, WITHDRAWAL_STOPS, WITHDRAW_PROGRESS } from '../src/app/withdraw-app.js';
+import { STEP_NAMES, WITHDRAWAL_STOPS } from '../src/app/withdraw-app.js';
 import { expect, test } from '../src/fixtures.js';
 import {
   FEE_CAP_SATS,
@@ -105,40 +105,5 @@ test.describe('X1. a withdrawal that works, from sBTC to another chain', () => {
     const remembered: unknown = JSON.parse(saved['satway.withdrawals.v1'] ?? '[]');
     const file: unknown = JSON.parse(await readFile(started.receiptPath, 'utf8'));
     expect(remembered).toEqual([file]);
-  });
-
-  test('SOL on Solana, with the address filled in from the Solana wallet', async ({
-    app,
-    world,
-    wallets,
-  }) => {
-    const { withdraw, started } = await startWithdrawal(app, world, wallets, {
-      destinationWallet: 'solana',
-      asset: 'SOL on sol',
-    });
-    expect(started.receipt.destination).toMatchObject({
-      assetId: TOKENS.sol.assetId,
-      chain: 'sol',
-      address: wallets.solana.address,
-    });
-    await toDelivered(withdraw, world);
-    await expect(app.page.getByRole('heading', { name: 'Withdrawal complete' })).toBeVisible();
-    await expect(app.progress(WITHDRAW_PROGRESS.done)).toBeVisible();
-  });
-
-  test('USDC on Solana to an address typed by hand, at 3% slippage', async ({
-    app,
-    world,
-    wallets,
-  }) => {
-    const { withdraw, started } = await startWithdrawal(app, world, wallets, {
-      asset: 'USDC on sol',
-      recipient: wallets.solana.address,
-      slippage: '3%',
-    });
-    expect(started.receipt.destination.address).toBe(wallets.solana.address);
-    expect(world.oneClick.quotes.at(-1)?.request.slippageTolerance).toBe(300);
-    await toDelivered(withdraw, world);
-    await expect(app.page.getByRole('heading', { name: 'Withdrawal complete' })).toBeVisible();
   });
 });

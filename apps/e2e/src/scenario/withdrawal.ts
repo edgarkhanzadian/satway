@@ -9,7 +9,6 @@ import {
 } from '../app/withdraw-app.js';
 import type { Wallets } from '../browser/harness.js';
 import { EVM_WALLET_NAME } from '../wallets/evm-wallet.js';
-import { SOLANA_WALLET_NAME } from '../wallets/solana-wallet.js';
 import type { ChainTx } from '../world/bitcoin.js';
 import type { World } from '../world/world.js';
 
@@ -21,7 +20,7 @@ export interface WithdrawalStart {
   asset?: string;
   amount?: string;
   recipient?: string;
-  destinationWallet?: 'evm' | 'solana';
+  destinationWallet?: 'evm';
   fund?: number;
   slippage?: string;
 }
@@ -41,10 +40,6 @@ export async function openWithdraw(
   if (options.destinationWallet === 'evm') {
     await to.getByRole('button', { name: new RegExp(EVM_WALLET_NAME) }).click();
     await expect(to.getByText(`${EVM_WALLET_NAME} connected`)).toBeVisible();
-  }
-  if (options.destinationWallet === 'solana') {
-    await to.getByRole('button', { name: new RegExp(SOLANA_WALLET_NAME) }).click();
-    await expect(to.getByText(`${SOLANA_WALLET_NAME} connected`)).toBeVisible();
   }
   return withdraw;
 }

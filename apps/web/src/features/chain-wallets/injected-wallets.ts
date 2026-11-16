@@ -1,4 +1,4 @@
-import type { Eip1193Provider, EvmWalletOption, SourceWallet } from '@satway/chains';
+import type { Eip1193Provider, EvmWalletOption } from '@satway/chains';
 
 interface Eip6963Detail {
   info: { uuid: string; name: string };
@@ -30,31 +30,11 @@ export async function discoverEvmWallets(waitMs = 300): Promise<EvmWalletOption[
   return [...found.values()];
 }
 
-interface SolanaProvider {
-  connect(): Promise<{ publicKey: { toString(): string } }>;
-}
-
-export function findSolanaWallet(): SolanaProvider | null {
-  return window.phantom?.solana ?? window.solana ?? null;
-}
-
 declare global {
   interface Window {
     ethereum?: Eip1193Provider;
-    phantom?: { solana?: SolanaProvider };
-    solana?: SolanaProvider;
   }
   interface WindowEventMap {
     'eip6963:announceProvider': CustomEvent<Eip6963Detail>;
   }
-}
-
-export async function connectSolana(): Promise<SourceWallet> {
-  const provider = findSolanaWallet();
-  if (!provider) throw new Error('No Solana wallet found in this browser');
-  const { publicKey } = await provider.connect();
-  const address = publicKey.toString();
-  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address))
-    throw new Error('The wallet did not share an account');
-  return { kind: 'solana', name: 'Solana wallet', address };
 }

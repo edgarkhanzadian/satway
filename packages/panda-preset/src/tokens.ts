@@ -73,8 +73,6 @@ export const tokens = defineTokens({
     control: { value: '44px' },
     input: { value: '48px' },
     fileButton: { value: '32px' },
-    qr: { value: '240px' },
-    qrCompact: { value: '200px' },
     quoteLabel: { value: '160px' },
     route: {
       mark: { value: '26px' },

@@ -21,8 +21,6 @@ loadEnv();
 const usd = Number(process.argv[2] ?? 25);
 
 const EVM = optional('TEST_REFUND_EVM') ?? '0x2527D02599Ba641c19FEa793cD0F167589a0f10D';
-const SOL = optional('TEST_REFUND_SOL') ?? 'So11111111111111111111111111111111111111112';
-const TRON = optional('TEST_REFUND_TRON') ?? 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
 
 const ROUTES: { chain: string; symbol: string; refundTo: string }[] = [
   { chain: 'base', symbol: 'USDC', refundTo: EVM },
@@ -30,9 +28,6 @@ const ROUTES: { chain: string; symbol: string; refundTo: string }[] = [
   { chain: 'eth', symbol: 'USDC', refundTo: EVM },
   { chain: 'eth', symbol: 'ETH', refundTo: EVM },
   { chain: 'bsc', symbol: 'USDT', refundTo: EVM },
-  { chain: 'sol', symbol: 'USDC', refundTo: SOL },
-  { chain: 'sol', symbol: 'SOL', refundTo: SOL },
-  { chain: 'tron', symbol: 'USDT', refundTo: TRON },
 ];
 
 function baseUnits(token: OneClickToken, usdAmount: number): string {

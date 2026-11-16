@@ -6,7 +6,6 @@ import { parseWith } from '@satway/core';
 import type { Harness } from '../browser/harness.js';
 import { APP_ORIGIN, POLL_INTERVAL_MS } from '../config.js';
 import { EVM_WALLET_NAME } from '../wallets/evm-wallet.js';
-import { SOLANA_WALLET_NAME } from '../wallets/solana-wallet.js';
 import { STACKS_WALLET_NAME } from '../wallets/stacks-wallet.js';
 import type { World } from '../world/world.js';
 import { type ReceiptFile, receiptFileSchema } from './receipt.js';
@@ -123,11 +122,6 @@ export class SatwayApp {
   async connectEvmWallet(): Promise<void> {
     await this.from.getByRole('button', { name: new RegExp(EVM_WALLET_NAME) }).click();
     await expect(this.from.getByText(`${EVM_WALLET_NAME} connected`)).toBeVisible();
-  }
-
-  async connectSolanaWallet(): Promise<void> {
-    await this.from.getByRole('button', { name: new RegExp(SOLANA_WALLET_NAME) }).click();
-    await expect(this.from.getByText(`${SOLANA_WALLET_NAME} connected`)).toBeVisible();
   }
 
   async fillDeposit(input: { asset?: string; amount: string; refundTo?: string }): Promise<void> {

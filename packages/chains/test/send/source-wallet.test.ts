@@ -9,26 +9,21 @@ import {
   SendError,
   type SourceWallet,
   buildEvmTransfer,
-  chainFamily,
   connectEvm,
   encodeErc20Transfer,
   evmTransactionState,
-  isSentTxFor,
-  isSolanaAddress,
-  isSolanaSignature,
+  isEvmChain,
+  isSupportedOriginChain,
+  isTxHash,
   isUserRejection,
   nextRefundField,
   sendFromEvm,
-  solanaSenderOf,
   walletAddressFor,
   walletCovers,
   walletFailure,
 } from '../../src/index.js';
 import { LIVE_EVM_TOKENS } from './evm-tokens.js';
 
-const SIG =
-  '4QMdVtgtZcuygfB7RnGhZvrPxVDjXU7WgaKCaYEd2XSeQYMGKSrthoiV4GmL6pq2fu5gHaoiHofNEYTNSJuryyr';
-const SOL_WALLET = 'DgrD34m4MdR1SWr7VYezeddN61i9ib14YUVXh5QvKG1H';
 const FROM = '0x2527D02599Ba641c19FEa793cD0F167589a0f10D';
 const SWAP = '0x4352589330E4Ab9c40B2eaFBc125F4eeA38e260D';
 const USDC_BASE: OneClickToken = {
@@ -211,32 +206,43 @@ describe('buildEvmTransfer', () => {
 
 describe('chain matching', () => {
   const evm: SourceWallet = {
-    kind: 'evm',
     name: 'W',
     address: FROM,
     provider: { request: () => Promise.resolve(null) },
   };
-  const sol: SourceWallet = {
-    kind: 'solana',
-    name: 'S',
-    address: 'So11111111111111111111111111111111111111112',
-  };
 
   it('classifies chains', () => {
-    expect(chainFamily('base')).toBe('evm');
-    expect(chainFamily('sol')).toBe('solana');
-    expect(chainFamily('tron')).toBe('other');
-    expect(chainFamily('btc')).toBe('other');
+    expect(isEvmChain('base')).toBe(true);
+    expect(isEvmChain('eth')).toBe(true);
+    expect(isEvmChain('sol')).toBe(false);
+    expect(isEvmChain('tron')).toBe(false);
+    expect(isEvmChain('btc')).toBe(false);
   });
 
-  it('a wallet only covers assets on its own kind of chain', () => {
+  it('offers deposits from EVM chains only, for now', () => {
+    for (const chain of ['eth', 'base', 'arb', 'bsc', 'pol', 'op', 'avax']) {
+      expect(isSupportedOriginChain(chain)).toBe(true);
+    }
+    for (const chain of ['sol', 'tron', 'btc', 'near', 'ton', 'stellar']) {
+      expect(isSupportedOriginChain(chain)).toBe(false);
+    }
+  });
+
+  it('a wallet only covers assets on EVM chains', () => {
     expect(walletCovers(evm, USDC_BASE)).toBe(true);
+    expect(walletCovers(evm, ETH)).toBe(true);
     expect(walletCovers(evm, SOL)).toBe(false);
-    expect(walletCovers(sol, SOL)).toBe(true);
-    expect(walletCovers(sol, ETH)).toBe(false);
     expect(walletCovers(evm, TRX)).toBe(false);
     expect(walletCovers(null, ETH)).toBe(false);
     expect(walletCovers(evm, undefined)).toBe(false);
+  });
+
+  it('gives the wallet address only for an EVM chain', () => {
+    expect(walletAddressFor(evm, 'base')).toBe(FROM);
+    expect(walletAddressFor(evm, 'sol')).toBeNull();
+    expect(walletAddressFor(evm, 'tron')).toBeNull();
+    expect(walletAddressFor(evm, undefined)).toBeNull();
+    expect(walletAddressFor(null, 'base')).toBeNull();
   });
 });
 
@@ -269,24 +275,23 @@ describe('nextRefundField', () => {
   });
 });
 
-describe('isSentTxFor', () => {
+describe('isTxHash', () => {
   const HASH = '0x' + 'cd'.repeat(32);
 
-  it('accepts a Solana signature only for a Solana deposit, and a 0x hash only for EVM', () => {
-    expect(isSentTxFor('solana', SIG)).toBe(true);
-    expect(isSentTxFor('evm', SIG)).toBe(false);
-    expect(isSentTxFor('evm', HASH)).toBe(true);
-    expect(isSentTxFor('solana', HASH)).toBe(false);
-    expect(isSentTxFor('other', SIG)).toBe(false);
-    expect(isSentTxFor('evm', 'nonsense')).toBe(false);
-  });
-
-  it('rejects base58 values that are not 64 bytes as Solana signatures', () => {
-    expect(isSentTxFor('solana', SIG)).toBe(true);
-    expect(isSentTxFor('solana', SIG.slice(0, -2))).toBe(false);
-    expect(isSentTxFor('solana', 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v')).toBe(false);
-    expect(isSentTxFor('solana', `${SIG.slice(0, -1)}0`)).toBe(false);
-    expect(isSentTxFor('solana', '')).toBe(false);
+  it('accepts a 0x-prefixed 32-byte hash only', () => {
+    expect(isTxHash(HASH)).toBe(true);
+    expect(isTxHash(HASH.toUpperCase().replace('0X', '0x'))).toBe(true);
+    expect(isTxHash(HASH.slice(0, -2))).toBe(false);
+    expect(isTxHash(`${HASH}cd`)).toBe(false);
+    expect(isTxHash(HASH.slice(2))).toBe(false);
+    expect(isTxHash(`${HASH.slice(0, -1)}g`)).toBe(false);
+    expect(
+      isTxHash(
+        '4QMdVtgtZcuygfB7RnGhZvrPxVDjXU7WgaKCaYEd2XSeQYMGKSrthoiV4GmL6pq2fu5gHaoiHofNEYTNSJuryyr'
+      )
+    ).toBe(false);
+    expect(isTxHash('nonsense')).toBe(false);
+    expect(isTxHash('')).toBe(false);
   });
 });
 
@@ -304,56 +309,6 @@ describe('where a wallet send failed', () => {
     expect(walletFailure({ code: 4001, message: 'no' }, 'x').phase).toBe('rejected');
     const typed = new SendError('before', 'not-sent');
     expect(walletFailure(typed, 'x')).toBe(typed);
-  });
-});
-
-describe('Solana address checks', () => {
-  it('accepts 32-byte base58 keys only', () => {
-    expect(isSolanaAddress('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v')).toBe(true);
-    expect(isSolanaAddress('11111111111111111111111111111111')).toBe(true);
-    expect(isSolanaAddress('EPjFWdd5AufqSSqeM2qN1xzybapC8G4')).toBe(false);
-    expect(isSolanaAddress('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1vv')).toBe(false);
-    expect(isSolanaAddress('0x2527D02599Ba641c19FEa793cD0F167589a0f10D')).toBe(false);
-    expect(isSolanaAddress('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1l')).toBe(false);
-    expect(isSolanaSignature(SIG)).toBe(true);
-  });
-});
-
-describe('accounts in a wallet that covers two chain families', () => {
-  const sender = { send: () => Promise.resolve({ kind: 'sent' as const, signature: SIG }) };
-  const both: SourceWallet = {
-    kind: 'evm',
-    name: 'Both (WalletConnect)',
-    address: FROM,
-    provider: { request: () => Promise.resolve(null) },
-    solana: { address: SOL_WALLET, sender },
-  };
-
-  it('picks the address for the selected asset’s chain family', () => {
-    expect(walletAddressFor(both, 'evm')).toBe(FROM);
-    expect(walletAddressFor(both, 'solana')).toBe(SOL_WALLET);
-    expect(walletAddressFor(both, 'other')).toBeNull();
-    expect(walletCovers(both, SOL)).toBe(true);
-    expect(walletCovers(both, ETH)).toBe(true);
-    expect(walletCovers(both, TRX)).toBe(false);
-    expect(solanaSenderOf(both)).toEqual({ address: SOL_WALLET, sender });
-  });
-
-  it('only gives a Solana sender when the wallet can send', () => {
-    const addressOnly: SourceWallet = { kind: 'solana', name: 'S', address: SOL_WALLET };
-    expect(solanaSenderOf(addressOnly)).toBeNull();
-    expect(walletAddressFor(addressOnly, 'solana')).toBe(SOL_WALLET);
-    expect(walletAddressFor(addressOnly, 'evm')).toBeNull();
-    expect(solanaSenderOf({ ...addressOnly, sender })).toEqual({ address: SOL_WALLET, sender });
-    expect(
-      solanaSenderOf({
-        kind: 'evm',
-        name: 'E',
-        address: FROM,
-        provider: { request: () => Promise.resolve(null) },
-      })
-    ).toBeNull();
-    expect(solanaSenderOf(null)).toBeNull();
   });
 });
 
@@ -555,9 +510,10 @@ describe('malformed wallet RPC results', () => {
 
   it('connectEvm still takes the first valid account', async () => {
     const w = replying({ eth_requestAccounts: [FROM, SWAP] });
-    expect(await connectEvm({ id: 'x', name: 'X', provider: w.provider })).toMatchObject({
-      kind: 'evm',
+    expect(await connectEvm({ id: 'x', name: 'X', provider: w.provider })).toEqual({
+      name: 'X',
       address: FROM,
+      provider: w.provider,
     });
   });
 });

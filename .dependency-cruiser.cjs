@@ -54,11 +54,7 @@ module.exports = {
       from: { path: '^apps/e2e/' },
       to: {
         path: '^packages/',
-        pathNot: [
-          '^packages/core/src/index[.]ts$',
-          '^packages/chains/src/index[.]ts$',
-          '^packages/chains/src/send/solana/index[.]ts$',
-        ],
+        pathNot: ['^packages/core/src/index[.]ts$', '^packages/chains/src/index[.]ts$'],
       },
     },
     {
@@ -181,16 +177,9 @@ module.exports = {
     {
       name: 'chains-only-through-its-entries',
       severity: 'error',
-      comment:
-        'Outside packages/chains, import @satway/chains through its entries only: the package entry, or @satway/chains/solana for the lazily loaded Solana send code.',
+      comment: 'Outside packages/chains, import @satway/chains through its package entry only.',
       from: { pathNot: '^packages/chains/' },
-      to: {
-        path: '^packages/chains/',
-        pathNot: [
-          '^packages/chains/src/index[.]ts$',
-          '^packages/chains/src/send/solana/index[.]ts$',
-        ],
-      },
+      to: { path: '^packages/chains/', pathNot: '^packages/chains/src/index[.]ts$' },
     },
     {
       name: 'chains-metadata-does-not-import-send',
@@ -199,14 +188,6 @@ module.exports = {
         'packages/chains/src/metadata (chain families, chain ids, native assets, address checks) is reusable by any flow. It must not import the send directory.',
       from: { path: '^packages/chains/src/metadata/' },
       to: { path: '^packages/chains/src/', pathNot: '^packages/chains/src/metadata/' },
-    },
-    {
-      name: 'chains-solana-send-stays-lazy',
-      severity: 'error',
-      comment:
-        'The Solana send code (packages/chains/src/send/solana) is loaded lazily by the web app through @satway/chains/solana. The rest of the package may only import its types, or the main entry would pull it into the first chunk.',
-      from: { path: '^packages/chains/src/', pathNot: '^packages/chains/src/send/solana/' },
-      to: { path: '^packages/chains/src/send/solana/', dependencyTypesNot: ['type-only'] },
     },
     {
       name: 'chains-directories-through-their-index',
@@ -220,17 +201,6 @@ module.exports = {
       },
     },
     {
-      name: 'chains-solana-through-its-index',
-      severity: 'error',
-      comment:
-        'Inside packages/chains, code outside send/solana reaches it only through send/solana/index.ts (and only for types, see chains-solana-send-stays-lazy).',
-      from: { path: '^packages/chains/src/', pathNot: '^packages/chains/src/send/solana/' },
-      to: {
-        path: '^packages/chains/src/send/solana/',
-        pathNot: '^packages/chains/src/send/solana/index[.]ts$',
-      },
-    },
-    {
       name: 'scripts-use-package-entries-only',
       severity: 'error',
       comment:
@@ -238,11 +208,7 @@ module.exports = {
       from: { path: '^scripts/' },
       to: {
         path: '^packages/',
-        pathNot: [
-          '^packages/core/src/index[.]ts$',
-          '^packages/chains/src/index[.]ts$',
-          '^packages/chains/src/send/solana/index[.]ts$',
-        ],
+        pathNot: ['^packages/core/src/index[.]ts$', '^packages/chains/src/index[.]ts$'],
       },
     },
     {
@@ -264,12 +230,9 @@ module.exports = {
     {
       name: 'web-ui-is-presentational',
       severity: 'error',
-      comment:
-        'apps/web/src/ui holds presentational components: it never imports features, app, or the network-reading Solana send code.',
+      comment: 'apps/web/src/ui holds presentational components: it never imports features or app.',
       from: { path: '^apps/web/src/ui/' },
-      to: {
-        path: ['^apps/web/src/(?:features|app)/', '^packages/chains/src/send/solana/'],
-      },
+      to: { path: '^apps/web/src/(?:features|app)/' },
     },
     {
       name: 'web-ui-only-types-from-shared',

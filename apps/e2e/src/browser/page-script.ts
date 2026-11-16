@@ -1,13 +1,6 @@
 export interface PageScriptOptions {
   binding: string;
   evm: { name: string; uuid: string; rdns: string; icon: string } | null;
-  solana: {
-    name: string;
-    icon: string;
-    address: string;
-    publicKey: string;
-    features: readonly ('signAndSend' | 'sign')[];
-  } | null;
   stacks: { id: string; name: string; icon: string } | null;
 }
 
@@ -39,27 +32,6 @@ export function installSatwayPage(options: PageScriptOptions): void {
     throw Object.assign(new Error(typeof message === 'string' ? message : 'Wallet error'), {
       code: read(error, 'code'),
     });
-  }
-
-  function toBase64(bytes: Uint8Array): string {
-    let binary = '';
-    bytes.forEach(byte => {
-      binary += String.fromCharCode(byte);
-    });
-    return btoa(binary);
-  }
-
-  function fromBase64(text: unknown): Uint8Array {
-    if (typeof text !== 'string') throw new Error('The wallet returned no bytes');
-    const binary = atob(text);
-    const out = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
-    return out;
-  }
-
-  function bytesOf(value: unknown): Uint8Array {
-    if (value instanceof Uint8Array) return value;
-    throw new Error('Expected transaction bytes');
   }
 
   document.addEventListener('securitypolicyviolation', event => {
@@ -112,92 +84,6 @@ export function installSatwayPage(options: PageScriptOptions): void {
     }
     window.addEventListener('eip6963:requestProvider', announce);
     announce();
-  }
-
-  const solana = options.solana;
-  if (solana) {
-    const chains = Object.freeze(['solana:mainnet']);
-    const featureNames = [
-      ...(solana.features.includes('signAndSend') ? ['solana:signAndSendTransaction'] : []),
-      ...(solana.features.includes('sign') ? ['solana:signTransaction'] : []),
-    ];
-    const account = Object.freeze({
-      address: solana.address,
-      publicKey: fromBase64(solana.publicKey),
-      chains,
-      features: Object.freeze(featureNames),
-      label: solana.name,
-    });
-    let accounts: readonly object[] = [];
-    const features: Record<string, unknown> = {
-      'standard:connect': {
-        version: '1.0.0',
-        async connect() {
-          await walletCall('solana', { method: 'connect' });
-          accounts = [account];
-          return { accounts };
-        },
-      },
-      'standard:events': {
-        version: '1.0.0',
-        on() {
-          return () => undefined;
-        },
-      },
-    };
-    if (solana.features.includes('signAndSend')) {
-      features['solana:signAndSendTransaction'] = {
-        version: '1.0.0',
-        supportedTransactionVersions: ['legacy', 0],
-        async signAndSendTransaction(...inputs: unknown[]) {
-          const outputs: { signature: Uint8Array }[] = [];
-          for (const input of inputs) {
-            const signature = await walletCall('solana', {
-              method: 'signAndSendTransaction',
-              transaction: toBase64(bytesOf(read(input, 'transaction'))),
-              chain: read(input, 'chain'),
-              options: plain(read(input, 'options')),
-            });
-            outputs.push({ signature: fromBase64(signature) });
-          }
-          return outputs;
-        },
-      };
-    }
-    if (solana.features.includes('sign')) {
-      features['solana:signTransaction'] = {
-        version: '1.0.0',
-        supportedTransactionVersions: ['legacy', 0],
-        async signTransaction(...inputs: unknown[]) {
-          const outputs: { signedTransaction: Uint8Array }[] = [];
-          for (const input of inputs) {
-            const signed = await walletCall('solana', {
-              method: 'signTransaction',
-              transaction: toBase64(bytesOf(read(input, 'transaction'))),
-              chain: read(input, 'chain'),
-            });
-            outputs.push({ signedTransaction: fromBase64(signed) });
-          }
-          return outputs;
-        },
-      };
-    }
-    const wallet = {
-      version: '1.0.0',
-      name: solana.name,
-      icon: solana.icon,
-      chains,
-      features,
-      get accounts() {
-        return accounts;
-      },
-    };
-    function register(api: unknown) {
-      const fn = read(api, 'register');
-      if (typeof fn === 'function') Reflect.apply(fn, api, [wallet]);
-    }
-    window.addEventListener('wallet-standard:app-ready', event => register(read(event, 'detail')));
-    window.dispatchEvent(new CustomEvent('wallet-standard:register-wallet', { detail: register }));
   }
 
   const stacks = options.stacks;

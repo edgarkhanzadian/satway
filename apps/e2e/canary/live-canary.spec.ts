@@ -8,31 +8,16 @@ import {
 } from '@satway/core';
 
 import { expect, test } from '../src/canary/canary-fixtures.js';
-import { SOLANA_MAINNET_CAIP2, UPSTREAM } from '../src/config.js';
-
-const WALLETCONNECT_PROJECT_ID = '78235ea93aa1c847fd6384cc920a44d1';
-const SOLANA_RPC_URL = `${UPSTREAM.solanaRpc}/v1/?chainId=${SOLANA_MAINNET_CAIP2}&projectId=${WALLETCONNECT_PROJECT_ID}`;
+import { UPSTREAM } from '../src/config.js';
 
 interface Route {
   asset: string;
   amount: string;
-  refundTo: string | null;
-  mayFail?: string;
 }
 
-const PLACEHOLDER_SOL = 'So11111111111111111111111111111111111111112';
-const PLACEHOLDER_TRON = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
-
 const ROUTES: Route[] = [
-  { asset: 'USDC on base', amount: '25', refundTo: null },
-  { asset: 'ETH on eth', amount: '0.01', refundTo: null },
-  { asset: 'SOL on sol', amount: '0.2', refundTo: PLACEHOLDER_SOL },
-  {
-    asset: 'USDT on tron',
-    amount: '25',
-    refundTo: PLACEHOLDER_TRON,
-    mayFail: 'the swap provider may refuse a small Tron route on its minimum',
-  },
+  { asset: 'USDC on base', amount: '25' },
+  { asset: 'ETH on eth', amount: '0.01' },
 ];
 
 const feesSchema = z.looseObject({
@@ -40,18 +25,6 @@ const feesSchema = z.looseObject({
   halfHourFee: z.number(),
   hourFee: z.number(),
 });
-
-const rpcSchema = z.looseObject({ jsonrpc: z.literal('2.0'), result: z.unknown() });
-
-async function solanaRpc(method: string): Promise<unknown> {
-  const response = await fetch(SOLANA_RPC_URL, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: [] }),
-  });
-  expect(response.status, `Solana RPC ${method}`).toBe(200);
-  return parseWith(rpcSchema, await response.json(), `Solana RPC ${method}`).result;
-}
 
 test.describe('live canary: real public services, read-only, no funds', () => {
   test('upstreams answer in the shapes the app expects', async () => {
@@ -66,9 +39,6 @@ test.describe('live canary: real public services, read-only, no funds', () => {
     const feesUrl = `${MAINNET_CONFIG.btcApiUrl}/v1/fees/recommended`;
     const fees = parseWith(feesSchema, await (await fetch(feesUrl)).json(), feesUrl);
     expect(fees.halfHourFee).toBeGreaterThan(0);
-    expect(await solanaRpc('getHealth')).toBe('ok');
-    const blockhash = await solanaRpc('getLatestBlockhash');
-    expect(JSON.stringify(blockhash)).toMatch(/"blockhash":"[1-9A-HJ-NP-Za-km-z]{32,44}"/);
     test.info().annotations.push({
       type: 'upstreams',
       description: `signers key ${signers.signersPublicKey.slice(0, 12)}…, deposit minimum ${limits.perDepositMinimum} sats, tip ${tip}, half-hour fee ${fees.halfHourFee} sat/vB`,
@@ -90,7 +60,6 @@ test.describe('live canary: real public services, read-only, no funds', () => {
 
     for (const route of ROUTES) {
       await app.fillDeposit({ asset: route.asset, amount: route.amount });
-      if (route.refundTo !== null) await app.refundInput.fill(route.refundTo);
       await app.page.getByRole('button', { name: 'Get quote' }).click();
       const preview = app.definition('You receive about');
       const alert = app.page.getByRole('alert');
@@ -100,7 +69,7 @@ test.describe('live canary: real public services, read-only, no funds', () => {
         type: refused === null ? 'quote ok' : 'quote refused',
         description: `${route.asset}: ${refused ?? (await preview.innerText())}`,
       });
-      if (refused !== null && route.mayFail === undefined)
+      if (refused !== null)
         throw new Error(`The dry quote for ${route.asset} was refused: ${refused}`);
       await expect(app.page.getByRole('heading', { name: 'Deposit in progress' })).toHaveCount(0);
     }

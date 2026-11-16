@@ -9,6 +9,11 @@ import {
 const DECLINED = 'You declined the request in your wallet, so nothing was signed or sent.';
 
 test.describe('X2. a withdrawal that is refused before anything is signed or sent', () => {
+  test('only assets on EVM chains are offered as destinations', async ({ app, world, wallets }) => {
+    const withdraw = await openWithdraw(app, world, wallets);
+    await expect(withdraw.assetSelect.locator('option')).toHaveText(['USDC on base', 'ETH on eth']);
+  });
+
   test('the wallet rejects the request: nothing is saved or sent, and signing again works', async ({
     app,
     world,
@@ -85,7 +90,7 @@ test.describe('X2. a withdrawal that is refused before anything is signed or sen
     await expect(app.page.getByRole('alert')).toContainText('capitalisation error');
     await withdraw.fill({
       amount: String(WITHDRAW_SATS),
-      recipient: wallets.solana.address,
+      recipient: 'So11111111111111111111111111111111111111112',
     });
     await app.page.getByRole('button', { name: 'Get quote' }).click();
     await expect(app.page.getByRole('alert')).toContainText('not an EVM address');

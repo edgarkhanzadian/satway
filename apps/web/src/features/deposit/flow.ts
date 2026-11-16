@@ -1,3 +1,4 @@
+import { isSupportedOriginChain } from '@satway/chains';
 import {
   type FetchLike,
   type NetworkConfig,
@@ -17,6 +18,31 @@ import {
 } from '@satway/core';
 
 import type { Backend, Receipt } from '../../shared/index.js';
+
+const POPULAR = ['USDC', 'USDT', 'ETH', 'BNB'];
+
+export function depositOrigins(
+  tokens: readonly OneClickToken[],
+  btcAssetId: string
+): OneClickToken[] {
+  function rank(t: OneClickToken): number {
+    return POPULAR.indexOf(t.symbol) + 1 || POPULAR.length + 1;
+  }
+  return tokens
+    .filter(
+      t =>
+        t.assetId !== btcAssetId &&
+        isSupportedOriginChain(t.blockchain) &&
+        t.price > 0 &&
+        !/deprecated/i.test(t.symbol)
+    )
+    .sort(
+      (a, b) =>
+        rank(a) - rank(b) ||
+        a.symbol.localeCompare(b.symbol) ||
+        a.blockchain.localeCompare(b.blockchain)
+    );
+}
 
 export interface DepositInput {
   stacksAddress: string;

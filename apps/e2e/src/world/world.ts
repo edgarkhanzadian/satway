@@ -1,6 +1,6 @@
 import { buildDepositAddress } from '@satway/core';
 
-import { SOLANA_MAINNET_CAIP2, UPSTREAM } from '../config.js';
+import { UPSTREAM } from '../config.js';
 import { AlexStacksNode } from './alex.js';
 import {
   BitcoinChain,
@@ -17,16 +17,15 @@ import { type Gate, RealDate, gate, realNow } from './clock.js';
 import { Emily, type EmilyDeposit } from './emily.js';
 import { EvmChains, type EvmTransfer } from './evm.js';
 import { Hiro } from './hiro.js';
-import { type Reply, field, parseJson, text } from './http.js';
+import type { Reply } from './http.js';
 import { type BitcoinKey, bitcoinKey, stacksAddressOf } from './keys.js';
 import { BTC_ASSET_ID, OneClick, type Swap, TOKENS } from './oneclick.js';
 import { Rng } from './random.js';
 import { parseDepositScript } from './sbtc-scripts.js';
-import { type Credit, NATIVE_SOL_ASSET, SolanaChain } from './solana.js';
 import { WithdrawalWorld } from './withdrawals.js';
 
 export type Caller = 'page' | 'worker' | 'notifier' | 'wallet' | 'test';
-export type Service = 'hiro' | 'alex' | 'mempool' | 'emily' | 'oneclick' | 'solana';
+export type Service = 'hiro' | 'alex' | 'mempool' | 'emily' | 'oneclick';
 
 export interface WorldRequest {
   method: string;
@@ -57,7 +56,6 @@ export interface FaultRule {
   service: Service;
   method?: string;
   path?: RegExp;
-  rpcMethod?: string;
   bodyIncludes?: string;
   callers?: readonly Caller[];
   outcome: FaultOutcome;
@@ -75,17 +73,10 @@ export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
 
 export type WorldReply = Reply | 'network-error' | 'hang';
 
-const BROWSER_SERVICES: ReadonlySet<Service> = new Set([
-  'hiro',
-  'alex',
-  'mempool',
-  'emily',
-  'solana',
-]);
+const BROWSER_SERVICES: ReadonlySet<Service> = new Set(['hiro', 'alex', 'mempool', 'emily']);
 
 export const START_HEIGHT = 975_800;
 export const EVIDENCE_AMOUNT_SATS = 20_000_774;
-const SOLANA_SLOT_MS = 400;
 
 function serviceOf(url: URL): Service | null {
   switch (url.origin) {
@@ -99,8 +90,6 @@ function serviceOf(url: URL): Service | null {
       return 'oneclick';
     case UPSTREAM.alex:
       return 'alex';
-    case UPSTREAM.solanaRpc:
-      return 'solana';
     default:
       return null;
   }
@@ -146,7 +135,6 @@ export class World {
   readonly hiro: Hiro;
   readonly alex: AlexStacksNode;
   readonly oneClick: OneClick;
-  readonly solana: SolanaChain;
   readonly evm: EvmChains;
   readonly withdrawals: WithdrawalWorld;
   readonly log: WorldLogEntry[] = [];
@@ -163,7 +151,6 @@ export class World {
   private evidenceWallet: Wallet | null = null;
   private readonly faults: ActiveFault[] = [];
   private clockOffsetMs = 0;
-  private solanaClockRemainderMs = 0;
   private seq = 0;
   private parkedCount = 0;
 
@@ -177,14 +164,8 @@ export class World {
     this.hiro = new Hiro(() => this.signer.publicKey);
     this.alex = new AlexStacksNode(() => this.signer.publicKey);
     this.oneClick = new OneClick(this.rng, () => this.now());
-    this.solana = new SolanaChain(this.rng, credit => this.solanaCredit(credit));
     this.evm = new EvmChains(this.rng, (transfer, hash) => this.evmTransfer(transfer, hash));
     this.evidence = this.seedEvidenceSet('valid');
-    this.solana.createMint(
-      TOKENS.usdcSol.contractAddress,
-      TOKENS.usdcSol.decimals,
-      this.rng.base58(32)
-    );
     this.withdrawals = new WithdrawalWorld({
       rng: new Rng(`${seed}#withdrawals`),
       now: () => this.now(),
@@ -208,10 +189,6 @@ export class World {
 
   advanceClock(ms: number): void {
     this.clockOffsetMs += ms;
-    const total = this.solanaClockRemainderMs + ms;
-    const slots = Math.floor(total / SOLANA_SLOT_MS);
-    this.solanaClockRemainderMs = total - slots * SOLANA_SLOT_MS;
-    if (slots > 0) this.solana.advance(slots);
   }
 
   get parked(): number {
@@ -343,26 +320,6 @@ export class World {
     this.evidence = this.seedEvidenceSet(variant);
   }
 
-  private solanaCredit(credit: Credit): void {
-    const assetId =
-      credit.assetMint === null
-        ? NATIVE_SOL_ASSET
-        : (this.oneClick
-            .tokens()
-            .find(
-              t =>
-                t.family === 'solana' &&
-                t.contractAddress !== undefined &&
-                t.contractAddress === credit.assetMint
-            )?.assetId ?? `unknown-mint:${credit.assetMint}`);
-    this.oneClick.arrive({
-      depositAddress: credit.owner,
-      assetId,
-      amount: credit.amount,
-      txHash: credit.signature,
-    });
-  }
-
   private evmTransfer(transfer: EvmTransfer, hash: string): void {
     const token = this.oneClick.tokens().find(t => {
       if (t.family !== 'evm' || t.chainId !== transfer.chainId) return false;
@@ -413,7 +370,6 @@ export class World {
         f.service === service &&
         (f.method === undefined || f.method === method) &&
         (f.path === undefined || f.path.test(path)) &&
-        (f.rpcMethod === undefined || field(parseJson(body), 'method') === f.rpcMethod) &&
         (f.bodyIncludes === undefined || body.includes(f.bodyIncludes)) &&
         (f.callers === undefined || f.callers.includes(caller))
     );
@@ -547,15 +503,6 @@ export class World {
           request.body,
           request.headers
         );
-      case 'solana':
-        if (
-          request.method !== 'POST' ||
-          url.pathname !== '/v1/' ||
-          url.searchParams.get('chainId') !== SOLANA_MAINNET_CAIP2 ||
-          !url.searchParams.get('projectId')
-        )
-          return text('Bad Request', 400);
-        return this.solana.serve(parseJson(request.body));
       default:
         throw new Error(`Unknown service ${String(service satisfies never)}`);
     }
@@ -583,7 +530,7 @@ export class World {
 
   requestsTo(
     service: Service,
-    filter: { caller?: Caller; method?: string; path?: string | RegExp; rpcMethod?: string } = {}
+    filter: { caller?: Caller; method?: string; path?: string | RegExp } = {}
   ): WorldLogEntry[] {
     return this.log.filter(e => {
       if (e.service !== service) return false;
@@ -592,12 +539,6 @@ export class World {
       const path = new URL(e.url).pathname;
       if (typeof filter.path === 'string' && path !== filter.path) return false;
       if (filter.path instanceof RegExp && !filter.path.test(path)) return false;
-      if (
-        filter.rpcMethod !== undefined &&
-        (e.requestBody === undefined ? undefined : field(parseJson(e.requestBody), 'method')) !==
-          filter.rpcMethod
-      )
-        return false;
       return true;
     });
   }
@@ -642,7 +583,7 @@ export class World {
       depositAddress: swap.depositAddress,
       assetId: swap.token.assetId,
       amount: options.amount ?? swap.amountIn,
-      txHash: swap.token.family === 'solana' ? this.rng.base58(64) : `0x${this.rng.hex(32)}`,
+      txHash: `0x${this.rng.hex(32)}`,
     });
     if (!updated) throw new Error('The deposit did not match the swap');
     return updated;

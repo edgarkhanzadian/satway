@@ -10,7 +10,12 @@ import {
   planReclaim,
 } from '@satway/core';
 
-import { liveQuoteWorse, prepareDeposit, toBaseUnits } from '../../../src/features/deposit/flow.js';
+import {
+  depositOrigins,
+  liveQuoteWorse,
+  prepareDeposit,
+  toBaseUnits,
+} from '../../../src/features/deposit/flow.js';
 import { pickAccount } from '../../../src/features/stacks-wallet/wallet.js';
 import {
   type Backend,
@@ -1230,6 +1235,29 @@ describe('downloadReceipt', () => {
     expect(() => downloadReceipt(receipt)).toThrow(/blocked/);
     vi.runAllTimers();
     expect(log).toEqual(['append', 'remove', 'revoke blob:x']);
+  });
+});
+
+describe('depositOrigins', () => {
+  it('offers only assets on supported (EVM) chains, popular ones first', () => {
+    function token(over: Partial<OneClickToken>): OneClickToken {
+      return { ...USDC, ...over };
+    }
+    const list = depositOrigins(
+      [
+        token({ assetId: 'zzz', symbol: 'ZZZ', blockchain: 'arb' }),
+        token({ assetId: config.btcAssetId, symbol: 'BTC', blockchain: 'btc' }),
+        token({ assetId: 'tron-usdt', symbol: 'USDT', blockchain: 'tron' }),
+        token({ assetId: 'sol', symbol: 'SOL', blockchain: 'sol' }),
+        token({ assetId: 'near', symbol: 'NEAR', blockchain: 'near' }),
+        token({ assetId: 'dead', symbol: 'OLD (deprecated)', blockchain: 'eth' }),
+        token({ assetId: 'free', symbol: 'FREE', blockchain: 'eth', price: 0 }),
+        token({ assetId: 'eth', symbol: 'ETH', blockchain: 'eth' }),
+        USDC,
+      ],
+      config.btcAssetId
+    );
+    expect(list.map(t => t.assetId)).toEqual([USDC.assetId, 'eth', 'zzz']);
   });
 });
 

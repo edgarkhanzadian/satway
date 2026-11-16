@@ -1,5 +1,3 @@
-import { base58 } from '@scure/base';
-
 import type { OneClickToken } from '@satway/core';
 
 export const EVM_CHAIN_IDS: Readonly<Record<string, number>> = Object.freeze({
@@ -15,10 +13,14 @@ export const EVM_CHAIN_IDS: Readonly<Record<string, number>> = Object.freeze({
   scroll: 534352,
 });
 
-export function chainFamily(blockchain: string): 'evm' | 'solana' | 'other' {
-  if (blockchain in EVM_CHAIN_IDS) return 'evm';
-  if (blockchain === 'sol') return 'solana';
-  return 'other';
+export function isEvmChain(blockchain: string): boolean {
+  return blockchain in EVM_CHAIN_IDS;
+}
+
+export const SUPPORTED_ORIGIN_CHAINS: ReadonlySet<string> = new Set(Object.keys(EVM_CHAIN_IDS));
+
+export function isSupportedOriginChain(blockchain: string): boolean {
+  return SUPPORTED_ORIGIN_CHAINS.has(blockchain);
 }
 
 const HOT_OMNI_NATIVE_SUFFIX = '_11111111111111111111';
@@ -44,21 +46,4 @@ export const EVM_NATIVE_DECIMALS = 18;
 
 export function isKnownEvmNative(token: Pick<OneClickToken, 'assetId' | 'blockchain'>): boolean {
   return (EVM_NATIVE_ASSETS[token.blockchain] ?? []).includes(token.assetId);
-}
-
-function base58Length(value: string): number | null {
-  if (!/^[1-9A-HJ-NP-Za-km-z]+$/.test(value) || value.length > 90) return null;
-  try {
-    return base58.decode(value).length;
-  } catch {
-    return null;
-  }
-}
-
-export function isSolanaAddress(value: string): boolean {
-  return base58Length(value) === 32;
-}
-
-export function isSolanaSignature(value: string): boolean {
-  return base58Length(value) === 64;
 }

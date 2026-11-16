@@ -1,6 +1,6 @@
 {
   "name": "@satway/chains",
-  "description": "EVM and Solana transfers, sends and send records for the origin chain. No UI, no browser globals.",
+  "description": "EVM transfers, sends and send records for the origin chain. No UI, no browser globals.",
   "version": "0.0.0",
   "type": "module",
   "scripts": {
@@ -12,17 +12,11 @@
     "typecheck": "tsc --noEmit"
   },
   "exports": {
-    ".": "./src/index.ts",
-    "./solana": "./src/send/solana/index.ts"
+    ".": "./src/index.ts"
   },
   "dependencies": {
     "@noble/hashes": "1.8.0",
-    "@satway/core": "workspace:*",
-    "@scure/base": "1.2.6",
-    "@solana-program/system": "0.16.0",
-    "@solana-program/token": "0.18.0",
-    "@solana/kit": "8.6.0",
-    "uqr": "0.1.3"
+    "@satway/core": "workspace:*"
   },
   "devDependencies": {
     "@satway/prettier-config": "workspace:*",

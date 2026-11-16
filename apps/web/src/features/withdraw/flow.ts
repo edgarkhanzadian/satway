@@ -19,7 +19,7 @@ import {
 
 import type { Backend, WithdrawalBackend } from '../../shared/index.js';
 
-const POPULAR = ['USDC', 'USDT', 'ETH', 'SOL', 'BNB'];
+const POPULAR = ['USDC', 'USDT', 'ETH', 'BNB'];
 
 export function sats(n: number): string {
   return `${n.toLocaleString('en-US')} sats`;

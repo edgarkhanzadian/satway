@@ -69,7 +69,6 @@ test.describe('Q2. keyboard only', () => {
       'Withdraw',
       'Recover',
       `${EVM_WALLET_NAME}For Ethereum, Base, Arbitrum and other EVM chains`,
-      'Test Solana WalletFor Solana',
       'Connect Stacks wallet',
     ]);
   });

@@ -99,13 +99,12 @@ export function savedLabel(started: StartedDeposit): string {
 export async function resumeIn(
   app: SatwayApp,
   started: StartedDeposit,
-  options: { reload?: boolean; evm?: boolean; solana?: boolean } = {}
+  options: { reload?: boolean; evm?: boolean } = {}
 ): Promise<void> {
   if (options.reload === true) await app.page.reload();
   await app.open();
   await app.connectStacksWallet();
-  if (options.evm !== false && options.solana !== true) await app.connectEvmWallet();
-  if (options.solana === true) await app.connectSolanaWallet();
+  if (options.evm !== false) await app.connectEvmWallet();
   await app.resumeSaved(savedLabel(started));
 }
 

@@ -21,6 +21,7 @@ test.describe('A. USDC on Base from the injected EVM wallet', () => {
     await app.connectEvmWallet();
 
     await expect(app.assetSelect).toHaveValue(TOKENS.usdcBase.assetId);
+    await expect(app.assetSelect.locator('option')).toHaveText(['USDC on base', 'ETH on eth']);
     await expect(app.refundInput).toHaveValue(wallets.evm.address);
 
     await app.fillDeposit({ amount: '100' });

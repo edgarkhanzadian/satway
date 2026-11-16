@@ -54,7 +54,6 @@ test('D. manual send: no chain wallet connected, the user pays the shown address
   await app.expectComplete();
 
   expect(wallets.evm.behaviour.requests).toEqual([]);
-  expect(wallets.solana.behaviour.requests).toEqual([]);
   expect(wallets.stacks.behaviour.requests.map(r => r.method)).toEqual(['getAddresses']);
 });
 

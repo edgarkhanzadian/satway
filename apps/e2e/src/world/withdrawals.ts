@@ -25,7 +25,7 @@ export interface WithdrawalSwap {
   minAmountOut: bigint;
 }
 
-type Service = 'hiro' | 'alex' | 'mempool' | 'emily' | 'oneclick' | 'solana';
+type Service = 'hiro' | 'alex' | 'mempool' | 'emily' | 'oneclick';
 
 function formatUnits(amount: bigint, decimals: number): string {
   const digits = amount.toString().padStart(decimals + 1, '0');
@@ -298,8 +298,7 @@ export class WithdrawalWorld {
   swapDelivers(depositAddress?: string): string {
     const ws = depositAddress === undefined ? this.latestSwap() : this.swaps.get(depositAddress);
     if (!ws) throw new Error('No such withdrawal swap');
-    const token = this.oneClick.token(ws.destinationAsset);
-    const hash = token?.family === 'solana' ? this.rng.base58(64) : `0x${this.rng.hex(32)}`;
+    const hash = `0x${this.rng.hex(32)}`;
     this.oneClick.succeed(ws.swap, hash, Number(ws.amountOut));
     return hash;
   }

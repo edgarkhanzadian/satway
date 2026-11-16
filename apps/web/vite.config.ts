@@ -10,7 +10,6 @@ function contentSecurityPolicy(apiUrl: string): Plugin {
     'https://stacks-node.alexlab.co',
     'https://mempool.space',
     'https://sbtc-emily.com',
-    'https://rpc.walletconnect.org',
   ];
   const policy = [
     "default-src 'self'",

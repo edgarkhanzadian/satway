@@ -6,7 +6,6 @@ import { actions, button, details, field, notice, sheet } from 'satway-styles/re
 
 import {
   type SourceWallet,
-  chainFamily,
   isUserRejection,
   nextRefundField,
   walletAddressFor,
@@ -128,8 +127,8 @@ export function Withdraw(props: WithdrawProps) {
           Withdraw sBTC to another chain
         </styled.h2>
         <p>
-          Turn sBTC on Stacks into USDC, ETH, SOL and other assets on EVM chains and Solana. Connect
-          your Stacks wallet above to begin.
+          Turn sBTC on Stacks into USDC, ETH and other assets on EVM chains. Connect your Stacks
+          wallet above to begin.
         </p>
         <styled.ul
           marginTop="space.08"
@@ -230,8 +229,7 @@ function WithdrawForm(
   }, [account.stacksAddress]);
 
   const token = useMemo(() => tokens.find(t => t.assetId === assetId), [tokens, assetId]);
-  const family = token ? chainFamily(token.blockchain) : 'other';
-  const walletAddress = walletAddressFor(destinationWallet, family);
+  const walletAddress = walletAddressFor(destinationWallet, token?.blockchain);
 
   const recipientRef = useRef(recipient);
   recipientRef.current = recipient;

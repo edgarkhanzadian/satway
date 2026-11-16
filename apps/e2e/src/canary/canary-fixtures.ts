@@ -1,5 +1,4 @@
 import { type BrowserContext, type Route, test as base, expect } from '@playwright/test';
-import { base64 } from '@scure/base';
 
 import { type Env, handle } from '@satway/api';
 
@@ -8,7 +7,6 @@ import { BINDING } from '../browser/harness.js';
 import { type PageScriptOptions, installSatwayPage } from '../browser/page-script.js';
 import { API_ORIGIN, APP_ORIGIN, UPSTREAM } from '../config.js';
 import { EVM_WALLET_NAME, EvmWallet } from '../wallets/evm-wallet.js';
-import { SOLANA_WALLET_NAME, SolanaWallet } from '../wallets/solana-wallet.js';
 import { STACKS_WALLET_ID, STACKS_WALLET_NAME, StacksWallet } from '../wallets/stacks-wallet.js';
 import { MemoryKv } from '../worker/kv.js';
 import { field, parseJson, stringField } from '../world/http.js';
@@ -19,21 +17,9 @@ export const CANARY_JWT_ENV = 'CANARY_ONECLICK_JWT';
 const ICON =
   'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiBmaWxsPSIjMzMzIi8+PC9zdmc+';
 
-const READ_ONLY_SOLANA_METHODS: readonly string[] = [
-  'getHealth',
-  'getLatestBlockhash',
-  'getBlockHeight',
-  'getSlot',
-  'getAccountInfo',
-  'getMultipleAccounts',
-  'getBalance',
-  'getSignatureStatuses',
-];
-
 const ADDRESS_ONLY = {
   evm: ['eth_requestAccounts', 'eth_accounts', 'eth_chainId'],
   stacks: ['getAddresses', 'stx_getAddresses'],
-  solana: ['connect'],
 } as const;
 
 const NO_SIGNING_BUTTONS =
@@ -47,7 +33,6 @@ export interface CanaryLog {
 
 export interface CanaryWallets {
   evm: EvmWallet;
-  solana: SolanaWallet;
   stacks: StacksWallet;
 }
 
@@ -58,10 +43,6 @@ function envFor(): Env {
     ALLOWED_ORIGINS: APP_ORIGIN,
     ...(jwt ? { ONECLICK_JWT: jwt } : {}),
   };
-}
-
-function rpcMethod(body: string): string | undefined {
-  return stringField(parseJson(body), 'method');
 }
 
 export interface NetworkRules {
@@ -85,12 +66,6 @@ function requestProblem(
   if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return null;
   if (url.origin === UPSTREAM.hiro && url.pathname.startsWith('/v2/contracts/call-read/'))
     return null;
-  if (url.origin === UPSTREAM.solanaRpc) {
-    const called = rpcMethod(body);
-    return called !== undefined && READ_ONLY_SOLANA_METHODS.includes(called)
-      ? null
-      : `Solana RPC ${String(called)} is not read-only`;
-  }
   return `${method} ${url.href} is not read-only`;
 }
 
@@ -99,7 +74,6 @@ const ALLOWED_PAGE_ORIGINS: readonly string[] = [
   UPSTREAM.alex,
   UPSTREAM.mempool,
   UPSTREAM.emily,
-  UPSTREAM.solanaRpc,
 ];
 
 async function install(context: BrowserContext, wallets: CanaryWallets, log: CanaryLog) {
@@ -113,15 +87,14 @@ async function install(context: BrowserContext, wallets: CanaryWallets, log: Can
       log.violations.push(`a guarded button was pressed: ${String(payload)}`);
       return null;
     }
-    if (kind === 'evm' || kind === 'stacks' || kind === 'solana') {
+    if (kind === 'evm' || kind === 'stacks') {
       const allowed: readonly string[] = ADDRESS_ONLY[kind];
       if (!allowed.includes(method)) {
         log.violations.push(`the ${kind} wallet was asked to ${method}`);
         throw new Error(`The canary wallet refuses ${method}`);
       }
       if (kind === 'evm') return wallets.evm.handle(payload);
-      if (kind === 'stacks') return wallets.stacks.handle(payload);
-      return wallets.solana.handle(payload);
+      return wallets.stacks.handle(payload);
     }
     throw new Error(`Unknown canary binding call ${String(kind)}`);
   });
@@ -132,13 +105,6 @@ async function install(context: BrowserContext, wallets: CanaryWallets, log: Can
       uuid: '00000000-0000-4000-a000-000000000000',
       rdns: 'test.satway.evm',
       icon: ICON,
-    },
-    solana: {
-      name: SOLANA_WALLET_NAME,
-      icon: ICON,
-      address: wallets.solana.address,
-      publicKey: base64.encode(wallets.solana.key.publicKey),
-      features: ['signAndSend'],
     },
     stacks: { id: STACKS_WALLET_ID, name: STACKS_WALLET_NAME, icon: ICON },
   };
@@ -242,7 +208,6 @@ export const test = base.extend<CanaryFixtures>({
     const keys = new World('satway canary placeholder keys');
     await use({
       evm: new EvmWallet(keys, { chainId: 8453 }),
-      solana: new SolanaWallet(keys),
       stacks: new StacksWallet(keys),
     });
   },

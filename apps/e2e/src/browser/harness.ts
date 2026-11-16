@@ -5,15 +5,9 @@ import type {
   Route,
   WebSocketRoute,
 } from '@playwright/test';
-import { base64 } from '@scure/base';
 
 import { API_ORIGIN, APP_ORIGIN, PAGE_REACHABLE_UPSTREAMS } from '../config.js';
 import { EVM_WALLET_NAME, type EvmWallet } from '../wallets/evm-wallet.js';
-import {
-  SOLANA_WALLET_NAME,
-  type SolanaFeature,
-  type SolanaWallet,
-} from '../wallets/solana-wallet.js';
 import {
   STACKS_WALLET_ID,
   STACKS_WALLET_NAME,
@@ -31,13 +25,11 @@ const ICON =
 
 export interface WalletSetup {
   evm: boolean;
-  solana: false | { features: readonly SolanaFeature[] };
   stacks: boolean;
 }
 
 export interface Wallets {
   evm: EvmWallet;
-  solana: SolanaWallet;
   stacks: StacksWallet;
 }
 
@@ -171,7 +163,6 @@ export class Harness {
   }
 
   private pageOptions(setup: WalletSetup): PageScriptOptions {
-    const solana = setup.solana;
     return {
       binding: BINDING,
       evm: setup.evm
@@ -180,15 +171,6 @@ export class Harness {
             uuid: this.world.rng.uuid(),
             rdns: 'test.satway.evm',
             icon: ICON,
-          }
-        : null,
-      solana: solana
-        ? {
-            name: SOLANA_WALLET_NAME,
-            icon: ICON,
-            address: this.wallets.solana.address,
-            publicKey: base64.encode(this.wallets.solana.key.publicKey),
-            features: solana.features,
           }
         : null,
       stacks: setup.stacks ? { id: STACKS_WALLET_ID, name: STACKS_WALLET_NAME, icon: ICON } : null,
@@ -220,8 +202,6 @@ export class Harness {
         return null;
       case 'evm':
         return this.wallets.evm.handle(payload);
-      case 'solana':
-        return this.wallets.solana.handle(payload);
       case 'stacks':
         return this.wallets.stacks.handle(payload);
       default:

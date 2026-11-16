@@ -21,7 +21,6 @@ const EXPECTED_CSP: Record<string, string[]> = {
     'https://stacks-node.alexlab.co',
     'https://mempool.space',
     'https://sbtc-emily.com',
-    'https://rpc.walletconnect.org',
   ],
   'frame-src': ["'none'"],
   'base-uri': ["'self'"],

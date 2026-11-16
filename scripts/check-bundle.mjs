@@ -70,12 +70,8 @@ if (!csp) {
     'https://stacks-node.alexlab.co',
     'https://mempool.space',
     'https://sbtc-emily.com',
-    'https://rpc.walletconnect.org',
   ]);
   const connectSrc = (/connect-src([^;]*)/.exec(csp)?.[1] ?? '').trim().split(/\s+/);
-  // Solana sends read and simulate through Reown's RPC at rpc.walletconnect.org.
-  if (!connectSrc.includes('https://rpc.walletconnect.org'))
-    problems.push('CSP connect-src must allow the Solana RPC https://rpc.walletconnect.org');
   const extra = connectSrc.filter(source => !allowedConnect.has(source));
   const apiOrigin =
     /^(?:https:\/\/[a-z0-9.-]+(?::\d+)?|http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?)$/;
