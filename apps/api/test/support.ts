@@ -10,6 +10,7 @@ import {
   newSignerKeyState,
   registerDeposit,
 } from '../src/http/index.js';
+import { runNotifier } from '../src/notifier/index.js';
 import {
   INDEX_KEY,
   type KV,
@@ -383,6 +384,14 @@ export async function watching(
     registerDeps(w, over)
   );
   w.arrive();
+  return kv;
+}
+
+export async function folded(w: World, kv: MemoryKv, now = NOW): Promise<MemoryKv> {
+  const arrived = w.state.arrived;
+  w.state.arrived = false;
+  await runNotifier(kv, endpoints, w.fetchFn, { now });
+  w.state.arrived = arrived;
   return kv;
 }
 

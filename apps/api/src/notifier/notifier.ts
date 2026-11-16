@@ -26,14 +26,18 @@ import {
   LIST_MAX_GAP_MINUTES,
   LIST_MIN_GAP_MINUTES,
   LIST_SETTLE_MINUTES,
+  LOAD_HEARTBEAT_HOURS,
   LOAD_REFRESH_MINUTES,
   MAX_ACTIVE_WATCHES,
   MAX_ADDRESSES_PER_RUN,
-  MAX_FOLDS_PER_RUN,
   MAX_LIST_PAGES_PER_RUN,
+  MAX_PENDING,
+  MAX_SWAPS_FOLLOWED,
   MAX_SWAPS_PER_WATCH,
+  MAX_UNFOLDED_ADMITTED,
   PAYOUT_GRACE_HOURS,
   PERSIST_COST,
+  type PendingName,
   REGISTRATION_COST,
   RETRY_FIRST_MINUTES,
   RETRY_MAX_MINUTES,
@@ -43,6 +47,7 @@ import {
   STUCK_OUTPUT_GRACE_HOURS,
   SWAP_STATUS_COST,
   VISIT_COST,
+  WORK_RESERVE,
   type Watch,
   type WatchIndex,
   type WatchLoad,
@@ -50,7 +55,7 @@ import {
   deleteRegistration,
   emptyIndex,
   getIndex,
-  getRegisteredAt,
+  getRecent,
   getRegistration,
   listRegistrations,
   loadOf,
@@ -84,6 +89,7 @@ export const LIST_MAX_GAP_MS = LIST_MAX_GAP_MINUTES * MINUTE_MS;
 export const LIST_BACKSTOP_MS = LIST_BACKSTOP_HOURS * HOUR_MS;
 export const ENDED_MEMORY_MS = ENDED_MEMORY_HOURS * HOUR_MS;
 export const LOAD_REFRESH_MS = LOAD_REFRESH_MINUTES * MINUTE_MS;
+export const LOAD_HEARTBEAT_MS = LOAD_HEARTBEAT_HOURS * HOUR_MS;
 
 export interface NotifierReport {
   watched: number;
@@ -94,6 +100,7 @@ export interface NotifierReport {
   budget: number;
   listed: number;
   folded: number;
+  pending: number;
   notified: { address: string; txid: string; vout: number }[];
   finished: string[];
   expired: string[];
@@ -222,7 +229,12 @@ async function listDue(ctx: RunContext): Promise<boolean> {
   if (listDueAt(index, nowMs, null)) return true;
   if (index.listedAt !== null && nowMs - index.listedAt < LIST_MIN_GAP_MS) return false;
   try {
-    return listDueAt(index, nowMs, await getRegisteredAt(ctx.kv));
+    const recent = await getRecent(ctx.kv);
+    const latest = recent.reduce<number | null>(
+      (m, r) => (m === null || r.at > m ? r.at : m),
+      null
+    );
+    return listDueAt(index, nowMs, latest);
   } catch (err) {
     ctx.report.errors.push({ address: '*', message: message(err) });
     return false;
@@ -402,10 +414,14 @@ async function watchEnd(ctx: RunContext, watch: Watch): Promise<WatchEnd> {
     return watch.registered.length > 0 ? 'finished' : 'expired';
   }
   if (watch.registered.length === 0) return null;
-  const cost = live.length * SWAP_STATUS_COST + watch.swaps.length;
+  const read = new Set(live.slice(0, MAX_SWAPS_PER_WATCH));
+  const cost = read.size * SWAP_STATUS_COST + watch.swaps.length;
   if (ctx.budget.remaining() < cost + ctx.reserve) return 'deferred';
   const readings: SwapReading[] = [];
-  for (const swap of watch.swaps) readings.push(await readSwap(ctx, swap));
+  for (const swap of watch.swaps) {
+    const unread = !read.has(swap) && !deadlinePassed(swap.deadline, ctx.now);
+    readings.push(unread ? null : await readSwap(ctx, swap));
+  }
   return swapsFinal(readings, watch.registered, watch.swaps.length) ? 'finished' : null;
 }
 
@@ -451,19 +467,30 @@ function followedNames(index: WatchIndex): Set<string> {
   );
 }
 
-function addPending(ctx: RunContext, names: readonly string[]): void {
+function byPendingAge(a: PendingName, b: PendingName): number {
+  if (a.createdAt !== b.createdAt) return a.createdAt - b.createdAt;
+  if (a.name === b.name) return 0;
+  return a.name < b.name ? -1 : 1;
+}
+
+function addPending(ctx: RunContext, names: readonly PendingName[]): void {
   const { index } = ctx;
   const nowMs = ctx.now.getTime();
   const followed = followedNames(index);
-  const pending = new Set(index.pending);
-  for (const name of names) {
+  const pending = new Set(index.pending.map(p => p.name));
+  const added: PendingName[] = [];
+  for (const entry of names) {
+    const { name } = entry;
     const forgetAt = index.ended[name];
     if (forgetAt !== undefined && forgetAt > nowMs) continue;
     if (followed.has(name) || pending.has(name) || registrationKeyParts(name) === null) continue;
+    if (entry.deadline + PAYOUT_GRACE_MS + STUCK_OUTPUT_GRACE_MS < nowMs) continue;
     pending.add(name);
-    index.pending.push(name);
-    ctx.dirty = true;
+    added.push(entry);
   }
+  if (added.length === 0) return;
+  index.pending = [...index.pending, ...added].sort(byPendingAge).slice(0, MAX_PENDING);
+  ctx.dirty = true;
 }
 
 async function list(ctx: RunContext): Promise<void> {
@@ -494,7 +521,7 @@ type Drop = 'folded' | 'missing' | { reason: string };
 
 async function drop(ctx: RunContext, name: string, how: Drop): Promise<null> {
   const { index } = ctx;
-  index.pending = index.pending.filter(n => n !== name);
+  index.pending = index.pending.filter(n => n.name !== name);
   ctx.dirty = true;
   if (how === 'folded') return null;
   index.ended[name] = ctx.now.getTime() + ENDED_MEMORY_MS;
@@ -537,19 +564,16 @@ async function foldOne(ctx: RunContext, name: string): Promise<Watch | null> {
     if (existing.swaps.some(s => s.swapDepositAddress === swap.swapDepositAddress)) {
       return drop(ctx, name, 'folded');
     }
-    if (existing.swaps.length >= MAX_SWAPS_PER_WATCH) {
+    if (existing.swaps.length >= MAX_SWAPS_FOLLOWED) {
       return drop(ctx, name, {
-        reason: 'The address already follows as many swaps as the Worker allows',
+        reason: 'The address already follows as many swaps as the Worker can hold',
       });
     }
     existing.swaps = [...existing.swaps, swap].sort(byCreated);
     ctx.report.folded += 1;
     return drop(ctx, name, 'folded');
   }
-  if (index.watches.length >= MAX_ACTIVE_WATCHES) {
-    index.pending = [...index.pending.filter(n => n !== name), name];
-    return null;
-  }
+  if (index.watches.length >= MAX_ACTIVE_WATCHES) return null;
   const watch: Watch = {
     address: parts.address,
     depositScript: reg.depositScript,
@@ -571,11 +595,12 @@ function byAddress(a: Watch, b: Watch): number {
 
 async function fold(ctx: RunContext): Promise<Watch[]> {
   const created: Watch[] = [];
-  for (let i = 0; i < MAX_FOLDS_PER_RUN; i++) {
-    const [name] = ctx.index.pending;
-    if (name === undefined) break;
-    if (ctx.budget.remaining() < FOLD_COST + PERSIST_COST) break;
-    const watch = await foldOne(ctx, name);
+  for (const entry of [...ctx.index.pending]) {
+    if (ctx.budget.remaining() < FOLD_COST + WORK_RESERVE) break;
+    const parts = registrationKeyParts(entry.name);
+    const followed = parts !== null && ctx.index.watches.some(w => w.address === parts.address);
+    if (!followed && ctx.index.watches.length >= MAX_ACTIVE_WATCHES) continue;
+    const watch = await foldOne(ctx, entry.name);
     if (watch) created.push(watch);
   }
   return created;
@@ -598,10 +623,17 @@ function rotationAfter(index: WatchIndex, next: string | null, runIndex: number)
   return { at: at < 0 ? 0 : at, run: runIndex };
 }
 
+function loadHashOf(load: WatchLoad): string {
+  return JSON.stringify([load.counts, load.pending, load.listedAt]);
+}
+
 function loadDue(index: WatchIndex, load: WatchLoad, nowMs: number): boolean {
-  if (index.loadAt === null || nowMs - index.loadAt >= LOAD_REFRESH_MS) return true;
+  if (index.loadAt === null || nowMs - index.loadAt >= LOAD_HEARTBEAT_MS) return true;
+  if (loadHashOf(load) === index.loadHash) return false;
+  if (nowMs - index.loadAt >= LOAD_REFRESH_MS) return true;
   return (
-    load.full.length > 0 || load.addresses.length >= MAX_ACTIVE_WATCHES - MAX_ADDRESSES_PER_RUN
+    load.pending >= MAX_UNFOLDED_ADMITTED / 2 ||
+    Object.keys(load.counts).length >= MAX_ACTIVE_WATCHES - 2 * MAX_ADDRESSES_PER_RUN
   );
 }
 
@@ -633,6 +665,7 @@ export async function runNotifier(
     budget: budget.max,
     listed: 0,
     folded: 0,
+    pending: 0,
     notified: [],
     finished: [],
     expired: [],
@@ -708,12 +741,12 @@ export async function runNotifier(
     report.errors.push({ address: '*', message: message(err) });
   }
 
+  report.pending = index.pending.length;
   try {
-    const load = loadOf(index);
-    const hash = JSON.stringify(load);
-    if (hash !== index.loadHash && loadDue(index, load, now.getTime())) {
+    const load = loadOf(index, now.getTime());
+    if (loaded.broken || loadDue(index, load, now.getTime())) {
       await putLoad(kv, load);
-      index.loadHash = hash;
+      index.loadHash = loadHashOf(load);
       index.loadAt = now.getTime();
       ctx.dirty = true;
     }

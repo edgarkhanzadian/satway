@@ -96,6 +96,7 @@ export function notifierRun(run: NotifierRun): Record<string, unknown> {
     subrequests: expect.any(Number),
     listed: expect.any(Number),
     folded: expect.any(Number),
+    pending: expect.any(Number),
     processed: run.watched,
     skipped: 0,
     notified: [],

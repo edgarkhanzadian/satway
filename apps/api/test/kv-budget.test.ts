@@ -35,6 +35,13 @@ describe('KV operations over a simulated day', () => {
     expect(all.reads).toBeLessThan(FREE.reads / 20);
   });
 
+  it('20 paid deposits while Emily is down all day: retries back off and stay under the write limit', async () => {
+    const day = await simulateDay({ arrivals: 20, paid: true, seeded: 0, emilyDown: true });
+    const all = total(day.notifier, day.handler);
+    expect(all.writes).toBeLessThanOrEqual(400);
+    expect(day.maxSubrequests).toBeLessThanOrEqual(RUN_SUBREQUEST_BUDGET);
+  });
+
   it('320 watches refilled all day: lists, deletes and reads stay under the Free limits, writes do not', async () => {
     const day = await simulateDay({ arrivals: 320, paid: false, seeded: 320 });
     const all = total(day.notifier, day.handler);

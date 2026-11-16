@@ -46,6 +46,12 @@ export interface QueueEntry {
   refused: boolean;
 }
 
+export interface PendingName {
+  name: string;
+  createdAt: number;
+  deadline: number;
+}
+
 export interface Rotation {
   at: number;
   run: number;
@@ -55,7 +61,7 @@ export interface WatchIndex {
   watches: Watch[];
   rotation: Rotation;
   queue: QueueEntry[];
-  pending: string[];
+  pending: PendingName[];
   ended: Record<string, number>;
   listedAt: number | null;
   listCursor: string | null;
@@ -64,17 +70,26 @@ export interface WatchIndex {
 }
 
 export interface WatchLoad {
-  addresses: string[];
-  full: string[];
+  counts: Record<string, number>;
+  pending: number;
+  listedAt: number | null;
+  publishedAt: number;
+}
+
+export interface RecentRegistration {
+  address: string;
+  swap: string;
+  at: number;
 }
 
 export const REGISTRATION_PREFIX = 'dep:';
 export const INDEX_KEY = 'meta:watch-index';
 export const LOAD_KEY = 'meta:watch-load';
-export const SIGNAL_KEY = 'meta:registered-at';
+export const RECENT_KEY = 'meta:recent-registrations';
 const SIGNER_KEY_CACHE = 'meta:signer-key';
 export const MAX_EXTRA_SWAPS = 3;
 export const MAX_SWAPS_PER_WATCH = 1 + MAX_EXTRA_SWAPS;
+export const MAX_SWAPS_FOLLOWED = 16;
 export const WATCH_TTL_SECONDS = 14 * 24 * 60 * 60;
 const MIN_TTL_SECONDS = 60;
 const OUTPOINT = /^[0-9a-f]{64}:\d+$/;
@@ -114,7 +129,9 @@ const watchIndexSchema: z.ZodType<WatchIndex> = z.looseObject({
   watches: z.array(watchSchema),
   rotation: z.looseObject({ at: z.number(), run: z.number() }),
   queue: z.array(queueEntrySchema),
-  pending: z.array(z.string()),
+  pending: z.array(
+    z.looseObject({ name: z.string(), createdAt: z.number(), deadline: z.number() })
+  ),
   ended: z.record(z.string(), z.number()),
   listedAt: z.number().nullable(),
   listCursor: z.string().nullable(),
@@ -123,8 +140,14 @@ const watchIndexSchema: z.ZodType<WatchIndex> = z.looseObject({
 });
 
 const watchLoadSchema: z.ZodType<WatchLoad> = z.looseObject({
-  addresses: z.array(z.string()),
-  full: z.array(z.string()),
+  counts: z.record(z.string(), z.number()),
+  pending: z.number(),
+  listedAt: z.number().nullable(),
+  publishedAt: z.number(),
+});
+
+const recentSchema: z.ZodType<{ entries: RecentRegistration[] }> = z.looseObject({
+  entries: z.array(z.looseObject({ address: z.string(), swap: z.string(), at: z.number() })),
 });
 
 function parsed<T>(schema: z.ZodType<T>, raw: string, key: string): T | null {
@@ -157,7 +180,13 @@ export async function putRegistration(
   await kv.put(
     registrationKey(address, registration.swapDepositAddress),
     JSON.stringify(registration),
-    { expirationTtl: WATCH_TTL_SECONDS }
+    {
+      expirationTtl: WATCH_TTL_SECONDS,
+      metadata: {
+        createdAt: Date.parse(registration.createdAt),
+        deadline: Date.parse(registration.deadline),
+      },
+    }
   );
 }
 
@@ -183,16 +212,24 @@ export async function deleteRegistration(kv: KV, name: string): Promise<void> {
   await kv.delete(name);
 }
 
+const listedMetadataSchema = z.looseObject({ createdAt: z.number(), deadline: z.number() });
+
 export async function listRegistrations(
   kv: KV,
   cursor: string | null
-): Promise<{ names: string[]; cursor: string | null }> {
+): Promise<{ names: PendingName[]; cursor: string | null }> {
   const page = await kv.list({
     prefix: REGISTRATION_PREFIX,
     ...(cursor === null ? {} : { cursor }),
   });
   const next = page.list_complete ? null : (page.cursor ?? null);
-  return { names: page.keys.map(k => k.name), cursor: next };
+  const names = page.keys.map(k => {
+    const meta = listedMetadataSchema.safeParse(k.metadata);
+    return meta.success
+      ? { name: k.name, createdAt: meta.data.createdAt, deadline: meta.data.deadline }
+      : { name: k.name, createdAt: Number.MAX_SAFE_INTEGER, deadline: Number.MAX_SAFE_INTEGER };
+  });
+  return { names, cursor: next };
 }
 
 export function emptyIndex(): WatchIndex {
@@ -224,11 +261,17 @@ export async function putIndex(kv: KV, index: WatchIndex): Promise<void> {
   await kv.put(INDEX_KEY, JSON.stringify(index));
 }
 
-export function loadOf(index: Pick<WatchIndex, 'watches'>): WatchLoad {
-  return {
-    addresses: index.watches.map(w => w.address),
-    full: index.watches.filter(w => w.swaps.length >= MAX_SWAPS_PER_WATCH).map(w => w.address),
-  };
+export function loadOf(
+  index: Pick<WatchIndex, 'watches' | 'pending' | 'listedAt'>,
+  publishedAt: number
+): WatchLoad {
+  const counts: Record<string, number> = {};
+  for (const w of index.watches) counts[w.address] = w.swaps.length;
+  for (const p of index.pending) {
+    const parts = registrationKeyParts(p.name);
+    if (parts) counts[parts.address] = (counts[parts.address] ?? 0) + 1;
+  }
+  return { counts, pending: index.pending.length, listedAt: index.listedAt, publishedAt };
 }
 
 export async function getLoad(kv: KV): Promise<WatchLoad | null> {
@@ -240,15 +283,13 @@ export async function putLoad(kv: KV, load: WatchLoad): Promise<void> {
   await kv.put(LOAD_KEY, JSON.stringify(load));
 }
 
-export async function getRegisteredAt(kv: KV): Promise<number | null> {
-  const raw = await kv.get(SIGNAL_KEY);
-  if (raw === null) return null;
-  const ms = Number(raw);
-  return Number.isFinite(ms) ? ms : null;
+export async function getRecent(kv: KV): Promise<RecentRegistration[]> {
+  const raw = await kv.get(RECENT_KEY);
+  return raw === null ? [] : (parsed(recentSchema, raw, RECENT_KEY)?.entries ?? []);
 }
 
-export async function putRegisteredAt(kv: KV, ms: number): Promise<void> {
-  await kv.put(SIGNAL_KEY, String(ms), { expirationTtl: WATCH_TTL_SECONDS });
+export async function putRecent(kv: KV, entries: readonly RecentRegistration[]): Promise<void> {
+  await kv.put(RECENT_KEY, JSON.stringify({ entries }), { expirationTtl: WATCH_TTL_SECONDS });
 }
 
 export interface CachedSignerKey {

@@ -8,14 +8,13 @@ import {
 
 import {
   type KV,
-  MAX_ACTIVE_WATCHES,
-  SIGNAL_REFRESH_SECONDS,
   getLoad,
-  getRegisteredAt,
-  putRegisteredAt,
+  getRecent,
+  putRecent,
   putRegistration,
   registrationExists,
 } from '../store/index.js';
+import { type AdmissionLimits, admissionOf, recentWithin } from './admission.js';
 import { ApiError, BadRequest } from './errors.js';
 import { type ScriptConfig, checkScriptShape } from './script-shape.js';
 import { type SignerKeyState, isCurrentSignerKey, newSignerKeyState } from './signer-key.js';
@@ -36,7 +35,7 @@ export interface RegisterDeps {
   oneClickJwt?: string;
   now?: Date;
   signerState?: SignerKeyState;
-  maxWatches?: number;
+  limits?: AdmissionLimits;
   afterShapeChecks?(): Promise<void>;
 }
 
@@ -78,12 +77,6 @@ export class SwapLimitReached extends ApiError {
     );
     this.name = 'SwapLimitReached';
   }
-}
-
-async function signalRegistration(kv: KV, now: Date): Promise<void> {
-  const last = await getRegisteredAt(kv);
-  if (last !== null && last >= now.getTime() - SIGNAL_REFRESH_SECONDS * 1000) return;
-  await putRegisteredAt(kv, now.getTime());
 }
 
 export async function registerDeposit(
@@ -130,12 +123,12 @@ export async function registerDeposit(
 
   const address = derived.address;
   if (await registrationExists(kv, address, swap)) throw new AlreadyRegistered(address);
-  const load = (await getLoad(kv)) ?? { addresses: [], full: [] };
-  if (load.full.includes(address)) throw new SwapLimitReached(address);
-  if (
-    !load.addresses.includes(address) &&
-    load.addresses.length >= (deps.maxWatches ?? MAX_ACTIVE_WATCHES)
-  ) {
+  const load = await getLoad(kv);
+  const recent = await getRecent(kv);
+  const nowMs = now.getTime();
+  const verdict = admissionOf(load, recent, address, nowMs, deps.limits);
+  if (verdict === 'swap-limit') throw new SwapLimitReached(address);
+  if (verdict === 'capacity') {
     throw new ApiError(
       'Background tracking is at capacity. The open tab still registers the payout.',
       503,
@@ -143,7 +136,7 @@ export async function registerDeposit(
     );
   }
 
-  await signalRegistration(kv, now);
+  await putRecent(kv, [...recentWithin(recent, nowMs), { address, swap, at: nowMs }]);
   await putRegistration(kv, address, {
     depositScript: deposit,
     reclaimScript: reclaim,

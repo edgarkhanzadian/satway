@@ -74,7 +74,12 @@ test.describe('R8. the Worker watch for a deposit whose tab was closed', () => {
     });
     const keys = api.registrationKeys(receipt.depositAddress);
     expect(keys).toHaveLength(1);
-    expect(keys.map(k => api.kv.metadataOf(k))).toEqual([undefined]);
+    expect(keys.map(k => api.kv.metadataOf(k))).toEqual([
+      {
+        createdAt: expect.any(Number),
+        deadline: Date.parse(String(receipt.quoteResponse.quoteRequest.deadline)),
+      },
+    ]);
     for (let run = 0; run < 2; run++) {
       expect(await api.runScheduled()).toEqual(notifierRun({ watched: 1 }));
       expect(api.watched()).toEqual([receipt.depositAddress]);

@@ -2,14 +2,7 @@ import { buildDepositAddress, MAINNET_CONFIG as config } from '@satway/core';
 
 import { registerDeposit } from '../src/http/index.js';
 import { CRON_PERIOD_MS, runNotifier } from '../src/notifier/index.js';
-import {
-  INDEX_KEY,
-  LOAD_KEY,
-  MAX_ACTIVE_WATCHES,
-  type Watch,
-  emptyIndex,
-  loadOf,
-} from '../src/store/index.js';
+import { INDEX_KEY, LOAD_KEY, type Watch, emptyIndex, loadOf } from '../src/store/index.js';
 import {
   D,
   EMILY,
@@ -91,6 +84,7 @@ export interface DayPlan {
   paid: boolean;
   seeded: number;
   seededPaid?: boolean;
+  emilyDown?: boolean;
 }
 
 export async function simulateDay(plan: DayPlan): Promise<DayCounts> {
@@ -141,6 +135,8 @@ export async function simulateDay(plan: DayPlan): Promise<DayCounts> {
         jsonRes({ pegCap: null, perDepositMinimum: 10_000, perDepositCap: null })
       );
     const dep = /\/deposit\/([0-9a-f]{64})\/(\d+)$/.exec(url);
+    if (dep?.[1] && plan.emilyDown === true)
+      return Promise.resolve(jsonRes({ message: 'down' }, 503));
     if (dep?.[1])
       return Promise.resolve(
         jsonRes({
@@ -205,7 +201,7 @@ export async function simulateDay(plan: DayPlan): Promise<DayCounts> {
       listedAt: clock,
     };
     kv.data.set(INDEX_KEY, JSON.stringify(index));
-    kv.data.set(LOAD_KEY, JSON.stringify(loadOf(index)));
+    kv.data.set(LOAD_KEY, JSON.stringify(loadOf(index, NOW.getTime())));
   }
 
   let notifier: KvCounts = { reads: 0, writes: 0, deletes: 0, lists: 0 };
@@ -229,7 +225,6 @@ export async function simulateDay(plan: DayPlan): Promise<DayCounts> {
           fetchFn,
           now: new Date(clock + 30_000),
           signerState: { memory: null },
-          maxWatches: MAX_ACTIVE_WATCHES,
         });
         registrations += 1;
       } catch {

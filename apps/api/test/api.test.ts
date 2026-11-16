@@ -41,6 +41,7 @@ import {
   type World,
   bodyJson,
   endpoints,
+  folded,
   goodBody,
   handleOptions,
   indexedBody,
@@ -343,7 +344,7 @@ describe('registerDeposit', () => {
     const w = world({});
     const kv = await watching(w, memoryKv(), '0xswapA');
     const key = registrationKey(D.address, '0xswapA');
-    expect(kv.writes()).toEqual(['meta:signer-key', 'meta:registered-at', key]);
+    expect(kv.writes()).toEqual(['meta:signer-key', 'meta:recent-registrations', key]);
     expect(JSON.parse(kv.data.get(key) ?? 'null')).toEqual({
       depositScript: D.depositScript,
       reclaimScript: D.reclaimScript,
@@ -366,7 +367,7 @@ describe('registerDeposit', () => {
     await expect(watching(w, kv, '0xswapB')).rejects.toThrow(AlreadyRegistered);
     expect(kv.data.get(first)).toBe(stored);
     expect(registrationKeys(kv)).toEqual([first, registrationKey(D.address, '0xswapB')].sort());
-    expect(kv.writes().filter(k => k === 'meta:registered-at')).toHaveLength(1);
+    expect(kv.writes().filter(k => k === 'meta:recent-registrations')).toHaveLength(2);
   });
 
   it('keeps two deposits from one wallet apart, one record each', async () => {
@@ -434,7 +435,7 @@ describe('registerDeposit', () => {
       swaps: { '0xswap0': { hashes: [D.txid] }, '0xswapLate': { status: 'PROCESSING' } },
     });
     const kv = await watching(w);
-    await runNotifier(kv, endpoints, w.fetchFn, { ...run, budget: 6 });
+    await folded(w, kv);
     expect(record(kv)).toMatchObject({ registered: [] });
     const stale = kv.data.get(INDEX_KEY);
     const pause = pausedAt(w, url => url.includes('/v0/status?depositAddress=0xswap0'));
@@ -626,8 +627,7 @@ describe('runNotifier', () => {
 
   it('keeps watching while an eligible output is deferred by the budget', async () => {
     const w = world({ txs: [payoutTx(0, { value: 60_000 }), payoutTx(3)] });
-    const kv = await watching(w);
-    w.arrive();
+    const kv = await folded(w, await watching(w));
     const report = await runNotifier(kv, endpoints, w.fetchFn, { ...run, budget: 12 });
     expect(report.deferred).toEqual([D.address]);
     expect(report.notified).toHaveLength(1);
@@ -744,7 +744,13 @@ describe('runNotifier', () => {
     const kv = await watching(w);
     const index = {
       ...emptyIndex(),
-      pending: [registrationKey(D.address, '0xswap0')],
+      pending: [
+        {
+          name: registrationKey(D.address, '0xswap0'),
+          createdAt: NOW.getTime(),
+          deadline: NOW.getTime() + 2 * 3_600_000,
+        },
+      ],
       listCursor: 'bogus',
     };
     kv.data.set(INDEX_KEY, JSON.stringify(index));
@@ -879,7 +885,7 @@ describe('runNotifier: several swaps paying one address', () => {
   });
 
   it('does not read 1Click for a swap a day past its deadline, and expires without reads', async () => {
-    const later = new Date(NOW.getTime() + 28 * 3_600_000);
+    const later = new Date(NOW.getTime() + 25 * 3_600_000);
     const w = world({
       txs: [payoutTx(0)],
       swaps: {
@@ -888,11 +894,17 @@ describe('runNotifier: several swaps paying one address', () => {
       },
     });
     const kv = await watching(w, memoryKv(), '0xswapOld', { config: registerConfig });
-    await runNotifier(kv, endpoints, w.fetchFn, run);
+    for (const hours of [0, 6, 12, 18, 24]) {
+      await runNotifier(kv, endpoints, w.fetchFn, {
+        now: new Date(NOW.getTime() + hours * 3_600_000),
+      });
+    }
     await watching(w, kv, '0xswapNew', { now: later });
+    await runNotifier(kv, endpoints, w.fetchFn, { now: new Date(later.getTime() + 15 * 60_000) });
+    expect(record(kv)?.swaps).toHaveLength(2);
     const before = w.hits(STATUS_URL).length;
     const report = await runNotifier(kv, endpoints, w.fetchFn, {
-      now: new Date(later.getTime() + 10 * 60_000),
+      now: new Date(later.getTime() + 3 * 3_600_000),
     });
     const reads = w
       .hits(STATUS_URL)
@@ -907,7 +919,7 @@ describe('runNotifier: several swaps paying one address', () => {
       payoutTx(0, { txid: (i + 1).toString(16).padStart(2, '0').repeat(32), value: 100_000 - i })
     );
     const w = world({ txs, known: true, swaps: { '0xswap0': { hashes: [txs[0]?.txid ?? ''] } } });
-    const kv = await watching(w);
+    const kv = await folded(w, await watching(w));
     const first = await runNotifier(kv, endpoints, w.fetchFn, { ...run, budget: 14 });
     expect(first.finished).toEqual([]);
     expect(record(kv)?.registered.length).toBeLessThan(7);

@@ -33,6 +33,7 @@ import {
   MAX_ACTIVE_WATCHES,
   MAX_ADDRESSES_PER_RUN,
   MAX_EXTRA_SWAPS,
+  MAX_SWAPS_FOLLOWED,
   MIN_REGISTRATIONS_PER_RUN,
   RUN_SUBREQUEST_BUDGET,
   SUBREQUEST_LIMIT,
@@ -41,6 +42,7 @@ import {
   emptyIndex,
   getIndex,
   loadOf,
+  putRegistration,
   registrationKey,
 } from '../src/store/index.js';
 import {
@@ -452,25 +454,36 @@ describe('POST /deposits: the swap must be a live 1Click swap that pays this add
     expect(kv.writes()).toHaveLength(writes);
   });
 
-  it('follows at most the hard cap of swaps per address even when the handler let more through', async () => {
+  it('follows every swap the handler let through, up to a hard cap it never reaches by accident', async () => {
     const kv = memoryKv();
     const reg = {
       depositScript: D.depositScript,
       reclaimScript: D.reclaimScript,
       deadline: new Date(NOW.getTime() + 2 * 3_600_000).toISOString(),
     };
-    for (let n = 0; n < MAX_EXTRA_SWAPS + 3; n++) {
+    for (let n = 0; n < MAX_SWAPS_FOLLOWED + 2; n++) {
       const swap = `0xswapRace${n}`;
-      kv.data.set(
-        registrationKey(D.address, swap),
-        JSON.stringify({ ...reg, swapDepositAddress: swap, createdAt: new Date(n).toISOString() })
-      );
+      await putRegistration(kv, D.address, {
+        ...reg,
+        swapDepositAddress: swap,
+        createdAt: new Date(NOW.getTime() + n).toISOString(),
+      });
     }
     const w = world();
-    for (let r = 0; r < 4; r++) await runNotifier(kv, endpoints, w.fetchFn, { now: NOW });
-    expect(record(kv)?.swaps.map(s => s.swapDepositAddress)).toEqual(
-      Array.from({ length: MAX_EXTRA_SWAPS + 1 }, (_, n) => `0xswapRace${n}`)
-    );
+    const errors: string[] = [];
+    for (let r = 0; r < 6; r++) {
+      const report = await runNotifier(kv, endpoints, w.fetchFn, { now: NOW });
+      errors.push(...report.errors.map(e => e.message));
+    }
+    expect(
+      record(kv)
+        ?.swaps.map(s => s.swapDepositAddress)
+        .sort()
+    ).toEqual(Array.from({ length: MAX_SWAPS_FOLLOWED }, (_, n) => `0xswapRace${n}`).sort());
+    expect(errors).toEqual([
+      'The address already follows as many swaps as the Worker can hold',
+      'The address already follows as many swaps as the Worker can hold',
+    ]);
   });
 
   it('checks another swap like the first: one that pays another address is refused', async () => {
@@ -665,7 +678,7 @@ function seed(kv: MemoryKv, watches: readonly Watch[]): void {
     listedAt: NOW.getTime(),
   };
   kv.data.set(INDEX_KEY, JSON.stringify(index));
-  kv.data.set(LOAD_KEY, JSON.stringify(loadOf(index)));
+  kv.data.set(LOAD_KEY, JSON.stringify(loadOf(index, NOW.getTime())));
 }
 
 function fills(count: number): Watch[] {
