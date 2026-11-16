@@ -6,7 +6,6 @@ import { actions, button, field, notice, sheet } from 'satway-styles/recipes';
 import {
   checkPastedWithdrawalTransaction,
   MAINNET_WITHDRAWAL_FLOW_CONFIG as config,
-  errorMessage,
 } from '@satway/core';
 
 import {
@@ -22,6 +21,7 @@ import {
 import { abortableFetch, abortableStatus } from './abortable.js';
 import { loadKnownStatuses, rememberKnownStatus } from './entry-statuses.js';
 import { storedWithdrawal } from './stored-withdrawal.js';
+import { type ListIo, listRunner } from './withdrawal-list-effects.js';
 import {
   type ListEffect,
   type ListEvent,
@@ -42,6 +42,43 @@ async function textOf(file: Blob): Promise<string | null> {
   }
 }
 
+function browserListIo(backend: Backend, follow: (receipt: WithdrawalReceiptFile) => void): ListIo {
+  return {
+    async check(receipt, stacksTxid, signal) {
+      const snapshot = await checkWithdrawal(
+        config,
+        abortableStatus(backend, signal),
+        receipt,
+        stacksTxid,
+        abortableFetch(signal)
+      );
+      return snapshot.observation.progress;
+    },
+    checkTxid(receipt, txid, signal) {
+      return checkPastedWithdrawalTransaction(
+        config,
+        txid,
+        {
+          sender: receipt.sender,
+          amountSats: receipt.amountSats,
+          maxFeeSats: receipt.maxFeeSats,
+          recipient: receipt.recipient,
+        },
+        abortableFetch(signal)
+      );
+    },
+    read: textOf,
+    stored: storedWithdrawal,
+    rememberStatus: rememberKnownStatus,
+    remove(receipt) {
+      const active = activeWithdrawal(config);
+      if (active !== null && withdrawalId(active) === withdrawalId(receipt)) return;
+      forgetWithdrawal(config, receipt);
+    },
+    follow,
+  };
+}
+
 export function WithdrawalList(props: {
   backend: Backend;
   onFollow(receipt: WithdrawalReceiptFile): void;
@@ -56,97 +93,8 @@ export function WithdrawalList(props: {
   const { dispatch } = flow;
   const { entries, statuses, file, removal } = flow.state;
 
-  async function check(effect: Extract<ListEffect, { type: 'check' }>) {
-    const id = withdrawalId(effect.receipt);
-    const signal = flow.signal(effect.request);
-    try {
-      const snapshot = await checkWithdrawal(
-        config,
-        abortableStatus(backend, signal),
-        effect.receipt,
-        effect.stacksTxid,
-        abortableFetch(signal)
-      );
-      dispatch({
-        type: 'checked',
-        request: effect.request,
-        id,
-        progress: snapshot.observation.progress,
-      });
-    } catch (err) {
-      dispatch({
-        type: 'check-failed',
-        request: effect.request,
-        id,
-        message: errorMessage(err) ?? 'unknown error',
-      });
-    }
-  }
-
-  async function read(effect: Extract<ListEffect, { type: 'read' }>) {
-    dispatch({ type: 'file-read', request: effect.request, text: await textOf(effect.file) });
-  }
-
-  async function checkTxid(effect: Extract<ListEffect, { type: 'check-txid' }>) {
-    const signal = flow.signal(effect.request);
-    try {
-      const result = await checkPastedWithdrawalTransaction(
-        config,
-        effect.txid,
-        {
-          sender: effect.receipt.sender,
-          amountSats: effect.receipt.amountSats,
-          maxFeeSats: effect.receipt.maxFeeSats,
-          recipient: effect.receipt.recipient,
-        },
-        abortableFetch(signal)
-      );
-      dispatch({ type: 'file-txid-checked', request: effect.request, check: result });
-    } catch (err) {
-      dispatch({
-        type: 'file-txid-check-failed',
-        request: effect.request,
-        message: errorMessage(err) ?? 'unknown error',
-      });
-    }
-  }
-
-  function remove(receipt: WithdrawalReceiptFile) {
-    const active = activeWithdrawal(config);
-    if (active !== null && withdrawalId(active) === withdrawalId(receipt)) return;
-    forgetWithdrawal(config, receipt);
-  }
-
   function run(effect: ListEffect) {
-    switch (effect.type) {
-      case 'check':
-        void check(effect);
-        return;
-      case 'remember-status':
-        rememberKnownStatus(withdrawalId(effect.receipt), effect.status);
-        return;
-      case 'read':
-        void read(effect);
-        return;
-      case 'resolve':
-        dispatch({
-          type: 'file-resolved',
-          request: effect.request,
-          stored: storedWithdrawal(effect.receipt),
-        });
-        return;
-      case 'check-txid':
-        void checkTxid(effect);
-        return;
-      case 'follow':
-        props.onLoaded(effect.receipt);
-        return;
-      case 'remove':
-        remove(effect.receipt);
-        return;
-      default:
-        throw new Error(`Unknown list effect ${String(effect satisfies never)}`);
-    }
+    listRunner(browserListIo(backend, props.onLoaded), flow)(effect);
   }
 
   useEffect(() => {
