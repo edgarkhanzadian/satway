@@ -23,7 +23,7 @@ export interface SentRecord {
   startedAt: string;
   tx: string | null;
   via: 'wallet' | 'chain' | 'provider';
-  confirmed?: boolean;
+  confirmed: boolean;
 }
 
 export interface UncertainRecord {
@@ -58,7 +58,7 @@ const recordSchema: z.ZodType<SendRecord> = z.discriminatedUnion('state', [
     state: z.literal('sent'),
     tx: z.string().nullable(),
     via: z.union([z.literal('wallet'), z.literal('chain'), z.literal('provider')]),
-    confirmed: z.boolean().optional(),
+    confirmed: z.boolean(),
   }),
   z.object({
     ...base,
@@ -134,7 +134,7 @@ export function attemptingRecord(input: {
 }
 
 export function sendConfirmed(record: SentRecord): boolean {
-  return record.confirmed ?? record.via !== 'wallet';
+  return record.confirmed;
 }
 
 export function needsChainCheck(record: SendRecord): boolean {

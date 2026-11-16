@@ -156,6 +156,7 @@ describe('SendRecordView', () => {
       state: 'sent',
       tx: `0x${'ab'.repeat(32)}`,
       via: 'wallet',
+      confirmed: false,
     });
     expect(out).toContain('Do not send again.');
     expect(out).toContain('Waiting for it to be confirmed on chain.');

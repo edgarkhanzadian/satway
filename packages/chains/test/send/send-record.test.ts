@@ -518,6 +518,7 @@ describe('reading stored records', () => {
       startedAt: NOW.toISOString(),
       tx: HASH,
       via: 'wallet',
+      confirmed: false,
     };
     expect(
       createSendRecords(() => fakeStorage([[key, JSON.stringify(sent)]])).read(ONE)
@@ -658,28 +659,6 @@ describe('checking a send the wallet acknowledged', () => {
   it('still never lets the user claim nothing was sent after the wallet said it sent', async () => {
     const { records, record } = await walletSent();
     expect(confirmNothingSent(records, record, new Date(NOW.getTime() + 86_400_000))).toBe(false);
-  });
-
-  it('reads an older sent record without the confirmation flag: a wallet answer is unverified', () => {
-    const base = {
-      version: 1 as const,
-      state: 'sent' as const,
-      swap: ONE,
-      account: FROM,
-      startedAt: NOW.toISOString(),
-      tx: HASH,
-    };
-    const storage = fakeStorage([
-      [sendRecordKey(ONE), JSON.stringify({ ...base, via: 'wallet' })],
-      [sendRecordKey(TWO), JSON.stringify({ ...base, swap: TWO, via: 'chain' })],
-    ]);
-    const records = createSendRecords(() => storage, browserLocks().tab());
-    const wallet = records.read(ONE);
-    const chain = records.read(TWO);
-    if (!wallet || !chain) throw new Error('expected records');
-    expect(wallet.state).toBe('sent');
-    expect(needsChainCheck(wallet)).toBe(true);
-    expect(needsChainCheck(chain)).toBe(false);
   });
 });
 
