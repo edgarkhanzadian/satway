@@ -74,6 +74,18 @@ function payoutProgress(ctx: PayoutContext, o: PayoutObservation): Progress {
           'The BTC from this payout has been moved out of the deposit address. The sBTC signers’ API could not be reached, so whether they minted it is not known yet. Check again in a few minutes.',
       };
     }
+    if (o.mint === null && o.spender !== 'reclaim') {
+      return {
+        ...base,
+        blocksUntilReclaim: null,
+        stage: o.spender === 'signers' ? 'minting' : 'awaiting-notification',
+        terminal: false,
+        message:
+          o.spender === 'signers'
+            ? 'The sBTC signers have taken in this payout, but their API does not list it yet. Check again in a few minutes.'
+            : 'The Bitcoin API lists this payout as moved out of the deposit address, but who moved it could not be confirmed yet. This page keeps checking.',
+      };
+    }
     if (o.mint === null || o.mint === 'failed' || o.spender === 'reclaim') {
       return {
         ...base,

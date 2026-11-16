@@ -45,7 +45,11 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status });
 }
 
-function chainWorld(payments: readonly Payment[], minted: ReadonlySet<number>) {
+function chainWorld(
+  payments: readonly Payment[],
+  minted: ReadonlySet<number>,
+  outspend: { spent: boolean; txid?: string } = { spent: false }
+) {
   const reads: number[] = [];
   const pending = new Set<number>();
   function tx(p: Payment) {
@@ -87,7 +91,7 @@ function chainWorld(payments: readonly Payment[], minted: ReadonlySet<number>) {
         depositScript: dep.depositScript,
       });
     }
-    if (/\/tx\/[0-9a-f]{64}\/outspend\/0$/.test(url)) return json({ spent: false });
+    if (/\/tx\/[0-9a-f]{64}\/outspend\/0$/.test(url)) return json(outspend);
     return json({ message: `unexpected ${url}` }, 500);
   }
   function fetchFn(url: string): Promise<Response> {
@@ -131,5 +135,75 @@ describe('observeDeposit: mint reads and registration with many payments', () =>
     const obs = await observeDeposit(config, ctx, null, { fetchFn: w.fetchFn, known });
     expect(w.reads).toEqual([2]);
     expect(obs.mints.get(outpoint(1))).toBe('confirmed');
+  });
+});
+
+describe('observeDeposit: an output that only looks spent', () => {
+  const T = 'aa'.repeat(32);
+  const named = {
+    status: 'SUCCESS' as const,
+    updatedAt: '',
+    swapDetails: { originChainTxHashes: [], destinationChainTxHashes: [{ hash: T }] },
+  };
+
+  function laggingWorld(outspend: () => Response) {
+    const urls: string[] = [];
+    const tx = {
+      txid: T,
+      vout: [{ scriptpubkey: dep.scriptPubKey, value: 200_000 }],
+      status: { confirmed: true, block_height: TIP, block_time: 1 },
+    };
+    function route(url: string): Response {
+      urls.push(url);
+      if (url.endsWith('/limits'))
+        return json({ pegCap: null, perDepositMinimum: 10_000, perDepositCap: null });
+      if (url.endsWith('/blocks/tip/height')) return new Response(String(TIP));
+      if (url.endsWith('/txs/mempool')) return json([]);
+      if (url.endsWith('/txs/chain')) return json([tx]);
+      if (url.endsWith('/utxo')) return json([]);
+      if (url.includes('/outspend/')) return outspend();
+      return json({ message: 'not found' }, 404);
+    }
+    return { urls, fetchFn: (url: string) => Promise.resolve(route(url)) };
+  }
+
+  it('reads the outspend and registers a payout the API still calls unspent', async () => {
+    const w = laggingWorld(() => json({ spent: false }));
+    const obs = await observeDeposit(config, ctx, named, { fetchFn: w.fetchFn });
+    expect(w.urls.some(u => u.includes('/outspend/'))).toBe(true);
+    expect(obs.progress.stage).not.toBe('reclaimed');
+    expect(obs.progress.terminal).toBe(false);
+    expect(obs.toRegister.map(o => o.txid)).toEqual([T]);
+    expect(obs.payouts.map(p => p.spent)).toEqual([false]);
+  });
+
+  it('stays non-terminal and registers nothing when the outspend cannot be read', async () => {
+    const w = laggingWorld(() => json({ message: 'down' }, 503));
+    const obs = await observeDeposit(config, ctx, named, { fetchFn: w.fetchFn });
+    expect(obs.progress.terminal).toBe(false);
+    expect(obs.progress.stage).not.toBe('reclaimed');
+    expect(obs.toRegister).toEqual([]);
+  });
+
+  it('stays non-terminal when the spender is not proven to be the reclaim path', async () => {
+    const w = laggingWorld(() => json({ spent: true, txid: 'bb'.repeat(32) }));
+    const obs = await observeDeposit(config, ctx, named, { fetchFn: w.fetchFn });
+    expect(obs.progress.terminal).toBe(false);
+    expect(obs.progress.stage).not.toBe('reclaimed');
+  });
+});
+
+describe('observeDeposit: payouts past the mint-read cap', () => {
+  it('are not taken as never registered, so the deposit is not called reclaimed', async () => {
+    const payments = Array.from({ length: 14 }, (_, i) => ({
+      n: i + 1,
+      confirmed: true,
+      spent: true,
+    }));
+    const w = chainWorld(payments, new Set(payments.map(p => p.n)), { spent: true });
+    const obs = await observeDeposit(config, ctx, null, { fetchFn: w.fetchFn, swapless: true });
+    expect(obs.payouts.some(p => !obs.mints.has(`${p.txid}:${p.vout}`))).toBe(true);
+    expect(obs.progress.stage).not.toBe('reclaimed');
+    expect(obs.progress.terminal).toBe(false);
   });
 });

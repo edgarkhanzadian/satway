@@ -1207,7 +1207,7 @@ describe('reclaim target from a snapshot', () => {
     const receipt = await receiptFor(w);
     w.setTip(TIP + 2_000);
     const snap = await checkProgress(config, w.backend, receipt, w.fetchFn);
-    expect(snap.progress.stage).toBe('reclaimed');
+    expect(snap.progress.terminal).toBe(false);
     const plan = planOf(snap);
     expect(plan.target).toBeNull();
     expect(plan.nothingLeft).toBe(false);

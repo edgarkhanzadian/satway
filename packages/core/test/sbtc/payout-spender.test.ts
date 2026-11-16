@@ -6,6 +6,7 @@ import {
   type SweepTransaction,
   buildDepositAddress,
   buildReclaimPsbt,
+  fetchPayoutSpend,
   fetchPayoutSpender,
   parseWith,
   signReclaimPsbt,
@@ -119,5 +120,41 @@ describe('fetchPayoutSpender', () => {
   it('is unknown when the API returns a different transaction than it named', async () => {
     const net = esplora(reclaimTransaction(), 'ff'.repeat(32));
     expect(await fetchPayoutSpender(BTC_API, payout, deposit, net.fetchFn)).toBeNull();
+  });
+});
+
+describe('fetchPayoutSpend', () => {
+  function esplora(outspend: unknown, spend: SweepTransaction | null = null) {
+    function fetchFn(url: string) {
+      const body = url.includes('/outspend/') ? outspend : spend;
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+    }
+    return fetchFn;
+  }
+
+  it('tells an output the API still calls unspent from one it cannot attribute', async () => {
+    expect(await fetchPayoutSpend(BTC_API, payout, deposit, esplora({ spent: false }))).toBe(
+      'unspent'
+    );
+    const reclaim = reclaimTransaction();
+    expect(
+      await fetchPayoutSpend(
+        BTC_API,
+        payout,
+        deposit,
+        esplora({ spent: true, txid: reclaim.txid }, reclaim)
+      )
+    ).toBe('reclaim');
+    expect(
+      await fetchPayoutSpend(BTC_API, payout, deposit, esplora({ spent: true, txid: 'zz' }))
+    ).toBe('unknown');
+    expect(
+      await fetchPayoutSpend(
+        BTC_API,
+        payout,
+        swept,
+        esplora({ spent: true, txid: reclaim.txid }, reclaim)
+      )
+    ).toBe('unknown');
   });
 });

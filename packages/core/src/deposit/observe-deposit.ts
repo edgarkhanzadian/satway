@@ -16,7 +16,7 @@ import {
   type PayoutSpender,
   fetchDeposit,
   fetchLimits,
-  fetchPayoutSpender,
+  fetchPayoutSpend,
   notifyDeposit,
 } from '../sbtc/index.js';
 import { type FetchLike, HttpError, type NetworkConfig, errorMessage } from '../shared/index.js';
@@ -62,9 +62,11 @@ export interface DepositObservation {
   requests: number;
 }
 
-function spenderNeeded(payout: AddressOutput, mint: MintStatus): boolean {
-  return payout.spent && mint !== null && mint !== 'confirmed' && mint !== 'failed';
+function spenderNeeded(payout: AddressOutput, mint: MintStatus | undefined): boolean {
+  return payout.spent && mint !== 'confirmed' && mint !== 'failed';
 }
+
+export const MAX_SPEND_READS_PER_CHECK = 6;
 
 export type RegistrationFailureKind = 'transient' | 'rejected';
 
@@ -106,12 +108,15 @@ function progressFor(
   >,
   reclaimLockBlocks: number
 ): Progress {
-  const payouts: PayoutObservation[] = o.payouts.map(payout => ({
-    payout,
-    spent: payout.spent,
-    spender: o.spenders.get(outpointOf(payout)) ?? null,
-    mint: o.mints.get(outpointOf(payout)) ?? null,
-  }));
+  const payouts: PayoutObservation[] = o.payouts.map(payout => {
+    const key = outpointOf(payout);
+    return {
+      payout,
+      spent: payout.spent,
+      spender: o.spenders.get(key) ?? null,
+      mint: o.mints.has(key) ? (o.mints.get(key) ?? null) : MINT_UNKNOWN,
+    };
+  });
   return deriveProgress({
     swap: o.swap,
     payouts,
@@ -205,21 +210,24 @@ export async function observeDeposit(
     ctx.depositScriptPubKey,
     { txids: payoutTxids, maxPages: options.maxPages, fetchFn }
   );
-  const { payouts, belowMinimum } = depositPayouts(fetched.outputs, perDepositMinimum);
-  const candidates = outputsToRegister(fetched.outputs, {
+  const policy = {
     minimumSats: perDepositMinimum,
     tipHeight,
     reclaimLockBlocks: ctx.reclaimLockBlocks,
     limit: Number.POSITIVE_INFINITY,
-  });
+  };
+  const first = depositPayouts(fetched.outputs, perDepositMinimum);
+  const firstCandidates = outputsToRegister(fetched.outputs, policy);
 
   const known = options.known ?? new Map<string, MintStatus>();
   const mints = new Map<string, MintStatus>();
-  for (const o of [...candidates, ...payouts]) {
+  for (const o of [...firstCandidates, ...first.payouts]) {
     const before = known.get(outpointOf(o));
     if (before === 'confirmed' || before === 'failed') mints.set(outpointOf(o), before);
   }
-  const reads = mintReadOrder(candidates, payouts, known).filter(o => !mints.has(outpointOf(o)));
+  const reads = mintReadOrder(firstCandidates, first.payouts, known).filter(
+    o => !mints.has(outpointOf(o))
+  );
   let mintReads = 0;
   for (const o of reads.slice(0, MAX_MINT_READS_PER_CHECK)) {
     mints.set(outpointOf(o), await readMint(config.sbtcApiUrl, o, fetchFn));
@@ -229,33 +237,42 @@ export async function observeDeposit(
     const before = known.get(outpointOf(o));
     if (before !== undefined && before !== MINT_UNKNOWN) mints.set(outpointOf(o), before);
   }
+
+  const spenders = new Map<string, PayoutSpender | null>();
+  const stillUnspent = new Set<string>();
+  let spendReads = 0;
+  for (const payout of first.payouts) {
+    const key = outpointOf(payout);
+    if (!spenderNeeded(payout, mints.get(key))) continue;
+    if (spendReads >= MAX_SPEND_READS_PER_CHECK) break;
+    spendReads += 1;
+    const spend = await optional(() => fetchPayoutSpend(config.btcApiUrl, payout, ctx, fetchFn));
+    if (spend === 'unspent') stillUnspent.add(key);
+    else spenders.set(key, spend === 'signers' || spend === 'reclaim' ? spend : null);
+  }
+
+  const outputs = fetched.outputs.map(o =>
+    stillUnspent.has(outpointOf(o)) ? { ...o, spent: false } : o
+  );
+  const { payouts, belowMinimum } = depositPayouts(outputs, perDepositMinimum);
+  const candidates = outputsToRegister(outputs, policy);
   const toRegister = candidates
     .filter(o => mints.has(outpointOf(o)) && mints.get(outpointOf(o)) === null)
     .slice(0, MAX_REGISTRATIONS_PER_CHECK);
-
-  const spenders = new Map<string, PayoutSpender | null>();
-  for (const payout of payouts) {
-    const key = outpointOf(payout);
-    if (!mints.has(key) || !spenderNeeded(payout, mints.get(key) ?? null)) continue;
-    spenders.set(
-      key,
-      await optional(() => fetchPayoutSpender(config.btcApiUrl, payout, ctx, fetchFn))
-    );
-  }
 
   const swap = status?.status ?? null;
   const swapless = options.swapless === true && status === null;
   const observed = { swap, swapless, payoutTxids, payouts, mints, tipHeight, spenders };
   return {
     ...observed,
-    outputs: fetched.outputs,
+    outputs,
     belowMinimum,
     foreignTxids: fetched.foreignTxids,
     truncated: fetched.truncated,
     perDepositMinimum,
     toRegister,
     progress: progressFor(observed, ctx.reclaimLockBlocks),
-    requests: fetched.requests + 2 + mintReads + spenders.size * 2,
+    requests: fetched.requests + 2 + mintReads + spendReads * 2,
   };
 }
 

@@ -196,13 +196,32 @@ describe('deriveProgress: after the payout', () => {
     }
   });
 
-  it('a spent output that was never registered or was rejected has been reclaimed', () => {
-    for (const mint of [null, 'failed'] as const) {
+  it('a spent output the signers rejected has been reclaimed', () => {
+    const p = deriveProgress(
+      obs({ payout: payout(), mint: 'failed', tipHeight: 9_999, payoutSpent: true })
+    );
+    expect(p).toMatchObject({ stage: 'reclaimed', terminal: true, needsNotification: false });
+  });
+
+  it('a spent-looking output Emily does not know is reclaimed only when the reclaim path spent it', () => {
+    for (const payoutSpender of ['signers', null, undefined] as const) {
       const p = deriveProgress(
-        obs({ payout: payout(), mint, tipHeight: 9_999, payoutSpent: true })
+        obs({ payout: payout(), mint: null, tipHeight: 9_999, payoutSpent: true, payoutSpender })
       );
-      expect(p).toMatchObject({ stage: 'reclaimed', terminal: true, needsNotification: false });
+      expect(p.stage).not.toBe('reclaimed');
+      expect(p).toMatchObject({ terminal: false, needsNotification: false });
+      expect(p.message).toMatch(/\.$/);
     }
+    const reclaimed = deriveProgress(
+      obs({
+        payout: payout(),
+        mint: null,
+        tipHeight: 9_999,
+        payoutSpent: true,
+        payoutSpender: 'reclaim',
+      })
+    );
+    expect(reclaimed).toMatchObject({ stage: 'reclaimed', terminal: true });
   });
 });
 

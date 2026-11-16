@@ -50,22 +50,35 @@ export function spenderOfTransaction(
   return input ? spenderOfWitness(input.witness ?? [], scripts) : null;
 }
 
+export type PayoutSpend = PayoutSpender | 'unspent' | 'unknown';
+
+export async function fetchPayoutSpend(
+  btcApiUrl: string,
+  outpoint: { txid: string; vout: number },
+  scripts: DepositScripts,
+  fetchFn: FetchLike = defaultFetch
+): Promise<PayoutSpend> {
+  const txid = outpoint.txid.toLowerCase();
+  if (!TXID.test(txid)) return 'unknown';
+  const outspend = await requestJson(
+    fetchFn,
+    `${btcApiUrl}/tx/${txid}/outspend/${outpoint.vout}`,
+    evidenceOutspendSchema
+  );
+  if (!outspend.spent) return 'unspent';
+  const spender = outspend.txid?.toLowerCase();
+  if (spender === undefined || !TXID.test(spender)) return 'unknown';
+  const spend = await requestJson(fetchFn, `${btcApiUrl}/tx/${spender}`, sweepTransactionSchema);
+  if (spend.txid.toLowerCase() !== spender) return 'unknown';
+  return spenderOfTransaction(spend, { txid, vout: outpoint.vout }, scripts) ?? 'unknown';
+}
+
 export async function fetchPayoutSpender(
   btcApiUrl: string,
   outpoint: { txid: string; vout: number },
   scripts: DepositScripts,
   fetchFn: FetchLike = defaultFetch
 ): Promise<PayoutSpender | null> {
-  const txid = outpoint.txid.toLowerCase();
-  if (!TXID.test(txid)) return null;
-  const outspend = await requestJson(
-    fetchFn,
-    `${btcApiUrl}/tx/${txid}/outspend/${outpoint.vout}`,
-    evidenceOutspendSchema
-  );
-  const spender = outspend.txid?.toLowerCase();
-  if (!outspend.spent || spender === undefined || !TXID.test(spender)) return null;
-  const spend = await requestJson(fetchFn, `${btcApiUrl}/tx/${spender}`, sweepTransactionSchema);
-  if (spend.txid.toLowerCase() !== spender) return null;
-  return spenderOfTransaction(spend, { txid, vout: outpoint.vout }, scripts);
+  const spend = await fetchPayoutSpend(btcApiUrl, outpoint, scripts, fetchFn);
+  return spend === 'signers' || spend === 'reclaim' ? spend : null;
 }
