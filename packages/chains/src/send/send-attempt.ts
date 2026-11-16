@@ -154,14 +154,6 @@ export function confirmNothingSent(
   return records.clear(record.swap);
 }
 
-export function latestSwap(
-  snapshot: { swap: OneClickSwapStatus | null } | null,
-  stale: boolean
-): OneClickSwapStatus | null | undefined {
-  if (snapshot === null) return undefined;
-  return stale ? null : snapshot.swap;
-}
-
 export type SendPanel =
   | { kind: 'sending' }
   | { kind: 'record'; record: SendRecord }

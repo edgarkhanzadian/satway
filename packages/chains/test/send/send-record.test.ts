@@ -12,7 +12,6 @@ import {
   WALLET_PROMPT_WINDOW_MS,
   attemptSend,
   confirmNothingSent,
-  latestSwap,
   promptWaitMs,
   quoteExpired,
   resolveRecord,
@@ -203,11 +202,8 @@ describe('when the send button is offered', () => {
     }
   });
 
-  it('treats a failed refresh as an unknown status, even after an earlier positive answer', () => {
-    expect(latestSwap(null, false)).toBeUndefined();
-    expect(latestSwap({ swap: 'PENDING_DEPOSIT' }, false)).toBe('PENDING_DEPOSIT');
-    expect(latestSwap({ swap: 'PENDING_DEPOSIT' }, true)).toBeNull();
-    expect(kind(latestSwap({ swap: 'PENDING_DEPOSIT' }, true))).toBe('unknown');
+  it('treats an unknown swap status as unknown', () => {
+    expect(kind(null)).toBe('unknown');
   });
 
   it('not while a send is in flight, without a covering wallet, or without durable storage', () => {
