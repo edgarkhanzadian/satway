@@ -155,6 +155,18 @@ describe('sanitizeQuoteRequest', () => {
     ).toThrow(BadRequest);
   });
 
+  it('charges no fee, and accepts none, when a fee is set without a recipient', () => {
+    const noRecipient = { ...config, appFeeBps: 25, appFeeRecipient: '' };
+    expect(sanitizeQuoteRequest(goodQuote(NOW), noRecipient, NOW).appFees).toBeUndefined();
+    expect(() =>
+      sanitizeQuoteRequest(
+        { ...goodQuote(NOW), appFees: [{ recipient: '', fee: 25 }] },
+        noRecipient,
+        NOW
+      )
+    ).toThrow(BadRequest);
+  });
+
   it.each([null, 'x', 5, []])('rejects a non-object body: %j', body => {
     expect(() => sanitizeQuoteRequest(body, config)).toThrow(BadRequest);
   });

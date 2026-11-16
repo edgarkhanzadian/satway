@@ -119,6 +119,19 @@ describe('sanitizeWithdrawalQuoteRequest', () => {
     expect(() => sanitizeWithdrawalQuoteRequest(goodRequest(), withFee, NOW)).toThrow(/appFees/);
   });
 
+  it('charges no fee, and accepts none, when a fee is set without a recipient', () => {
+    const noRecipient = { ...W, appFeeBps: 25, appFeeRecipient: '' };
+    const clean = sanitizeWithdrawalQuoteRequest(goodRequest(), noRecipient, NOW);
+    expect(clean.appFees).toBeUndefined();
+    expect(() =>
+      sanitizeWithdrawalQuoteRequest(
+        { ...goodRequest(), appFees: [{ recipient: '', fee: 25 }] },
+        noRecipient,
+        NOW
+      )
+    ).toThrow(BadRequest);
+  });
+
   it.each([null, [], 'quote', 7])('refuses a body that is not an object: %j', body => {
     expect(refused(body)).toMatch(/JSON object/);
   });
