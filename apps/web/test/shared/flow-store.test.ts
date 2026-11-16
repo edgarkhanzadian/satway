@@ -113,14 +113,6 @@ describe('createFlowStore', () => {
     expect(calls).toBe(1);
   });
 
-  it('abortAll aborts every pending request', () => {
-    const store = quoteStore();
-    store.dispatch({ type: 'requested', amount: '1' });
-    const signal = store.signal(requestOf(store.get()));
-    store.abortAll();
-    expect(signal.aborted).toBe(true);
-  });
-
   it('runs the effects of a transition after the state is updated', () => {
     interface Counter {
       count: number;

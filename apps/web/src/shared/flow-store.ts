@@ -16,7 +16,6 @@ export interface FlowStore<S, E> {
   subscribe(listener: () => void): () => void;
   attach(): void;
   detach(): void;
-  abortAll(): void;
 }
 
 export function transition<S, X>(state: S, effects: readonly X[] = []): Transition<S, X> {
@@ -128,6 +127,5 @@ export function createFlowStore<S, E, X>(
         if (!attached && teardown === mine) abortAll();
       });
     },
-    abortAll,
   };
 }
