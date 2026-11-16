@@ -10,7 +10,13 @@ import {
   newSignerKeyState,
   registerDeposit,
 } from '../src/http/index.js';
-import type { KV } from '../src/store/index.js';
+import {
+  INDEX_KEY,
+  type KV,
+  type Watch,
+  parseIndex,
+  registrationKeyParts,
+} from '../src/store/index.js';
 
 export const D = {
   txid: '5ab7ae554358d3ffdab7cc48db49ff144c5ae4fdd617b4140eac1b1936109bf5',
@@ -388,13 +394,26 @@ export function outpointsPosted(w: World): string[] {
     );
 }
 
-export function watchKeys(kv: MemoryKv): string[] {
-  return [...kv.data.keys()].filter(k => k.startsWith('dep:'));
+export function indexed(kv: MemoryKv): Watch[] {
+  const raw = kv.data.get(INDEX_KEY);
+  return raw ? (parseIndex(raw)?.watches ?? []) : [];
 }
 
-export function record(kv: MemoryKv): unknown {
-  const raw = kv.data.get(`dep:${D.address}`);
-  return raw ? JSON.parse(raw) : null;
+export function registrationKeys(kv: MemoryKv): string[] {
+  return [...kv.data.keys()].filter(k => registrationKeyParts(k) !== null).sort();
+}
+
+export function watchKeys(kv: MemoryKv): string[] {
+  const addresses = new Set<string>(indexed(kv).map(w => w.address));
+  for (const key of registrationKeys(kv)) {
+    const parts = registrationKeyParts(key);
+    if (parts) addresses.add(parts.address);
+  }
+  return [...addresses].sort().map(a => `dep:${a}`);
+}
+
+export function record(kv: MemoryKv, address = D.address): Watch | null {
+  return indexed(kv).find(w => w.address === address) ?? null;
 }
 
 export function testEnv(over: Partial<Env> = {}): Env {

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   DEFAULT_REQUEST_TIMEOUT_MS,
+  type OneClickStatusResponse,
   buildQuoteRequest,
   MAINNET_CONFIG as config,
 } from '@satway/core';
@@ -19,13 +20,17 @@ import {
   RUN_TIME_BUDGET_MS,
   WORKER_REQUEST_TIMEOUT_MS,
   runNotifier,
+  swapsFinal,
 } from '../src/notifier/index.js';
-import { listWatchedAddresses, loadWatched } from '../src/store/index.js';
+import { INDEX_KEY, getIndex, registrationKey, registrationKeyParts } from '../src/store/index.js';
 import {
   CHAIN,
   D,
+  EMILY,
   NOW,
   REAL_TX_HEX,
+  STATUS_URL,
+  type World,
   bodyJson,
   endpoints,
   goodBody,
@@ -38,7 +43,9 @@ import {
   payoutTx,
   postJson,
   record,
+  registerConfig,
   registerDeps,
+  registrationKeys,
   testEnv,
   watchKeys,
   watching,
@@ -264,12 +271,17 @@ describe('HTTP handler', () => {
   });
 
   it('registers a deposit and returns the derived address and the swap deadline', async () => {
-    const e = env();
+    const kv = memoryKv();
     const w = world({ btc: config.btcApiUrl });
-    const res = await handle(post('/deposits', goodBody()), e, w.fetchFn, handleOptions());
+    const res = await handle(
+      post('/deposits', goodBody()),
+      env({ DEPOSITS: kv }),
+      w.fetchFn,
+      handleOptions()
+    );
     expect(res.status).toBe(201);
     expect(await res.json()).toEqual({ address: D.address, deadline: '2026-11-14T14:00:00.000Z' });
-    expect((await listWatchedAddresses(e.DEPOSITS)).addresses).toEqual([D.address]);
+    expect(watchKeys(kv)).toEqual([`dep:${D.address}`]);
   });
 
   it('404s unknown routes', async () => {
@@ -290,7 +302,7 @@ describe('registerDeposit', () => {
       deps()
     );
     expect(address).toBe(D.address);
-    expect([...kv.data.keys()].filter(k => k.startsWith('dep:'))).toEqual([`dep:${D.address}`]);
+    expect(registrationKeys(kv)).toEqual([registrationKey(D.address, '0xswap0')]);
   });
 
   it.each([
@@ -319,33 +331,34 @@ describe('registerDeposit', () => {
     await expect(registerDeposit(memoryKv(), body, deps())).rejects.toThrow(BadRequest);
   });
 
-  it('writes one record per deposit address, once, with no snapshot of the address', async () => {
+  it('writes one key per swap, once, never lists, and takes no snapshot of the address', async () => {
     const w = world({});
     const kv = await watching(w, memoryKv(), '0xswapA');
-    expect(kv.writes().filter(k => k.startsWith('dep:'))).toEqual([`dep:${D.address}`]);
-    expect(record(kv)).toEqual({
+    const key = registrationKey(D.address, '0xswapA');
+    expect(kv.writes()).toEqual(['meta:signer-key', 'meta:registered-at', key]);
+    expect(JSON.parse(kv.data.get(key) ?? 'null')).toEqual({
       depositScript: D.depositScript,
       reclaimScript: D.reclaimScript,
-      createdAt: NOW.toISOString(),
       swapDepositAddress: '0xswapA',
       deadline: '2026-11-14T14:00:00.000Z',
-      registered: [],
+      createdAt: NOW.toISOString(),
     });
+    expect(kv.ops.filter(o => o.op === 'list')).toEqual([]);
     expect(w.calls.some(c => c.url.includes('/address/'))).toBe(false);
-    expect(kv.ttls.get(`dep:${D.address}`)).toBe(14 * 24 * 60 * 60);
+    expect(kv.ttls.get(key)).toBe(14 * 24 * 60 * 60);
   });
 
-  it('is idempotent for one swap, and adds a second swap without touching the record', async () => {
+  it('is idempotent for one swap, and adds a second swap under its own key', async () => {
     const w = world({});
     const kv = await watching(w, memoryKv(), '0xswapA');
-    const stored = kv.data.get(`dep:${D.address}`);
+    const first = registrationKey(D.address, '0xswapA');
+    const stored = kv.data.get(first);
     await expect(watching(w, kv, '0xswapA')).rejects.toThrow(AlreadyRegistered);
     await expect(watching(w, kv, '0xswapB')).resolves.toBe(kv);
     await expect(watching(w, kv, '0xswapB')).rejects.toThrow(AlreadyRegistered);
-    expect(kv.data.get(`dep:${D.address}`)).toBe(stored);
-    expect([...kv.data.keys()].filter(k => k.startsWith('swap:'))).toEqual([
-      `swap:${D.address}:0xswapB`,
-    ]);
+    expect(kv.data.get(first)).toBe(stored);
+    expect(registrationKeys(kv)).toEqual([first, registrationKey(D.address, '0xswapB')].sort());
+    expect(kv.writes().filter(k => k === 'meta:registered-at')).toHaveLength(1);
   });
 
   it('keeps two deposits from one wallet apart, one record each', async () => {
@@ -359,9 +372,7 @@ describe('registerDeposit', () => {
     );
   });
 
-  it('a registration while the notifier is mid-run cannot lose either deposit or its progress', async () => {
-    const w = world({ txs: [payoutTx(0)], swaps: { '0xswapLate': { status: 'PROCESSING' } } });
-    const kv = await watching(w);
+  function pausedAt(w: World, matches: (url: string) => boolean) {
     const gate = { open: () => undefined };
     const held = new Promise<undefined>(resolve => {
       gate.open = () => {
@@ -369,33 +380,85 @@ describe('registerDeposit', () => {
         return undefined;
       };
     });
-    let paused = false;
-    async function slowFetch(url: string, init?: RequestInit): Promise<Response> {
-      if (!paused && url.endsWith('/utxo')) {
-        paused = true;
+    const state = { paused: false };
+    async function fetchFn(url: string, init?: RequestInit): Promise<Response> {
+      if (!state.paused && matches(url)) {
+        state.paused = true;
         await held;
       }
       return w.fetchFn(url, init);
     }
-    const running = runNotifier(kv, endpoints, slowFetch, run);
-    await vi.waitFor(() => expect(paused).toBe(true));
+    return { fetchFn, state, open: () => gate.open() };
+  }
+
+  const later = { now: new Date(NOW.getTime() + 15 * 60_000) };
+
+  it('a swap registered while the notifier reads 1Click to end the watch is still watched', async () => {
+    const w = world({
+      txs: [payoutTx(0)],
+      swaps: { '0xswap0': { hashes: [D.txid] }, '0xswapLate': { status: 'PROCESSING' } },
+    });
+    const kv = await watching(w);
+    const pause = pausedAt(w, url => url.includes('/v0/status?depositAddress=0xswap0'));
+    const running = runNotifier(kv, endpoints, pause.fetchFn, run);
+    await vi.waitFor(() => expect(pause.state.paused).toBe(true));
+    const late = await registerDeposit(kv, goodBody('0xswapLate'), registerDeps(w));
+    expect(late.address).toBe(D.address);
+    pause.open();
+    const first = await running;
+    expect(first.finished).toEqual([D.address]);
+    expect(registrationKeys(kv)).toEqual([registrationKey(D.address, '0xswapLate')]);
+    expect(watchKeys(kv)).toEqual([`dep:${D.address}`]);
+
+    const second = await runNotifier(kv, endpoints, w.fetchFn, later);
+    expect(second.finished).toEqual([]);
+    expect(record(kv)?.swaps.map(s => s.swapDepositAddress)).toEqual(['0xswapLate']);
+    const third = await runNotifier(kv, endpoints, w.fetchFn, {
+      now: new Date(NOW.getTime() + 60 * 60_000),
+    });
+    expect(third.finished).toEqual([]);
+    expect(watchKeys(kv)).toEqual([`dep:${D.address}`]);
+  });
+
+  it('a stale index read after the end makes the watch live longer, never drops the late swap', async () => {
+    const w = world({
+      txs: [payoutTx(0)],
+      swaps: { '0xswap0': { hashes: [D.txid] }, '0xswapLate': { status: 'PROCESSING' } },
+    });
+    const kv = await watching(w);
+    await runNotifier(kv, endpoints, w.fetchFn, { ...run, budget: 6 });
+    expect(record(kv)).toMatchObject({ registered: [] });
+    const stale = kv.data.get(INDEX_KEY);
+    const pause = pausedAt(w, url => url.includes('/v0/status?depositAddress=0xswap0'));
+    const running = runNotifier(kv, endpoints, pause.fetchFn, run);
+    await vi.waitFor(() => expect(pause.state.paused).toBe(true));
+    await registerDeposit(kv, goodBody('0xswapLate'), registerDeps(w));
+    pause.open();
+    expect((await running).finished).toEqual([D.address]);
+    if (stale !== undefined) kv.data.set(INDEX_KEY, stale);
+    const again = await runNotifier(kv, endpoints, w.fetchFn, later);
+    expect(again.finished).toEqual([]);
+    expect(record(kv)?.swaps.map(s => s.swapDepositAddress)).toContain('0xswapLate');
+  });
+
+  it('a deposit registered while the notifier is mid-run is folded in later with nothing lost', async () => {
+    const w = world({ txs: [payoutTx(0)], swaps: { '0xswap0': { status: 'PROCESSING' } } });
+    const kv = await watching(w);
+    const pause = pausedAt(w, url => url.endsWith('/utxo'));
+    const running = runNotifier(kv, endpoints, pause.fetchFn, run);
+    await vi.waitFor(() => expect(pause.state.paused).toBe(true));
     const other = indexedBody(3);
     await registerDeposit(kv, other, registerDeps(w));
-    await registerDeposit(kv, goodBody('0xswapLate'), registerDeps(w));
-    gate.open();
-    const report = await running;
-    expect(report.finished).toEqual([]);
-    expect(record(kv)).toMatchObject({
-      swapDepositAddress: '0xswap0',
-      registered: [{ outpoint: `${D.txid}:0` }],
-    });
-    expect(watchKeys(kv).sort()).toEqual(
-      [`dep:${D.address}`, `dep:${indexedDeposit(3).address}`].sort()
-    );
-    expect(JSON.parse(kv.data.get(`dep:${indexedDeposit(3).address}`) ?? '{}')).toMatchObject({
-      swapDepositAddress: other.swapDepositAddress,
+    pause.open();
+    expect((await running).finished).toEqual([]);
+    expect(record(kv)).toMatchObject({ registered: [`${D.txid}:0`] });
+    await runNotifier(kv, endpoints, w.fetchFn, later);
+    expect(watchKeys(kv)).toEqual([`dep:${D.address}`, `dep:${indexedDeposit(3).address}`].sort());
+    expect(record(kv, indexedDeposit(3).address)).toMatchObject({
+      swaps: [{ swapDepositAddress: other.swapDepositAddress }],
       registered: [],
     });
+    expect(record(kv)).toMatchObject({ registered: [`${D.txid}:0`] });
   });
 });
 
@@ -541,7 +604,7 @@ describe('runNotifier', () => {
     expect(first.notified).toEqual([{ address: D.address, txid: CHAIN[3]?.txid, vout: 3 }]);
     expect(first.finished).toEqual([]);
     expect(watchKeys(kv).length).toBe(1);
-    expect(record(kv)).toMatchObject({ registered: [{ outpoint: `${CHAIN[3]?.txid}:3` }] });
+    expect(record(kv)).toMatchObject({ registered: [`${CHAIN[3]?.txid}:3`] });
 
     const healthy = world({ txs: opts.txs, knownOutpoints: [`${CHAIN[3]?.txid}:3`] });
     healthy.arrive();
@@ -615,108 +678,79 @@ describe('runNotifier', () => {
     expect(watchKeys(kv).length).toBe(1);
   });
 
-  it('drops a record of another shape as unreadable', async () => {
+  const forged = {
+    depositScript: D.depositScript,
+    reclaimScript: D.reclaimScript,
+    swapDepositAddress: '0xforged',
+    deadline: '',
+    createdAt: '',
+  };
+
+  it('drops a registration of another shape as unreadable', async () => {
     const kv = memoryKv();
+    const key = registrationKey(D.address, '0xswap0');
     kv.data.set(
-      `dep:${D.address}`,
-      JSON.stringify({
-        depositScript: D.depositScript,
-        reclaimScript: D.reclaimScript,
-        createdAt: NOW.toISOString(),
-        registrations: [],
-      })
+      key,
+      JSON.stringify({ depositScript: D.depositScript, reclaimScript: D.reclaimScript })
     );
     const w = world({ txs: [payoutTx(0)] });
     w.arrive();
     const report = await runNotifier(kv, endpoints, w.fetchFn, run);
     expect(report.notified).toEqual([]);
+    expect(kv.data.has(key)).toBe(false);
     expect(watchKeys(kv)).toEqual([]);
   });
 
-  it('drops a record whose stored scripts do not match its address', async () => {
+  it('drops a registration whose stored scripts do not match its address', async () => {
     const kv = memoryKv();
-    kv.data.set(
-      'dep:bc1pforged',
-      JSON.stringify({
-        depositScript: D.depositScript,
-        reclaimScript: D.reclaimScript,
-        createdAt: '',
-        swapDepositAddress: '0xforged',
-        deadline: '',
-        registered: [],
-      })
-    );
+    kv.data.set(registrationKey('bc1pforged', '0xforged'), JSON.stringify(forged));
     const w = world({ txs: [payoutTx(0)] });
     const report = await runNotifier(kv, endpoints, w.fetchFn, run);
     expect(report.errors[0]?.message).toMatch(/do not match/);
     expect(w.calls).toHaveLength(0);
-    expect(watchKeys(kv).length).toBe(0);
+    expect(watchKeys(kv)).toEqual([]);
   });
 
   it('one failing deposit does not block the others', async () => {
     const w = world({ txs: [payoutTx(0)] });
     const kv = await watching(w);
-    kv.data.set(
-      'dep:bc1pforged',
-      JSON.stringify({
-        depositScript: D.depositScript,
-        reclaimScript: D.reclaimScript,
-        createdAt: '',
-        swapDepositAddress: '0xforged',
-        deadline: '',
-        registered: [],
-      })
-    );
+    kv.data.set(registrationKey('bc1pforged', '0xforged'), JSON.stringify(forged));
     const report = await runNotifier(kv, endpoints, w.fetchFn, run);
     expect(report.errors).toHaveLength(1);
     expect(report.notified).toHaveLength(1);
   });
 
-  it('deletes a record it cannot read and still handles the others', async () => {
+  it('deletes a registration it cannot read and still handles the others', async () => {
     const w = world({ txs: [payoutTx(0)] });
     const kv = await watching(w);
-    kv.data.set('dep:bc1pbroken', '{oops');
+    kv.data.set(registrationKey('bc1pbroken', '0xbroken'), '{oops');
     const report = await runNotifier(kv, endpoints, w.fetchFn, run);
-    expect(kv.data.has('dep:bc1pbroken')).toBe(false);
+    expect(kv.data.has(registrationKey('bc1pbroken', '0xbroken'))).toBe(false);
     expect(report.notified).toHaveLength(1);
+  });
+
+  it('rebuilds a broken index from the registration keys', async () => {
+    const w = world({ txs: [payoutTx(0)], swaps: { '0xswap0': { status: 'PROCESSING' } } });
+    const kv = await watching(w);
+    await runNotifier(kv, endpoints, w.fetchFn, run);
+    kv.data.set(INDEX_KEY, '{oops');
+    await runNotifier(kv, endpoints, w.fetchFn, run);
+    expect((await getIndex(kv)).broken).toBe(false);
+    expect(record(kv)).toMatchObject({ registered: [`${D.txid}:0`] });
   });
 });
 
-describe('listWatchedAddresses and loadWatched', () => {
-  const good = {
-    depositScript: D.depositScript,
-    reclaimScript: D.reclaimScript,
-    createdAt: '2026-11-14T12:00:00.000Z',
-    swapDepositAddress: '0xswap0',
-    deadline: '2026-11-14T14:00:00.000Z',
-    registered: [],
-  };
-
-  it('returns stored records with any extra fields intact', async () => {
-    const kv = memoryKv();
-    kv.data.set(`dep:${D.address}`, JSON.stringify({ ...good, note: 'kept' }));
-    expect((await listWatchedAddresses(kv)).addresses).toEqual([D.address]);
-    expect(await loadWatched(kv, D.address)).toEqual({
-      deposit: { ...good, note: 'kept' },
-      broken: false,
+describe('registration keys', () => {
+  it('name the address and the swap, and parse back even when the swap has colons', () => {
+    const key = registrationKey(D.address, 'memo:with:colons');
+    expect(key).toBe(`dep:${D.address}:memo:with:colons`);
+    expect(registrationKeyParts(key)).toEqual({
+      address: D.address,
+      swapDepositAddress: 'memo:with:colons',
     });
-  });
-
-  it.each([
-    ['not JSON', '{oops'],
-    [
-      'JSON of the wrong shape',
-      JSON.stringify({ depositScript: 42, reclaimScript: D.reclaimScript }),
-    ],
-    ['a JSON string', JSON.stringify('dep')],
-  ])('marks a record that is %s as broken and keeps the rest readable', async (_name, raw) => {
-    const kv = memoryKv();
-    kv.data.set(`dep:${D.address}`, JSON.stringify(good));
-    kv.data.set('dep:bc1pbroken', raw);
-    expect((await listWatchedAddresses(kv)).addresses).toEqual(['bc1pbroken', D.address].sort());
-    expect(await loadWatched(kv, 'bc1pbroken')).toEqual({ deposit: null, broken: true });
-    expect(await loadWatched(kv, D.address)).toEqual({ deposit: good, broken: false });
-    expect(await loadWatched(kv, 'bc1pmissing')).toEqual({ deposit: null, broken: false });
+    for (const bad of ['dep:', 'dep:x', 'dep::y', 'dep:x:', 'meta:watch-index']) {
+      expect(registrationKeyParts(bad)).toBeNull();
+    }
   });
 });
 
@@ -731,7 +765,7 @@ describe('runNotifier: a watch ends only when its swap is final', () => {
     const first = await runNotifier(kv, endpoints, w.fetchFn, run);
     expect(outpointsPosted(w)).toEqual([strangerOut]);
     expect(first.finished).toEqual([]);
-    expect(record(kv)).toMatchObject({ registered: [{ outpoint: strangerOut }] });
+    expect(record(kv)).toMatchObject({ registered: [strangerOut] });
 
     w.arrive(payoutTx(0));
     const second = await runNotifier(kv, endpoints, w.fetchFn, run);
@@ -759,7 +793,7 @@ describe('runNotifier: a watch ends only when its swap is final', () => {
     const report = await runNotifier(kv, endpoints, w.fetchFn, run);
     expect(outpointsPosted(w)).toEqual([`${D.txid}:0`]);
     expect(report.finished).toEqual([]);
-    expect(record(kv)).toMatchObject({ registered: [{ outpoint: `${D.txid}:0` }] });
+    expect(record(kv)).toMatchObject({ registered: [`${D.txid}:0`] });
   });
 
   it.each(['REFUNDED', 'FAILED'])(
@@ -780,5 +814,80 @@ describe('runNotifier: a watch ends only when its swap is final', () => {
     await runNotifier(kv, endpoints, w.fetchFn, { ...run, oneClickJwt: 'worker-key' });
     const reads = w.calls.filter(c => c.url.includes('/v0/status?'));
     expect(reads.at(-1)?.auth).toBe('Bearer worker-key');
+  });
+});
+
+describe('runNotifier: several swaps paying one address', () => {
+  it('a swap reporting SUCCESS without a hash is not paid by another swap’s named payout', async () => {
+    const w = world({
+      txs: [payoutTx(0)],
+      swaps: { '0xswapA': { hashes: [D.txid] }, '0xswapB': {} },
+    });
+    const kv = await watching(w, memoryKv(), '0xswapA');
+    await watching(w, kv, '0xswapB');
+    const first = await runNotifier(kv, endpoints, w.fetchFn, run);
+    expect(outpointsPosted(w)).toEqual([`${D.txid}:0`]);
+    expect(first.finished).toEqual([]);
+    expect(record(kv)?.swaps).toHaveLength(2);
+
+    w.arrive(payoutTx(3));
+    const second = await runNotifier(kv, endpoints, w.fetchFn, run);
+    expect(outpointsPosted(w)).toEqual([`${D.txid}:0`, `${CHAIN[3]?.txid}:3`]);
+    expect(second.finished).toEqual([D.address]);
+  });
+
+  it('two swaps reporting SUCCESS without hashes need two registered outputs', () => {
+    const success: OneClickStatusResponse = {
+      status: 'SUCCESS',
+      updatedAt: NOW.toISOString(),
+      swapDetails: { originChainTxHashes: [], destinationChainTxHashes: [] },
+    };
+    expect(swapsFinal([success, success], [`${D.txid}:0`], 2)).toBe(false);
+    expect(swapsFinal([success, success], [`${D.txid}:0`, `${'cd'.repeat(32)}:1`], 2)).toBe(true);
+    expect(swapsFinal([success], [`${D.txid}:0`], 1)).toBe(true);
+    expect(swapsFinal([success, 'expired'], [`${D.txid}:0`], 2)).toBe(true);
+    expect(swapsFinal([success, null], [`${D.txid}:0`], 2)).toBe(false);
+  });
+
+  it('does not read 1Click for a swap a day past its deadline, and expires without reads', async () => {
+    const later = new Date(NOW.getTime() + 28 * 3_600_000);
+    const w = world({
+      txs: [payoutTx(0)],
+      swaps: {
+        '0xswapOld': { status: 'PROCESSING' },
+        '0xswapNew': { deadline: new Date(later.getTime() + 2 * 3_600_000).toISOString() },
+      },
+    });
+    const kv = await watching(w, memoryKv(), '0xswapOld', { config: registerConfig });
+    await runNotifier(kv, endpoints, w.fetchFn, run);
+    await watching(w, kv, '0xswapNew', { now: later });
+    const before = w.hits(STATUS_URL).length;
+    const report = await runNotifier(kv, endpoints, w.fetchFn, {
+      now: new Date(later.getTime() + 10 * 60_000),
+    });
+    const reads = w
+      .hits(STATUS_URL)
+      .slice(before)
+      .map(c => c.url);
+    expect(reads).toEqual([`${STATUS_URL}?depositAddress=0xswapNew`]);
+    expect(report.finished).toEqual([D.address]);
+  });
+
+  it('keeps a watch while eligible outputs past the first five are unregistered', async () => {
+    const txs = Array.from({ length: 7 }, (_, i) =>
+      payoutTx(0, { txid: (i + 1).toString(16).padStart(2, '0').repeat(32), value: 100_000 - i })
+    );
+    const w = world({ txs, known: true, swaps: { '0xswap0': { hashes: [txs[0]?.txid ?? ''] } } });
+    const kv = await watching(w);
+    const first = await runNotifier(kv, endpoints, w.fetchFn, { ...run, budget: 14 });
+    expect(first.finished).toEqual([]);
+    expect(record(kv)?.registered.length).toBeLessThan(7);
+    let finished = false;
+    for (let r = 0; r < 5 && !finished; r++) {
+      finished = (await runNotifier(kv, endpoints, w.fetchFn, run)).finished.length > 0;
+      if (!finished) expect(watchKeys(kv)).toEqual([`dep:${D.address}`]);
+    }
+    expect(finished).toBe(true);
+    expect(new Set(w.hits(`${EMILY}/deposit/`).map(c => c.url)).size).toBe(7);
   });
 });

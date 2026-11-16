@@ -16,16 +16,32 @@ import {
   isCurrentSignerKey,
   lockPushHex,
   newSignerKeyState,
+  registerDeposit,
 } from '../src/http/index.js';
 import { handle } from '../src/index.js';
-import { PAYOUT_GRACE_MS, rotationWindow, runNotifier } from '../src/notifier/index.js';
 import {
+  CRON_PERIOD_MS,
+  PAYOUT_GRACE_MS,
+  rotationStart,
+  rotationWindow,
+  runNotifier,
+} from '../src/notifier/index.js';
+import {
+  FULL_CYCLE_RUNS,
+  INDEX_KEY,
+  LOAD_KEY,
   MAX_ACTIVE_WATCHES,
   MAX_ADDRESSES_PER_RUN,
   MAX_EXTRA_SWAPS,
+  MIN_REGISTRATIONS_PER_RUN,
   RUN_SUBREQUEST_BUDGET,
   SUBREQUEST_LIMIT,
-  type WatchedDeposit,
+  type Watch,
+  type WatchIndex,
+  emptyIndex,
+  getIndex,
+  loadOf,
+  registrationKey,
 } from '../src/store/index.js';
 import {
   BTC,
@@ -42,11 +58,14 @@ import {
   handleOptions,
   indexedBody,
   indexedDeposit,
+  jsonRes,
   memoryKv,
   outpointsPosted,
   payoutTx,
   postJson,
   record,
+  registerDeps,
+  swapStatus,
   testEnv,
   watchKeys,
   watching,
@@ -358,21 +377,21 @@ describe('POST /deposits: the swap must be a live 1Click swap that pays this add
     expect(text).not.toContain('worker-key');
     expect(w.hits(STATUS_URL).map(c => c.auth)).toEqual(['Bearer worker-key']);
     expect(w.hits(STATUS_URL).map(c => c.url)).toEqual([`${STATUS_URL}?depositAddress=0xswap0`]);
-    expect(record(kv)).toEqual({
+    expect(JSON.parse(kv.data.get(registrationKey(D.address, '0xswap0')) ?? 'null')).toEqual({
       depositScript: D.depositScript,
       reclaimScript: D.reclaimScript,
-      createdAt: NOW.toISOString(),
       swapDepositAddress: '0xswap0',
       deadline: '2026-11-14T14:00:00.000Z',
-      registered: [],
+      createdAt: NOW.toISOString(),
     });
   });
 
-  it('answers 409 when the same swap re-registers a deposit address, without calling 1Click or writing', async () => {
+  it('answers 409 when the same swap re-registers a deposit address, after the live check and without writing', async () => {
     const w = liveWorld();
     const kv = memoryKv();
     await attempt(goodBody(), { w, kv });
-    const stored = kv.data.get(`dep:${D.address}`);
+    const key = registrationKey(D.address, '0xswap0');
+    const stored = kv.data.get(key);
     const before = expensive(w);
     const writes = kv.writes().length;
     const again = await attempt(goodBody('0xswap0'), { w, kv });
@@ -381,24 +400,34 @@ describe('POST /deposits: the swap must be a live 1Click swap that pays this add
       message: 'This deposit is already registered',
       address: D.address,
     });
-    expect(expensive(w)).toEqual(before);
+    expect(expensive(w)).toEqual({ ...before, oneClick: before.oneClick + 1 });
     expect(kv.writes()).toHaveLength(writes);
-    expect(kv.data.get(`dep:${D.address}`)).toBe(stored);
+    expect(kv.data.get(key)).toBe(stored);
   });
 
-  it('adds another live swap to the address under its own key, leaving the record alone', async () => {
+  it('reads nothing from KV for a request that fails the live swap check', async () => {
+    const w = liveWorld({ swaps: { '0xswapGone': 'unknown' } });
+    const kv = memoryKv();
+    await attempt(goodBody(), { w, kv });
+    const reads = kv.ops.length;
+    const res = await attempt(goodBody('0xswapGone'), { w, kv });
+    expect(res.res.status).toBe(400);
+    expect(kv.ops.slice(reads).filter(o => o.key !== 'meta:signer-key')).toEqual([]);
+  });
+
+  it('adds another live swap to the address under its own key, leaving the first alone', async () => {
     const w = liveWorld();
     const kv = memoryKv();
     await attempt(goodBody(), { w, kv });
-    const stored = kv.data.get(`dep:${D.address}`);
+    const key = registrationKey(D.address, '0xswap0');
+    const stored = kv.data.get(key);
     const before = expensive(w).oneClick;
     const other = await attempt(goodBody('0xswapOther'), { w, kv });
     expect(other.res.status).toBe(201);
     expect(other.body).toMatchObject({ address: D.address });
     expect(expensive(w).oneClick).toBe(before + 1);
-    expect(depositWrites(kv)).toHaveLength(1);
-    expect(kv.data.get(`dep:${D.address}`)).toBe(stored);
-    expect(kv.writes()).toContain(`swap:${D.address}:0xswapOther`);
+    expect(kv.data.get(key)).toBe(stored);
+    expect(kv.writes()).toContain(registrationKey(D.address, '0xswapOther'));
     const repeat = await attempt(goodBody('0xswapOther'), { w, kv });
     expect(repeat.res.status).toBe(409);
     expect(repeat.body).toEqual({
@@ -407,18 +436,41 @@ describe('POST /deposits: the swap must be a live 1Click swap that pays this add
     });
   });
 
-  it('refuses another swap with its own code once the address follows as many as it can', async () => {
+  it('refuses another swap with its own code once the Worker follows as many as it can', async () => {
     const w = liveWorld();
     const kv = memoryKv();
     await attempt(goodBody(), { w, kv });
     for (let n = 0; n < MAX_EXTRA_SWAPS; n++) {
       expect((await attempt(goodBody(`0xswapExtra${n}`), { w, kv })).res.status).toBe(201);
     }
+    for (let r = 0; r < 3; r++) await runNotifier(kv, endpoints, w.fetchFn, { now: NOW });
+    expect(record(kv)?.swaps).toHaveLength(MAX_EXTRA_SWAPS + 1);
     const writes = kv.writes().length;
     const over = await attempt(goodBody('0xswapOneTooMany'), { w, kv });
     expect(over.res.status).toBe(409);
     expect(over.body).toMatchObject({ address: D.address, code: 'swap-limit' });
     expect(kv.writes()).toHaveLength(writes);
+  });
+
+  it('follows at most the hard cap of swaps per address even when the handler let more through', async () => {
+    const kv = memoryKv();
+    const reg = {
+      depositScript: D.depositScript,
+      reclaimScript: D.reclaimScript,
+      deadline: new Date(NOW.getTime() + 2 * 3_600_000).toISOString(),
+    };
+    for (let n = 0; n < MAX_EXTRA_SWAPS + 3; n++) {
+      const swap = `0xswapRace${n}`;
+      kv.data.set(
+        registrationKey(D.address, swap),
+        JSON.stringify({ ...reg, swapDepositAddress: swap, createdAt: new Date(n).toISOString() })
+      );
+    }
+    const w = world();
+    for (let r = 0; r < 4; r++) await runNotifier(kv, endpoints, w.fetchFn, { now: NOW });
+    expect(record(kv)?.swaps.map(s => s.swapDepositAddress)).toEqual(
+      Array.from({ length: MAX_EXTRA_SWAPS + 1 }, (_, n) => `0xswapRace${n}`)
+    );
   });
 
   it('checks another swap like the first: one that pays another address is refused', async () => {
@@ -573,44 +625,6 @@ describe('POST /deposits: rate limit', () => {
   });
 });
 
-describe('POST /deposits: global cap on active watches', () => {
-  function fullKv(count: number, pageSize = 1000) {
-    const kv = memoryKv(pageSize);
-    for (let i = 0; i < count; i += 1)
-      kv.data.set(`dep:bc1pfill${String(i).padStart(4, '0')}`, '{}');
-    return kv;
-  }
-
-  it('answers 503 at capacity, with Retry-After, without the mempool snapshot or a write', async () => {
-    const kv = fullKv(MAX_ACTIVE_WATCHES);
-    const { res, body, w } = await attempt(goodBody(), { kv });
-    expect(res.status).toBe(503);
-    expect(res.headers.get('retry-after')).toBe(String(CAPACITY_RETRY_AFTER_SECONDS));
-    expect(body).toEqual({
-      message: 'Background tracking is at capacity. The open tab still registers the payout.',
-    });
-    expect(expensive(w).btc).toBe(0);
-    expect(depositWrites(kv)).toEqual([]);
-  });
-
-  it('counts deposits against the cap: each new deposit address takes one slot', async () => {
-    const kv = fullKv(MAX_ACTIVE_WATCHES - 2);
-    expect((await attempt(indexedBody(1), { kv })).res.status).toBe(201);
-    expect((await attempt(indexedBody(2), { kv })).res.status).toBe(201);
-    const full = await attempt(indexedBody(3), { kv });
-    expect(full.res.status).toBe(503);
-    expect((await attempt(indexedBody(1), { kv })).res.status).toBe(409);
-    expect(depositWrites(kv)).toHaveLength(2);
-    kv.data.delete('dep:bc1pfill0000');
-    expect((await attempt(indexedBody(3), { kv })).res.status).toBe(201);
-  });
-
-  it('treats a key listing it could not finish as full', async () => {
-    const kv = fullKv(30, 10);
-    expect((await attempt(goodBody(), { kv })).res.status).toBe(503);
-  });
-});
-
 function otherDeposit(i: number) {
   const reclaimKey = (i + 1).toString(16).padStart(64, '0');
   return buildDepositAddress({
@@ -622,28 +636,105 @@ function otherDeposit(i: number) {
   });
 }
 
-function storeWatch(
-  kv: ReturnType<typeof memoryKv>,
+function watchFor(
   address: string,
   scripts: { depositScript: string; reclaimScript: string },
-  deadline = new Date(NOW.getTime() + 2 * 3_600_000).toISOString()
-) {
-  const deposit: WatchedDeposit = {
+  over: Partial<Watch> = {}
+): Watch {
+  return {
+    address,
     depositScript: scripts.depositScript,
     reclaimScript: scripts.reclaimScript,
     createdAt: NOW.toISOString(),
-    swapDepositAddress: `0x${address.slice(-8)}`,
-    deadline,
+    swaps: [
+      {
+        swapDepositAddress: `0x${address.slice(-8)}`,
+        deadline: new Date(NOW.getTime() + 2 * 3_600_000).toISOString(),
+        createdAt: NOW.toISOString(),
+      },
+    ],
     registered: [],
+    ...over,
   };
-  kv.data.set(`dep:${address}`, JSON.stringify(deposit));
 }
 
-function processedIn(kv: ReturnType<typeof memoryKv>, from: number): string[] {
-  return kv.ops
-    .slice(from)
-    .filter(o => o.op === 'get' && o.key.startsWith('dep:'))
-    .map(o => o.key.slice(4));
+function seed(kv: MemoryKv, watches: readonly Watch[]): void {
+  const index: WatchIndex = {
+    ...emptyIndex(),
+    watches: [...watches].sort((a, b) => (a.address < b.address ? -1 : 1)),
+    listedAt: NOW.getTime(),
+  };
+  kv.data.set(INDEX_KEY, JSON.stringify(index));
+  kv.data.set(LOAD_KEY, JSON.stringify(loadOf(index)));
+}
+
+function fills(count: number): Watch[] {
+  return Array.from({ length: count }, (_, i) => {
+    const other = otherDeposit(i);
+    return watchFor(other.address, other);
+  });
+}
+
+describe('POST /deposits: global cap on active watches', () => {
+  it('answers 503 at capacity, with Retry-After, without a list, the mempool snapshot or a write', async () => {
+    const kv = memoryKv();
+    seed(kv, fills(MAX_ACTIVE_WATCHES));
+    const writes = kv.writes().length;
+    const { res, body, w } = await attempt(goodBody(), { kv });
+    expect(res.status).toBe(503);
+    expect(res.headers.get('retry-after')).toBe(String(CAPACITY_RETRY_AFTER_SECONDS));
+    expect(body).toEqual({
+      message: 'Background tracking is at capacity. The open tab still registers the payout.',
+    });
+    expect(expensive(w).btc).toBe(0);
+    expect(kv.writes().slice(writes)).toEqual(['meta:signer-key']);
+    expect(kv.ops.filter(o => o.op === 'list')).toEqual([]);
+  });
+
+  it('still takes another swap for an address it already follows when at capacity', async () => {
+    const kv = memoryKv();
+    seed(kv, [...fills(MAX_ACTIVE_WATCHES - 1), watchFor(D.address, D)]);
+    expect((await attempt(goodBody('0xswapMore'), { kv })).res.status).toBe(201);
+    expect((await attempt(indexedBody(1), { kv })).res.status).toBe(503);
+  });
+
+  it('never follows more than the cap: a new address waits in line until a slot frees', async () => {
+    const kv = memoryKv();
+    const w = world();
+    await registerDeposit(kv, goodBody(), registerDeps(w));
+    seed(kv, fills(MAX_ACTIVE_WATCHES));
+    const later = { now: new Date(NOW.getTime() + 15 * 60_000) };
+    await runNotifier(kv, endpoints, w.fetchFn, later);
+    expect(record(kv)).toBeNull();
+    expect(watchKeys(kv)).toHaveLength(MAX_ACTIVE_WATCHES + 1);
+    const index = (await getIndex(kv)).index;
+    if (!index) throw new Error('no index');
+    index.watches = index.watches.slice(1);
+    kv.data.set(INDEX_KEY, JSON.stringify(index));
+    await runNotifier(kv, endpoints, w.fetchFn, later);
+    expect(record(kv)?.swaps.map(s => s.swapDepositAddress)).toEqual(['0xswap0']);
+  });
+});
+
+function utxoVisits(calls: readonly string[]): string[] {
+  return calls.flatMap(url => {
+    const m = /\/address\/([a-z0-9]+)\/utxo$/.exec(url);
+    return m?.[1] ? [m[1]] : [];
+  });
+}
+
+function simulatedWorld(mode: 'down' | 'processing') {
+  const calls: string[] = [];
+  function fetchFn(url: string): Promise<Response> {
+    calls.push(url);
+    if (url.endsWith('/utxo')) return Promise.resolve(jsonRes([]));
+    if (url.includes('/v0/status')) {
+      if (mode === 'down') return Promise.resolve(jsonRes({ message: 'down' }, 503));
+      return Promise.resolve(jsonRes(swapStatus('0x', { status: 'PROCESSING' })));
+    }
+    return Promise.resolve(jsonRes({ message: 'not found' }, 404));
+  }
+  return { calls, fetchFn };
 }
 
 describe('runNotifier: bounded, fair work', () => {
@@ -652,46 +743,80 @@ describe('runNotifier: bounded, fair work', () => {
     expect(RUN_SUBREQUEST_BUDGET).toBeLessThan(SUBREQUEST_LIMIT);
     expect(MAX_ADDRESSES_PER_RUN).toBe(16);
     expect(MAX_ACTIVE_WATCHES).toBe(320);
+    expect(MIN_REGISTRATIONS_PER_RUN).toBeGreaterThanOrEqual(2);
   });
 
-  it('rotates a window over the sorted keys', () => {
+  it('rotates a window from where the last run stopped', () => {
     const items = Array.from({ length: 10 }, (_, i) => i);
     expect(rotationWindow(items, 0, 4)).toEqual([0, 1, 2, 3]);
-    expect(rotationWindow(items, 1, 4)).toEqual([4, 5, 6, 7]);
-    expect(rotationWindow(items, 2, 4)).toEqual([8, 9, 0, 1]);
-    expect(rotationWindow(items.slice(0, 3), 7, 4)).toEqual([0, 1, 2]);
+    expect(rotationWindow(items, 8, 4)).toEqual([8, 9, 0, 1]);
+    expect(rotationWindow(items.slice(0, 3), 2, 4)).toEqual([2, 0, 1]);
+    expect(rotationStart({ at: 3, run: 10 }, 11, 4, 10)).toBe(3);
+    expect(rotationStart({ at: 3, run: 10 }, 13, 4, 10)).toBe(1);
+    expect(rotationStart({ at: 3, run: 10 }, 10, 4, 10)).toBe(3);
   });
 
-  it('visits every watch within ceil(n / per-run) runs, even when junk sorts first and the real watch keeps failing', async () => {
+  it.each(['down', 'processing'] as const)(
+    'with 320 watches that all cost end-of-watch reads (1Click %s), visits each within one cycle',
+    async mode => {
+      const kv = memoryKv();
+      const all = fills(MAX_ACTIVE_WATCHES).map((watch, i) => ({
+        ...watch,
+        registered: [`${'ab'.repeat(32)}:${i}`],
+      }));
+      seed(kv, all);
+      const sim = simulatedWorld(mode);
+      const lastSeen = new Map<string, number>();
+      let worstGap = 0;
+      const runs = 3 * FULL_CYCLE_RUNS;
+      for (let r = 0; r < runs; r += 1) {
+        const from = sim.calls.length;
+        const report = await runNotifier(kv, endpoints, sim.fetchFn, {
+          now: new Date(NOW.getTime() + r * CRON_PERIOD_MS),
+          runIndex: 5_000 + r,
+          clock: { now: () => 0, deadline: 1e12 },
+        });
+        expect(report.subrequests).toBeLessThanOrEqual(RUN_SUBREQUEST_BUDGET);
+        for (const a of utxoVisits(sim.calls.slice(from))) {
+          const previous = lastSeen.get(a);
+          worstGap = Math.max(worstGap, previous === undefined ? r + 1 : r - previous);
+          lastSeen.set(a, r);
+        }
+      }
+      expect(lastSeen.size).toBe(MAX_ACTIVE_WATCHES);
+      for (const a of all) {
+        const seen = lastSeen.get(a.address) ?? -1;
+        worstGap = Math.max(worstGap, runs - 1 - seen);
+      }
+      expect(worstGap).toBeLessThanOrEqual(FULL_CYCLE_RUNS);
+    }
+  );
+
+  it('a run cut short by time resumes where it stopped instead of skipping the rest', async () => {
     const kv = memoryKv();
-    const all: string[] = [D.address];
-    for (let i = 0; i < 40; i += 1) {
-      const other = otherDeposit(i);
-      storeWatch(kv, other.address, other);
-      all.push(other.address);
-    }
-    storeWatch(kv, D.address, D);
-    expect([...all].sort().indexOf(D.address)).toBeGreaterThanOrEqual(MAX_ADDRESSES_PER_RUN);
-    const w = liveWorld({ btc: BTC, tooManyUtxos: true });
-    const runs = Math.ceil(all.length / MAX_ADDRESSES_PER_RUN);
-    const seen = new Set<string>();
-    for (let r = 0; r < runs; r += 1) {
-      const from = kv.ops.length;
-      const report = await runNotifier(kv, endpoints, w.fetchFn, { now: NOW, runIndex: 1000 + r });
-      expect(report.processed).toBe(Math.min(MAX_ADDRESSES_PER_RUN, all.length));
-      for (const a of processedIn(kv, from)) seen.add(a);
-    }
-    expect([...seen].sort()).toEqual([...all].sort());
-    expect(watchKeys(kv)).toHaveLength(all.length);
+    const all = fills(40);
+    seed(kv, all);
+    const sim = simulatedWorld('processing');
+    let ticks = 0;
+    await runNotifier(kv, endpoints, sim.fetchFn, {
+      now: NOW,
+      runIndex: 1,
+      clock: { now: () => ticks++, deadline: 5 },
+    });
+    const first = utxoVisits(sim.calls);
+    expect(first.length).toBeGreaterThan(0);
+    expect(first.length).toBeLessThan(MAX_ADDRESSES_PER_RUN);
+    const from = sim.calls.length;
+    await runNotifier(kv, endpoints, sim.fetchFn, { now: NOW, runIndex: 2 });
+    const sorted = all.map(w => w.address).sort();
+    expect(utxoVisits(sim.calls.slice(from))).toEqual(
+      sorted.slice(first.length, first.length + MAX_ADDRESSES_PER_RUN)
+    );
   });
 
   it('never spends more than the per-run budget, and counts what it spends', async () => {
     const kv = memoryKv();
-    for (let i = 0; i < 30; i += 1) {
-      const other = otherDeposit(i);
-      storeWatch(kv, other.address, other);
-    }
-    storeWatch(kv, D.address, D);
+    seed(kv, [...fills(30), watchFor(D.address, D)]);
     const txs = [0, 1, 2, 3, 4, 5].map(i =>
       payoutTx(0, { txid: (i + 10).toString(16).padStart(64, 'e'), value: 20_000 + i })
     );
@@ -710,18 +835,23 @@ describe('runNotifier: bounded, fair work', () => {
     expect(small.skipped).toBeGreaterThan(0);
   });
 
-  it('defers registrations it cannot afford instead of exceeding the budget', async () => {
+  it('defers registrations it cannot afford, keeps them queued, and does them first next run', async () => {
     const kv = memoryKv();
-    storeWatch(kv, D.address, D);
+    seed(kv, [watchFor(D.address, D)]);
     const txs = [0, 1, 2, 3, 4].map(i =>
       payoutTx(0, { txid: (i + 10).toString(16).padStart(64, 'e'), value: 20_000 + i })
     );
-    const w = liveWorld({ btc: BTC, txs });
+    const w = liveWorld({ btc: BTC, txs, known: true });
     w.arrive();
-    const report = await runNotifier(kv, endpoints, w.fetchFn, { now: NOW, budget: 12 });
-    expect(report.subrequests).toBeLessThanOrEqual(12);
+    const report = await runNotifier(kv, endpoints, w.fetchFn, { now: NOW, budget: 9 });
+    expect(report.subrequests).toBeLessThanOrEqual(9);
     expect(report.deferred).toEqual([D.address]);
+    expect(report.finished).toEqual([]);
     expect(watchKeys(kv)).toEqual([`dep:${D.address}`]);
+    const queued = (await getIndex(kv)).index?.queue ?? [];
+    expect(queued.length).toBeGreaterThan(0);
+    const next = await runNotifier(kv, endpoints, w.fetchFn, { now: NOW });
+    expect(next.finished).toEqual([D.address]);
   });
 });
 

@@ -1,17 +1,28 @@
 export const SUBREQUEST_LIMIT = 50;
 export const RUN_SUBREQUEST_BUDGET = 40;
 
-export const LIST_COST = 1;
+export const INDEX_READ_COST = 1;
+export const SIGNAL_READ_COST = 1;
+export const MAX_LIST_PAGES_PER_RUN = 2;
+export const MAX_FOLDS_PER_RUN = 2;
+export const FOLD_COST = 2;
+export const VISIT_COST = 1;
+export const DISCOVERY_COST =
+  SIGNAL_READ_COST + MAX_LIST_PAGES_PER_RUN + MAX_FOLDS_PER_RUN * (FOLD_COST + VISIT_COST);
+export const PERSIST_COST = 2;
 export const SHARED_LOOKUP_COST = 2;
-export const IDLE_ADDRESS_COST = 2;
-export const RECORD_WRITE_COST = 1;
 export const REGISTRATION_COST = 4;
 export const SWAP_STATUS_COST = 1;
-export const SWAP_LIST_COST = 1;
+export const MAX_ADDRESSES_PER_RUN = 16;
 
-export const MAX_ADDRESSES_PER_RUN = Math.floor(
-  (RUN_SUBREQUEST_BUDGET - LIST_COST - SHARED_LOOKUP_COST - REGISTRATION_COST - RECORD_WRITE_COST) /
-    IDLE_ADDRESS_COST
+export const MIN_REGISTRATIONS_PER_RUN = Math.floor(
+  (RUN_SUBREQUEST_BUDGET -
+    INDEX_READ_COST -
+    DISCOVERY_COST -
+    PERSIST_COST -
+    SHARED_LOOKUP_COST -
+    MAX_ADDRESSES_PER_RUN * VISIT_COST) /
+    REGISTRATION_COST
 );
 
 export const CRON_PERIOD_MINUTES = 2;
@@ -19,3 +30,11 @@ export const FULL_CYCLE_RUNS = 20;
 export const MAX_ACTIVE_WATCHES = MAX_ADDRESSES_PER_RUN * FULL_CYCLE_RUNS;
 
 export const PAYOUT_GRACE_HOURS = 24;
+
+export const LIST_MIN_GAP_MINUTES = 6;
+export const LIST_SETTLE_MINUTES = 12;
+export const LIST_MAX_GAP_MINUTES = 15;
+export const LIST_BACKSTOP_HOURS = 6;
+export const SIGNAL_REFRESH_SECONDS = 10 * 60;
+export const LOAD_REFRESH_MINUTES = 10;
+export const ENDED_MEMORY_HOURS = 6;

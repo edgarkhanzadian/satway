@@ -1,7 +1,15 @@
-import worker, { type Env, handle } from '@satway/api';
+import worker, {
+  type Env,
+  INDEX_KEY,
+  type Watch,
+  handle,
+  parseIndex,
+  registrationKeyParts,
+} from '@satway/api';
 
 import { APP_ORIGIN, TEST_ONECLICK_JWT } from '../config.js';
 import { RealDate } from '../world/clock.js';
+import { field } from '../world/http.js';
 import type { FetchLike, World } from '../world/world.js';
 import { MemoryKv } from './kv.js';
 import { FakeRateLimiter } from './rate-limiter.js';
@@ -142,12 +150,54 @@ export class ApiWorker {
     return response;
   }
 
+  private indexed(): Watch[] {
+    const raw = this.kv.entries.get(INDEX_KEY)?.value;
+    return raw === undefined ? [] : (parseIndex(raw)?.watches ?? []);
+  }
+
+  registrationKeys(depositAddress?: string): string[] {
+    return this.kv.keys('dep:').filter(k => {
+      const parts = registrationKeyParts(k);
+      return parts !== null && (depositAddress === undefined || parts.address === depositAddress);
+    });
+  }
+
   watched(): string[] {
-    return this.kv.keys('dep:').map(k => k.slice(4));
+    const addresses = new Set(this.indexed().map(w => w.address));
+    for (const key of this.registrationKeys()) {
+      const parts = registrationKeyParts(key);
+      if (parts) addresses.add(parts.address);
+    }
+    return [...addresses].sort();
   }
 
   watch(depositAddress: string): unknown {
-    return this.kv.json(`dep:${depositAddress}`);
+    const followed = this.indexed().find(w => w.address === depositAddress);
+    if (followed) {
+      const [primary] = followed.swaps;
+      return {
+        depositScript: followed.depositScript,
+        reclaimScript: followed.reclaimScript,
+        createdAt: followed.createdAt,
+        swapDepositAddress: primary?.swapDepositAddress,
+        deadline: primary?.deadline,
+        swaps: followed.swaps,
+        registered: followed.registered,
+      };
+    }
+    const [first] = this.registrationKeys(depositAddress)
+      .map(k => this.kv.json(k))
+      .sort((a, b) => String(field(a, 'createdAt')).localeCompare(String(field(b, 'createdAt'))));
+    if (first === undefined) return null;
+    return {
+      depositScript: field(first, 'depositScript'),
+      reclaimScript: field(first, 'reclaimScript'),
+      createdAt: field(first, 'createdAt'),
+      swapDepositAddress: field(first, 'swapDepositAddress'),
+      deadline: field(first, 'deadline'),
+      swaps: [],
+      registered: [],
+    };
   }
 
   depositPosts(): WorkerRequestLog[] {

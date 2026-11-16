@@ -69,9 +69,12 @@ test.describe('R8. the Worker watch for a deposit whose tab was closed', () => {
       createdAt: expect.any(String),
       swapDepositAddress: receipt.quoteResponse.quote.depositAddress,
       deadline: receipt.quoteResponse.quoteRequest.deadline,
+      swaps: [],
       registered: [],
     });
-    expect(api.kv.metadataOf(`dep:${receipt.depositAddress}`)).toBeUndefined();
+    const keys = api.registrationKeys(receipt.depositAddress);
+    expect(keys).toHaveLength(1);
+    expect(keys.map(k => api.kv.metadataOf(k))).toEqual([undefined]);
     for (let run = 0; run < 2; run++) {
       expect(await api.runScheduled()).toEqual(notifierRun({ watched: 1 }));
       expect(api.watched()).toEqual([receipt.depositAddress]);
@@ -99,7 +102,7 @@ test.describe('R8. the Worker watch for a deposit whose tab was closed', () => {
   }) => {
     const { receipt } = await startDeposit(app);
     await app.page.close();
-    const key = `dep:${receipt.depositAddress}`;
+    const [key = ''] = api.registrationKeys(receipt.depositAddress);
     expect(Math.abs((api.kv.expiresInMs(key) ?? 0) - 14 * DAY_MS)).toBeLessThan(10_000);
     const deadline = deadlineOf(api, receipt.depositAddress);
     expect(deadline).toBe(Date.parse(String(receipt.quoteResponse.quoteRequest.deadline)));

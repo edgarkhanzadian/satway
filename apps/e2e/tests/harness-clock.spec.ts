@@ -59,7 +59,8 @@ test.describe('harness self-checks: the Worker runs on the world clock', () => {
     const createdAt = Date.parse(String(field(watch, 'createdAt')));
     expect(Math.abs(createdAt - world.now().getTime())).toBeLessThan(5_000);
     expect(Math.abs(createdAt - realNow() - 3 * DAY_MS)).toBeLessThan(5_000);
-    const ttl = api.kv.expiresInMs(`dep:${deposit.address}`) ?? 0;
+    const [key = ''] = api.registrationKeys(deposit.address);
+    const ttl = api.kv.expiresInMs(key) ?? 0;
     expect(Math.abs(ttl - 14 * DAY_MS)).toBeLessThan(5_000);
 
     world.advanceClock(14 * DAY_MS - 60_000);

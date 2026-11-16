@@ -4,6 +4,13 @@ import { type Env, handle } from './http/index.js';
 import { CRON_PERIOD_MS, runNotifier } from './notifier/index.js';
 
 export { type Env, handle };
+export {
+  INDEX_KEY,
+  type Watch,
+  parseIndex,
+  registrationKey,
+  registrationKeyParts,
+} from './store/index.js';
 
 function scheduledTimeOf(event: unknown): Date {
   const time: unknown =

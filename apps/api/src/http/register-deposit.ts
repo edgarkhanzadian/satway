@@ -9,13 +9,12 @@ import {
 import {
   type KV,
   MAX_ACTIVE_WATCHES,
-  MAX_EXTRA_SWAPS,
-  type WatchedDeposit,
-  countWatches,
-  getWatched,
-  listExtraSwaps,
-  putExtraSwap,
-  putWatched,
+  SIGNAL_REFRESH_SECONDS,
+  getLoad,
+  getRegisteredAt,
+  putRegisteredAt,
+  putRegistration,
+  registrationExists,
 } from '../store/index.js';
 import { ApiError, BadRequest } from './errors.js';
 import { type ScriptConfig, checkScriptShape } from './script-shape.js';
@@ -81,51 +80,10 @@ export class SwapLimitReached extends ApiError {
   }
 }
 
-function newRecord(
-  deposit: string,
-  reclaim: string,
-  swap: string,
-  deadline: string,
-  now: Date
-): WatchedDeposit {
-  return {
-    depositScript: deposit,
-    reclaimScript: reclaim,
-    createdAt: now.toISOString(),
-    swapDepositAddress: swap,
-    deadline,
-    registered: [],
-  };
-}
-
-async function addSwap(
-  kv: KV,
-  existing: WatchedDeposit,
-  address: string,
-  swap: string,
-  check: () => Promise<string>,
-  now: Date
-): Promise<Registered> {
-  if (existing.swapDepositAddress === swap) throw new AlreadyRegistered(address);
-  const extras = await listExtraSwaps(kv, address, existing.createdAt);
-  if (extras.some(e => e.swapDepositAddress === swap)) throw new AlreadyRegistered(address);
-  const deadline = await check();
-  if (extras.length >= MAX_EXTRA_SWAPS) throw new SwapLimitReached(address);
-  await putExtraSwap(
-    kv,
-    address,
-    { swapDepositAddress: swap, deadline, createdAt: now.toISOString() },
-    now
-  );
-  if (!(await getWatched(kv, address))) {
-    await putWatched(
-      kv,
-      address,
-      newRecord(existing.depositScript, existing.reclaimScript, swap, deadline, now),
-      now
-    );
-  }
-  return { address, deadline };
+async function signalRegistration(kv: KV, now: Date): Promise<void> {
+  const last = await getRegisteredAt(kv);
+  if (last !== null && last >= now.getTime() - SIGNAL_REFRESH_SECONDS * 1000) return;
+  await putRegisteredAt(kv, now.getTime());
 }
 
 export async function registerDeposit(
@@ -168,13 +126,16 @@ export async function registerDeposit(
   function check(): Promise<string> {
     return swapDeadlineFor(swap, derived.address, { config, jwt: deps.oneClickJwt, fetchFn, now });
   }
-  const existing = await getWatched(kv, derived.address);
-  if (existing) return addSwap(kv, existing, derived.address, swap, check, now);
-
   const deadline = await check();
 
-  const active = await countWatches(kv);
-  if (active >= (deps.maxWatches ?? MAX_ACTIVE_WATCHES)) {
+  const address = derived.address;
+  if (await registrationExists(kv, address, swap)) throw new AlreadyRegistered(address);
+  const load = (await getLoad(kv)) ?? { addresses: [], full: [] };
+  if (load.full.includes(address)) throw new SwapLimitReached(address);
+  if (
+    !load.addresses.includes(address) &&
+    load.addresses.length >= (deps.maxWatches ?? MAX_ACTIVE_WATCHES)
+  ) {
     throw new ApiError(
       'Background tracking is at capacity. The open tab still registers the payout.',
       503,
@@ -182,6 +143,13 @@ export async function registerDeposit(
     );
   }
 
-  await putWatched(kv, derived.address, newRecord(deposit, reclaim, swap, deadline, now), now);
-  return { address: derived.address, deadline };
+  await signalRegistration(kv, now);
+  await putRegistration(kv, address, {
+    depositScript: deposit,
+    reclaimScript: reclaim,
+    swapDepositAddress: swap,
+    deadline,
+    createdAt: now.toISOString(),
+  });
+  return { address, deadline };
 }
