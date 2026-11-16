@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { css, cx } from 'satway-styles/css';
 import { styled } from 'satway-styles/jsx';
-import { actions, button, details, field, notice, sheet } from 'satway-styles/recipes';
+import { actions, button, details, notice, sheet } from 'satway-styles/recipes';
 
 import {
   type AttemptOutcome,
@@ -14,7 +14,6 @@ import {
   evmTransactionState,
   isEvmChain,
   needsChainCheck,
-  nextRefundField,
   promptWaitMs,
   quoteExpired,
   recordTx,
@@ -24,7 +23,6 @@ import {
   sendPanel,
   settleFromProvider,
   swapTargetOf,
-  walletAddressFor,
   walletCovers,
   watchSendRecords,
 } from '@satway/chains';
@@ -41,9 +39,7 @@ import {
   type WalletAccount,
   checkProgress,
   downloadReceipt,
-  latestRequests,
   paymentView,
-  rememberReceipt,
   sendAmountOf,
   sendAmountText,
   sendRecords,
@@ -59,19 +55,12 @@ import {
 import {
   type RegistrationState,
   closingNote,
-  firstRegistration,
   keepRegistering,
   registeredThisSession,
 } from './background-registration.js';
-import {
-  type Prepared,
-  claimDepositIndex,
-  depositOrigins,
-  liveQuoteWorse,
-  prepareDeposit,
-} from './flow.js';
-
-const fields = field();
+import { DepositForm } from './deposit-form.js';
+import { depositOrigins } from './flow.js';
+import { useDepositForm } from './use-deposit-form.js';
 
 const afterActions = cx(notice(), css({ marginTop: 'space.08' }));
 const afterActionsWarn = cx(notice({ tone: 'warn' }), css({ marginTop: 'space.08' }));
@@ -101,13 +90,6 @@ const refundNote = cx(
   css({ marginBlock: 'space.02', '.satway-actions + &': { marginTop: 'space.08' } })
 );
 
-export const NEW_ADDRESS_NOTE =
-  'A new Bitcoin deposit address for this deposit only, built from your keys when you continue.';
-
-function sats(n: number): string {
-  return `${n.toLocaleString('en-US')} sats`;
-}
-
 export function Deposit(props: {
   backend: Backend;
   account: WalletAccount | null;
@@ -118,159 +100,30 @@ export function Deposit(props: {
 }) {
   const { backend, account, source, active, onActive, onRoute } = props;
   const [tokens, setTokens] = useState<OneClickToken[]>([]);
-  const [assetId, setAssetId] = useState('');
-  const [amount, setAmount] = useState('');
-  const [refundTo, setRefundTo] = useState('');
-  const [preview, setPreview] = useState<Prepared | null>(null);
-  const [repriced, setRepriced] = useState<Prepared | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [previews] = useState(latestRequests);
-  const [tokensFailed, setTokensFailed] = useState(false);
+  const [tokenError, setTokenError] = useState<string | null>(null);
   const [tokenAttempt, setTokenAttempt] = useState(0);
-  const activating = useRef(false);
-  const cancelPreviews = useRef(() => {
-    previews.cancel();
-    setPreview(null);
-    setRepriced(null);
-    if (!activating.current) setBusy(false);
-  });
 
   useEffect(() => {
     async function loadTokens() {
       try {
         const all = await backend.tokens();
-        const usable = depositOrigins(all, config.btcAssetId);
-        setTokens(usable);
-        setAssetId(current => current || usable[0]?.assetId || '');
-        setTokensFailed(false);
+        setTokens(depositOrigins(all, config.btcAssetId));
+        setTokenError(null);
       } catch (err) {
-        setError(`Could not load the asset list: ${errorMessage(err)}`);
-        setTokensFailed(true);
+        setTokenError(`Could not load the asset list: ${errorMessage(err)}`);
       }
     }
     void loadTokens();
   }, [backend, tokenAttempt]);
 
-  const token = useMemo(() => tokens.find(t => t.assetId === assetId), [tokens, assetId]);
-  const covered = walletCovers(source, token);
-
-  useEffect(() => {
-    if (!source) return;
-    setAssetId(current => {
-      const now = tokens.find(t => t.assetId === current);
-      if (now && walletCovers(source, now)) return current;
-      return tokens.find(t => walletCovers(source, t))?.assetId ?? current;
-    });
-  }, [source, tokens]);
-
-  const refundRef = useRef(refundTo);
-  refundRef.current = refundTo;
-  const autofilledRefund = useRef<string | null>(null);
-  const walletRefund = walletAddressFor(source, token?.blockchain);
-
-  useEffect(() => {
-    const next = nextRefundField(
-      { value: refundRef.current, autofilled: autofilledRefund.current },
-      walletRefund
-    );
-    autofilledRefund.current = next.autofilled;
-    if (next.value !== refundRef.current) {
-      setRefundTo(next.value);
-      cancelPreviews.current();
-    }
-  }, [walletRefund]);
+  const form = useDepositForm({ backend, account, source, tokens, onActive });
+  const token = form.token;
 
   useEffect(() => {
     if (active) return;
     onRoute({ origin: token ? `${token.symbol} on ${token.blockchain}` : null, deposit: null });
   }, [onRoute, token, active]);
   useEffect(() => () => onRoute(null), [onRoute]);
-
-  async function run(dry: boolean) {
-    if (!token || !account) return;
-    const shown = preview;
-    const isLatest = previews.begin();
-    setBusy(true);
-    setError(null);
-    setRepriced(null);
-    let prepared: Prepared;
-    try {
-      prepared = await prepareDeposit(
-        config,
-        backend,
-        { ...account, token, amount, refundTo },
-        { dry }
-      );
-    } catch (err) {
-      if (isLatest()) {
-        setError(errorMessage(err) ?? null);
-        setBusy(false);
-      }
-      return;
-    }
-    if (!isLatest()) return;
-    if (dry) {
-      setPreview(prepared);
-      setBusy(false);
-      return;
-    }
-    if (shown && liveQuoteWorse(shown, prepared, config.slippageBps)) {
-      setRepriced(prepared);
-      setBusy(false);
-      return;
-    }
-    await activateNow(prepared);
-  }
-
-  async function activateNow(prepared: Prepared) {
-    activating.current = true;
-    try {
-      await activate(prepared);
-    } catch (err) {
-      setError(errorMessage(err) ?? null);
-    } finally {
-      activating.current = false;
-      setBusy(false);
-    }
-  }
-
-  async function activate(prepared: Prepared) {
-    if (!claimDepositIndex(prepared.receipt)) {
-      throw new Error(
-        'Another deposit in this browser already uses this Bitcoin deposit address. Get a new quote to continue.'
-      );
-    }
-    const remembered = rememberReceipt(prepared.receipt);
-    downloadReceipt(prepared.receipt);
-    const swapAddress = prepared.receipt.quoteResponse.quote.depositAddress;
-    const { depositScript, reclaimScript } = prepared.receipt;
-    const first = swapAddress
-      ? await firstRegistration(() => backend.register(depositScript, reclaimScript, swapAddress))
-      : undefined;
-    setRepriced(null);
-    setPreview(prepared);
-    onActive({
-      receipt: prepared.receipt,
-      receiptUnsaved: !remembered,
-      ...(first === undefined ? {} : { firstRegistration: first }),
-    });
-  }
-
-  async function acceptRepriced(live: Prepared) {
-    if (quoteExpired(live.receipt.quoteResponse.quote.deadline, new Date())) {
-      setRepriced(null);
-      setError('That new quote has expired. Get a new quote to continue.');
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    await activateNow(live);
-  }
-
-  function inputsChanged() {
-    cancelPreviews.current();
-  }
 
   if (active) {
     return (
@@ -282,10 +135,7 @@ export function Deposit(props: {
         source={source}
         token={tokens.find(t => t.assetId === active.receipt.origin.assetId)}
         onRoute={onRoute}
-        onDone={() => {
-          onActive(null);
-          setPreview(null);
-        }}
+        onDone={() => onActive(null)}
       />
     );
   }
@@ -293,174 +143,16 @@ export function Deposit(props: {
   if (!account) return null;
 
   return (
-    <section className={sheet()}>
-      <styled.h2 textStyle="heading" marginBottom="space.06">
-        Deposit to sBTC from another chain
-      </styled.h2>
-      <p className={notice()}>
-        sBTC will be minted to <code>{account.stacksAddress}</code>.
-      </p>
-
-      <label className={fields.label}>
-        You send
-        <select
-          className={fields.control}
-          value={assetId}
-          onChange={e => {
-            setAssetId(e.target.value);
-            inputsChanged();
-          }}
-        >
-          {tokens.map(t => (
-            <option key={t.assetId} value={t.assetId}>
-              {t.symbol} on {t.blockchain}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <label className={fields.label}>
-        Amount{token ? ` (${token.symbol})` : ''}
-        <input
-          className={fields.control}
-          inputMode="decimal"
-          value={amount}
-          placeholder="25"
-          onChange={e => {
-            setAmount(e.target.value);
-            inputsChanged();
-          }}
-        />
-      </label>
-
-      <label className={fields.label}>
-        Refund address{token ? ` on ${token.blockchain}` : ''}
-        <input
-          className={fields.control}
-          value={refundTo}
-          placeholder="Your own address on the chain you are sending from"
-          spellCheck={false}
-          onChange={e => {
-            autofilledRefund.current = null;
-            setRefundTo(e.target.value);
-            inputsChanged();
-          }}
-        />
-        <small className={fields.hint}>
-          {covered
-            ? 'Filled in from your connected wallet. If the swap cannot complete, your funds go back here.'
-            : 'If the swap cannot complete, your funds go back here. Use a wallet you control, not an exchange deposit address.'}
-        </small>
-      </label>
-
-      {error && (
-        <p className={notice({ tone: 'error' })} role="alert">
-          {error}
-        </p>
-      )}
-      {tokensFailed && (
-        <div className={actions()}>
-          <button
-            className={button()}
-            onClick={() => {
-              setError(null);
-              setTokensFailed(false);
-              setTokenAttempt(attempt => attempt + 1);
-            }}
-          >
-            Load the asset list again
-          </button>
-        </div>
-      )}
-
-      {preview && (
-        <dl className={details()}>
-          <dt>You receive about</dt>
-          <dd>{sats(preview.expectedSats)} as sBTC</dd>
-          <dt>At least</dt>
-          <dd>{sats(preview.minimumSats)}, before the signers’ Bitcoin fee</dd>
-          <dt>Swap provider fees</dt>
-          <dd>
-            {preview.providerFeeBps / 100}%
-            {preview.withdrawFeeSats !== null
-              ? ` plus ${sats(preview.withdrawFeeSats)} Bitcoin withdrawal`
-              : ''}
-          </dd>
-          <dt>Our fee</dt>
-          <dd>{config.appFeeBps / 100}%</dd>
-          <dt>Typical time</dt>
-          <dd>40 to 60 minutes; sBTC waits for Bitcoin confirmations</dd>
-          <dt>Pays out to</dt>
-          <dd>{NEW_ADDRESS_NOTE}</dd>
-          {preview.warnings.map(w => (
-            <dd key={w} className={notice({ tone: 'warn' })}>
-              {w}
-            </dd>
-          ))}
-        </dl>
-      )}
-
-      {repriced && preview ? (
-        <>
-          <p className={notice({ tone: 'warn' })} role="status">
-            The price moved since your quote. You would now receive about{' '}
-            {sats(repriced.expectedSats)} as sBTC, at least {sats(repriced.minimumSats)}, instead of
-            about {sats(preview.expectedSats)}, at least {sats(preview.minimumSats)}. Continue only
-            if the new amounts are acceptable.
-          </p>
-          <div className={actions()}>
-            <button
-              className={button({ variant: 'primary' })}
-              aria-disabled={busy}
-              onClick={() => {
-                if (!busy) void acceptRepriced(repriced);
-              }}
-            >
-              Continue with the new amounts
-            </button>
-            <button className={button()} disabled={busy} onClick={() => setRepriced(null)}>
-              Cancel
-            </button>
-          </div>
-          <p className={afterActions}>
-            Nothing has been saved or registered yet, and nothing is sent until you pay. If you
-            cancel, the new quote is not used and simply expires.
-          </p>
-        </>
-      ) : (
-        <>
-          <div className={actions()}>
-            <button
-              className={button()}
-              disabled={!token || !amount || !refundTo}
-              aria-disabled={busy}
-              onClick={() => {
-                if (!busy) void run(true);
-              }}
-            >
-              {busy ? 'Working…' : 'Get quote'}
-            </button>
-            {preview && (
-              <button
-                className={button({ variant: 'primary' })}
-                aria-disabled={busy}
-                onClick={() => {
-                  if (!busy) void run(false);
-                }}
-              >
-                Continue
-              </button>
-            )}
-          </div>
-          {preview && (
-            <p className={afterActions}>
-              Continuing downloads a receipt file. Keep it: it is what lets you recover your BTC if
-              anything goes wrong.
-            </p>
-          )}
-        </>
-      )}
-    </section>
+    <DepositForm
+      account={account}
+      tokens={tokens}
+      tokenError={tokenError}
+      onRetryTokens={() => {
+        setTokenError(null);
+        setTokenAttempt(attempt => attempt + 1);
+      }}
+      form={form}
+    />
   );
 }
 
