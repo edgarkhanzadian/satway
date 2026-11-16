@@ -421,8 +421,9 @@ What `POST /deposits` accepts, and what it costs:
   and one KV write. Invalid requests make no outbound call; 503 means an
   upstream (Hiro, 1Click) could not be read. When 1Click does not know the swap
   the 400 body carries `code: "unknown-swap"`; the web app retries that one
-  answer three times over about ten seconds in the background, since 1Click's
-  status can lag behind the quote it just created.
+  answer five times in the background, after 5 s, 20 s, 1 min, 2 min and 4 min
+  (about seven and a half minutes in all), since 1Click's status can lag behind
+  the quote it just created.
 - The scheduled run visits at most `MAX_ADDRESSES_PER_RUN` watches, in a window
   that rotates over the sorted keys each run, and makes at most
   `RUN_SUBREQUEST_BUDGET` fetch and KV calls (under the Workers Free limit of
