@@ -597,10 +597,9 @@ describe('following a dropped withdrawal transaction', () => {
   });
 
   it('never matches a call with no arguments, even to the same function', async () => {
-    const empty = (tx: StacksTransaction): StacksTransaction => ({
-      ...tx,
-      contract_call: { ...defined(tx.contract_call), function_args: [] },
-    });
+    function empty(tx: StacksTransaction): StacksTransaction {
+      return { ...tx, contract_call: { ...defined(tx.contract_call), function_args: [] } };
+    }
     const routes = routesFor(w);
     const pendingTxid = 'cd'.repeat(32);
     const pending = {
