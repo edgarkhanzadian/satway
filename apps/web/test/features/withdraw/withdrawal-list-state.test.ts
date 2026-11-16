@@ -270,7 +270,7 @@ describe('loading a receipt file', () => {
     }
     expect(read(JSON.stringify({ kind: 'satway-deposit' })).state.file).toEqual({
       kind: 'failed',
-      message: 'This is not a withdrawal receipt. Deposit receipts are loaded on the Recover tab.',
+      message: 'This is not a withdrawal receipt. Deposit receipts are loaded on the Deposit tab.',
     });
     const wrongDecimals = { ...SENT, destination: { ...SENT.destination, decimals: 18 } };
     expect(read(JSON.stringify(wrongDecimals)).state.file).toEqual({
