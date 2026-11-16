@@ -143,6 +143,51 @@ test.describe('X4. resuming a withdrawal, and slow or lost answers', () => {
     await new WithdrawPage(app).getQuote();
   });
 
+  test('editing the amount while a quote is in flight frees the button, and the late answer is ignored', async ({
+    app,
+    world,
+    wallets,
+  }) => {
+    const withdraw = await openWithdraw(app, world, wallets, { destinationWallet: 'evm' });
+    const held = world.hold({ service: 'oneclick', path: /^\/v0\/quote$/ });
+    await withdraw.fill({ amount: '50000' });
+    await app.page.getByRole('button', { name: 'Get quote' }).click();
+    await expect(app.page.getByRole('button', { name: 'Working…' })).toBeVisible();
+    await withdraw.fill({ amount: '60000' });
+    const getQuote = app.page.getByRole('button', { name: 'Get quote' });
+    await expect(getQuote).toBeVisible();
+    await expect(getQuote).not.toHaveAttribute('aria-disabled', 'true');
+    held.release();
+    await expect.poll(() => world.oneClick.quotes.length).toBe(1);
+    await expect(app.definition('You receive about')).toHaveCount(0);
+    await expect(getQuote).not.toHaveAttribute('aria-disabled', 'true');
+    await withdraw.getQuote();
+    expect(world.oneClick.quotes.at(-1)?.request.amount).toBe('60000');
+  });
+
+  test('editing the amount while the live quote is in flight frees the form', async ({
+    app,
+    world,
+    wallets,
+  }) => {
+    const withdraw = await openWithdraw(app, world, wallets, { destinationWallet: 'evm' });
+    await quoteWithdrawal(withdraw);
+    const held = world.hold({ service: 'oneclick', path: /^\/v0\/quote$/ });
+    await app.page.getByRole('button', { name: 'Continue' }).click();
+    await expect(app.page.getByRole('button', { name: 'Working…' })).toBeVisible();
+    await withdraw.fill({ amount: '60000' });
+    const getQuote = app.page.getByRole('button', { name: 'Get quote' });
+    await expect(getQuote).toHaveText('Get quote');
+    await expect(getQuote).not.toHaveAttribute('aria-disabled', 'true');
+    held.release();
+    await expect.poll(() => world.oneClick.quotes.length).toBe(2);
+    await expect(
+      app.page.getByRole('heading', { name: 'Check the live quote before you sign' })
+    ).toHaveCount(0);
+    await withdraw.getQuote();
+    await withdraw.continueToConfirm();
+  });
+
   test('a hanging Stacks API read while tracking: the page says so and recovers', async ({
     app,
     world,

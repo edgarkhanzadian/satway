@@ -239,6 +239,7 @@ function WithdrawForm(
     if (next.value !== recipientRef.current) {
       setRecipient(next.value);
       requests.cancel();
+      setBusy(false);
       setPreview(null);
       setLive(null);
     }
@@ -257,6 +258,7 @@ function WithdrawForm(
 
   function inputsChanged() {
     requests.cancel();
+    setBusy(false);
     setPreview(null);
     setLive(null);
     setError(null);
