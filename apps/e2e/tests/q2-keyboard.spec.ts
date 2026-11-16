@@ -97,6 +97,7 @@ test.describe('Q2. keyboard only', () => {
       `${EVM_WALLET_NAME}For Ethereum, Base, Arbitrum and other EVM chains`,
       'Connect Stacks wallet',
       'Follow',
+      'Check again',
       'Remove',
       'Withdrawal receipt (JSON)',
     ]);

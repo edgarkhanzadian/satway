@@ -51,6 +51,7 @@ export interface ListState {
 
 export type ListEvent =
   | { type: 'shown' }
+  | { type: 'check-requested'; id: string }
   | { type: 'entry-checked'; request: number; id: string; snapshot: Snapshot }
   | { type: 'entry-check-failed'; request: number; id: string; message: string }
   | { type: 'details-opened'; id: string; reclaim: boolean }
@@ -77,7 +78,7 @@ export function initialList(
   for (const receipt of entries) {
     const id = receiptId(receipt);
     const known = remembered[id];
-    statuses[id] = known?.terminal === true ? { kind: 'known', known } : { kind: 'queued' };
+    statuses[id] = known?.final === true ? { kind: 'known', known } : { kind: 'queued' };
   }
   return {
     last: 0,
@@ -90,11 +91,27 @@ export function initialList(
   };
 }
 
+const FINAL_WHEN_ALONE: ReadonlySet<Stage> = new Set<Stage>(['refunded', 'swap-failed']);
+
+export function isFinalSnapshot(snapshot: Snapshot): boolean {
+  const { stage, terminal } = snapshot.progress;
+  if (!terminal) return false;
+  if (stage === 'done') return true;
+  if (stage === 'reclaimed') return snapshot.payouts.length <= 1;
+  return (
+    FINAL_WHEN_ALONE.has(stage) &&
+    snapshot.payouts.length === 0 &&
+    snapshot.outputs.length === 0 &&
+    snapshot.belowMinimum.length === 0
+  );
+}
+
 export function knownStageOf(snapshot: Snapshot, receipt: Receipt): KnownStage {
   const stage: Stage = snapshot.progress.stage;
   return {
     stage,
     terminal: snapshot.progress.terminal,
+    final: isFinalSnapshot(snapshot),
     reclaimable: reclaimOffered(reclaimPlanOf(snapshot, receipt.reclaimLockBlocks), stage),
   };
 }
@@ -256,6 +273,11 @@ export function reduceList(state: ListState, event: ListEvent): Step {
     case 'shown':
       if (state.started) return transition(state);
       return startQueued({ ...state, started: true });
+    case 'check-requested': {
+      const status = state.statuses[event.id];
+      if (status?.kind !== 'known' && status?.kind !== 'failed') return transition(state);
+      return startQueued(withStatus(state, event.id, { kind: 'queued' }));
+    }
     case 'entry-checked':
       return entryChecked(state, event.request, event.id, event.snapshot);
     case 'entry-check-failed':
@@ -341,6 +363,7 @@ export interface EntryView {
   summary: string;
   follow: boolean;
   reclaim: boolean;
+  check: boolean;
 }
 
 function summaryOf(status: EntryStatus | undefined): string {
@@ -369,6 +392,7 @@ export function entryViews(state: ListState): EntryView[] {
       summary: summaryOf(status),
       follow: known?.terminal !== true,
       reclaim: known?.reclaimable === true,
+      check: status?.kind === 'known' || status?.kind === 'failed',
     };
   });
 }

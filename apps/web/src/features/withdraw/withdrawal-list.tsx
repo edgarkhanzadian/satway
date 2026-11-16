@@ -159,7 +159,7 @@ export function WithdrawalList(props: {
                         aria-describedby={labelId}
                         onClick={() => dispatch({ type: 'check-requested', id })}
                       >
-                        Check
+                        {status.checkLabel}
                       </button>
                     )}
                     <button

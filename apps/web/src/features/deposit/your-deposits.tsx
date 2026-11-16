@@ -193,6 +193,14 @@ export function YourDeposits(props: {
                 >
                   Show details
                 </button>
+                {view.check && (
+                  <button
+                    className={button()}
+                    onClick={() => dispatch({ type: 'check-requested', id: view.id })}
+                  >
+                    Check again
+                  </button>
+                )}
               </div>
               {details('saved', view.id)}
             </li>

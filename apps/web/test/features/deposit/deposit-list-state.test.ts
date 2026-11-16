@@ -9,6 +9,7 @@ import {
   NOT_A_RECEIPT,
   entryViews,
   initialList,
+  isFinalSnapshot,
   listMachine,
   pendingList,
   reduceList,
@@ -73,7 +74,7 @@ describe('Your deposits: checking remembered entries', () => {
     expect(first.effects).toContainEqual({
       type: 'remember-stage',
       id: ID0,
-      known: { stage: 'swapping', terminal: false, reclaimable: false },
+      known: { stage: 'swapping', terminal: false, final: false, reclaimable: false },
     });
     const failed = reduceList(first.state, {
       type: 'entry-check-failed',
@@ -99,8 +100,8 @@ describe('Your deposits: checking remembered entries', () => {
 
   it('does not check again an entry whose remembered stage is final, and offers no Follow for it', () => {
     const remembered = {
-      [ID0]: { stage: 'done' as const, terminal: true, reclaimable: false },
-      [ID1]: { stage: 'minting' as const, terminal: false, reclaimable: false },
+      [ID0]: { stage: 'done' as const, terminal: true, final: true, reclaimable: false },
+      [ID1]: { stage: 'minting' as const, terminal: false, final: false, reclaimable: false },
     };
     const shown = reduceList(initialList(ENTRIES.slice(0, 2), remembered), { type: 'shown' });
     expect(checks(shown.effects)).toEqual([ID1]);
@@ -110,10 +111,70 @@ describe('Your deposits: checking remembered entries', () => {
 
   it('offers Reclaim for an entry whose last check found it reclaimable', () => {
     const remembered = {
-      [ID0]: { stage: 'reclaimable' as const, terminal: true, reclaimable: true },
+      [ID0]: { stage: 'reclaimable' as const, terminal: true, final: true, reclaimable: true },
     };
     const [view] = entryViews(initialList(ENTRIES.slice(0, 1), remembered));
     expect(view).toMatchObject({ summary: 'Reclaimable now', reclaim: true, follow: false });
+  });
+
+  it('checks again a remembered rejected or reclaimable entry, as either can still change', () => {
+    const remembered = {
+      [ID0]: { stage: 'mint-failed' as const, terminal: true, final: false, reclaimable: false },
+      [ID1]: { stage: 'reclaimable' as const, terminal: true, final: false, reclaimable: true },
+    };
+    const shown = reduceList(initialList(ENTRIES.slice(0, 2), remembered), { type: 'shown' });
+    expect(checks(shown.effects)).toEqual([ID0, ID1]);
+  });
+
+  it('drops a remembered stage written before finality was recorded, so it is checked', () => {
+    const legacy = { [ID0]: { stage: 'mint-failed', terminal: true, reclaimable: false } };
+    const store = {
+      getItem: () => JSON.stringify(legacy),
+      setItem: () => undefined,
+    };
+    expect(loadStages(store)).toEqual({});
+  });
+
+  it('treats only minted, reclaimed, and refunded or failed with nothing at the address as final', () => {
+    const paid = { txid: 'ab'.repeat(32), vout: 0, amountSats: 50_000, confirmed: true };
+    const payout = { ...paid, blockHeight: 2 };
+    const outputs = [{ ...payout, blockTime: null, spent: false }];
+    function at(swap: 'SUCCESS' | 'REFUNDED', observed: PayoutObservation[]): Snapshot {
+      return {
+        ...snapshot('REFUNDED'),
+        swap,
+        progress: deriveProgress({
+          swap,
+          payouts: observed,
+          tipHeight: 12,
+          reclaimLockBlocks: 950,
+        }),
+        payouts: observed.length === 0 ? [] : outputs,
+        outputs: observed.length === 0 ? [] : outputs,
+      };
+    }
+    const rejected = at('SUCCESS', [{ payout, mint: 'failed' }]);
+    expect(rejected.progress).toMatchObject({ stage: 'mint-failed', terminal: true });
+    expect(isFinalSnapshot(rejected)).toBe(false);
+    expect(isFinalSnapshot(at('SUCCESS', [{ payout, mint: 'confirmed' }]))).toBe(true);
+    expect(
+      isFinalSnapshot(at('SUCCESS', [{ payout, spent: true, spender: 'reclaim', mint: null }]))
+    ).toBe(true);
+    expect(isFinalSnapshot(at('REFUNDED', []))).toBe(true);
+    expect(isFinalSnapshot(at('REFUNDED', [{ payout, mint: 'failed' }]))).toBe(false);
+    expect(isFinalSnapshot(snapshot('PROCESSING'))).toBe(false);
+  });
+
+  it('Check again re-checks a settled entry, final or not', () => {
+    const remembered = {
+      [ID0]: { stage: 'done' as const, terminal: true, final: true, reclaimable: false },
+    };
+    const state = initialList(ENTRIES.slice(0, 1), remembered);
+    expect(entryViews(state)[0]?.check).toBe(true);
+    const again = reduceList(state, { type: 'check-requested', id: ID0 });
+    expect(checks(again.effects)).toEqual([ID0]);
+    expect(entryViews(again.state)[0]?.check).toBe(false);
+    expect(reduceList(again.state, { type: 'check-requested', id: ID0 }).effects).toEqual([]);
   });
 
   it('ignores a reply for a check it no longer waits on', () => {
@@ -142,7 +203,7 @@ describe('Your deposits: checking remembered entries', () => {
       listMachine.durable?.({
         type: 'remember-stage',
         id: 'x',
-        known: { stage: 'done', terminal: true, reclaimable: false },
+        known: { stage: 'done', terminal: true, final: true, reclaimable: false },
       })
     ).toBe(true);
   });
@@ -167,7 +228,7 @@ describe('Your deposits: opening a receipt', () => {
       {
         type: 'remember-stage',
         id: ID3,
-        known: { stage: 'refunded', terminal: true, reclaimable: false },
+        known: { stage: 'refunded', terminal: true, final: true, reclaimable: false },
       },
     ]);
   });
@@ -234,13 +295,13 @@ describe('remembered stages', () => {
 
   it('round-trips and skips anything unreadable', () => {
     const store = memory();
-    rememberStage('a', { stage: 'done', terminal: true, reclaimable: false }, store);
+    rememberStage('a', { stage: 'done', terminal: true, final: true, reclaimable: false }, store);
     store.map.set(
       DEPOSIT_STAGES_KEY,
       JSON.stringify({ ...JSON.parse(store.map.get(DEPOSIT_STAGES_KEY) ?? '{}'), b: { x: 1 } })
     );
     expect(loadStages(store)).toEqual({
-      a: { stage: 'done', terminal: true, reclaimable: false },
+      a: { stage: 'done', terminal: true, final: true, reclaimable: false },
     });
     store.map.set(DEPOSIT_STAGES_KEY, 'not json');
     expect(loadStages(store)).toEqual({});

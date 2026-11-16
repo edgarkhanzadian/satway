@@ -13,6 +13,7 @@ import {
   entryStatusView,
   fileDecision,
   initialList,
+  isFinal,
   pendingListRequests,
   reduceList,
 } from '../../../src/features/withdraw/withdrawal-list-state.js';
@@ -141,6 +142,42 @@ describe('the remembered withdrawals', () => {
     });
     const retried = run(failed.state, { type: 'check-requested', id: SENT.depositAddress });
     expect(checks(retried.effects)).toHaveLength(1);
+  });
+
+  it('treats only delivered, refunded, rejected and failed requests as final', () => {
+    const stages = [
+      'awaiting-stacks-tx',
+      'tx-replaced',
+      'request-failed',
+      'awaiting-signers',
+      'rejected',
+      'payout-broadcast',
+      'payout-confirmed',
+      'swapping',
+      'done',
+      'refunded',
+      'swap-failed',
+      'needs-support',
+      'deadline-passed',
+      'rechecking',
+      'mismatch',
+    ] satisfies KnownStatus['stage'][];
+    const final = stages.filter(stage => isFinal({ stage, message: 'x', warning: false }));
+    expect(final).toEqual(['request-failed', 'rejected', 'done', 'refunded']);
+  });
+
+  it('offers Check again on every checked entry, final or not, and re-checks it', () => {
+    const opened = run(initialList([SENT], { [SENT.depositAddress]: DONE }), { type: 'opened' });
+    expect(entryStatusView(opened.state.statuses[SENT.depositAddress])).toMatchObject({
+      checkable: true,
+      checkLabel: 'Check again',
+    });
+    const again = run(opened.state, { type: 'check-requested', id: SENT.depositAddress });
+    expect(checks(again.effects)).toHaveLength(1);
+    expect(entryStatusView(again.state.statuses[SENT.depositAddress])).toMatchObject({
+      checkable: false,
+    });
+    expect(entryStatusView({ kind: 'idle', known: null }).checkLabel).toBe('Check');
   });
 
   it('labels an entry by amount, destination and start, and flags a draft', () => {

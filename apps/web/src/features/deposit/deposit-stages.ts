@@ -5,6 +5,7 @@ export const DEPOSIT_STAGES_KEY = 'satway.deposit-stages.v1';
 export interface KnownStage {
   stage: Stage;
   terminal: boolean;
+  final: boolean;
   reclaimable: boolean;
 }
 
@@ -26,6 +27,7 @@ const STAGES = [
 const knownSchema: z.ZodType<KnownStage> = z.object({
   stage: z.enum(STAGES),
   terminal: z.boolean(),
+  final: z.boolean(),
   reclaimable: z.boolean(),
 });
 

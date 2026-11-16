@@ -318,8 +318,10 @@ export function reduceList(state: ListState, event: ListEvent): Step {
       return state.opened ? transition(state) : pump({ ...state, opened: true });
     case 'check-requested': {
       const status = state.statuses[event.id];
-      if (status?.kind !== 'idle' && status?.kind !== 'failed') return transition(state);
-      const queued: EntryStatus = { kind: 'queued', known: status.known };
+      if (status?.kind !== 'idle' && status?.kind !== 'failed' && status?.kind !== 'checked') {
+        return transition(state);
+      }
+      const queued: EntryStatus = { kind: 'queued', known: knownOf(status) };
       return pump({ ...state, statuses: { ...state.statuses, [event.id]: queued } });
     }
     case 'checked':
@@ -387,24 +389,27 @@ export interface EntryStatusView {
   message: string;
   warning: boolean;
   checkable: boolean;
+  checkLabel: 'Check' | 'Check again';
   final: boolean;
 }
 
 export function entryStatusView(status: EntryStatus | undefined): EntryStatusView {
   const known = knownOf(status);
   const final = isFinal(known);
+  const checkLabel = known === null && status?.kind !== 'failed' ? 'Check' : 'Check again';
   switch (status?.kind) {
     case undefined:
     case 'queued':
     case 'checking':
-      return { message: 'Checking…', warning: false, checkable: false, final };
+      return { message: 'Checking…', warning: false, checkable: false, checkLabel, final };
     case 'unsent':
-      return { message: NEVER_SENT, warning: true, checkable: false, final };
+      return { message: NEVER_SENT, warning: true, checkable: false, checkLabel, final };
     case 'checked':
       return {
         message: status.status.message,
         warning: status.status.warning,
-        checkable: false,
+        checkable: true,
+        checkLabel,
         final,
       };
     case 'idle':
@@ -412,6 +417,7 @@ export function entryStatusView(status: EntryStatus | undefined): EntryStatusVie
         message: status.known === null ? 'Not checked yet.' : `Last seen: ${status.known.message}`,
         warning: status.known?.warning ?? false,
         checkable: true,
+        checkLabel,
         final,
       };
     case 'failed':
@@ -419,6 +425,7 @@ export function entryStatusView(status: EntryStatus | undefined): EntryStatusVie
         message: `Could not check it right now: ${status.message}`,
         warning: false,
         checkable: true,
+        checkLabel,
         final,
       };
     default:
