@@ -249,7 +249,9 @@ describe('describeQuoteChange', () => {
 describe('signingRefusal', () => {
   const preparedAt = '2026-11-14T17:00:00.000Z';
   const quoteDeadline = '2026-11-16T17:00:00.000Z';
-  const at = (iso: string) => signingRefusal(W, { preparedAt, quoteDeadline }, new Date(iso));
+  function at(iso: string): string | null {
+    return signingRefusal(W, { preparedAt, quoteDeadline }, new Date(iso));
+  }
 
   it('names its thresholds in the withdrawal config', () => {
     expect(W.maxSigningQuoteAgeMinutes).toBe(15);
