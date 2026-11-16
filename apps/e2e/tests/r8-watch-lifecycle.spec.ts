@@ -36,7 +36,7 @@ async function anotherUsersWatch(world: World, api: ApiWorker) {
     })
   );
   expect(response.status).toBe(201);
-  return deposit;
+  return { ...deposit, swapDepositAddress: swap.depositAddress };
 }
 
 function sortedReport(report: unknown): unknown {
@@ -129,7 +129,8 @@ test.describe('R8. the Worker watch for a deposit whose tab was closed', () => {
     const other = await anotherUsersWatch(world, api);
     world.reportDeposit({ depositAddress: ownSwap });
     const payout = world.completeSwap({ depositAddress: ownSwap });
-    const theirs = world.payTo(other.address, 50_000);
+    world.reportDeposit({ depositAddress: other.swapDepositAddress });
+    const theirs = world.completeSwap({ depositAddress: other.swapDepositAddress });
     world.addFault({
       service: 'emily',
       method: 'POST',
