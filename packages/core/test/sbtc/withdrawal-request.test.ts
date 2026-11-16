@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import {
   MAINNET_WITHDRAWAL_FLOW_CONFIG as C,
   type WithdrawalContractConfig,
+  assertWithdrawalInvariants,
   buildWithdrawalContractCall,
   decodeWithdrawalArguments,
   decodeWithdrawalRecipient,
@@ -174,6 +175,23 @@ describe('buildWithdrawalContractCall refusals', () => {
     [{ recipientAddress: 'bc1q4tqyf2eqk5jhuw3tpame0gdec53k7ft5khap87' }, /checksum/],
   ])('refuses %j', (patch, message) => {
     expect(() => buildWithdrawalContractCall(C, { ...good, ...patch })).toThrow(message);
+  });
+});
+
+describe('assertWithdrawalInvariants', () => {
+  it('accepts any whole amount above dust with a positive fee cap, whatever the policy', () => {
+    expect(() => assertWithdrawalInvariants(547, 1)).not.toThrow();
+    expect(() => assertWithdrawalInvariants(9_999, 200_000)).not.toThrow();
+  });
+
+  it.each([
+    [546, 3_000, /above 546/],
+    [20_000.5, 3_000, /above 546/],
+    [20_000, 0, /positive whole number/],
+    [20_000, 1.5, /positive whole number/],
+    [Number.MAX_SAFE_INTEGER, 3_000, /too large/],
+  ])('refuses %d sats with a %d sat fee cap', (amount, fee, message) => {
+    expect(() => assertWithdrawalInvariants(amount, fee)).toThrow(message);
   });
 });
 

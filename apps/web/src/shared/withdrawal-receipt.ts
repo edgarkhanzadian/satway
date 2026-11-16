@@ -5,7 +5,7 @@ import {
   type WithdrawalFlowConfig,
   type WithdrawalReceipt,
   assertMainnetSender,
-  assertWithdrawalAmounts,
+  assertWithdrawalInvariants,
   encodeWithdrawalRecipient,
   errorMessage,
   normalizeStacksTxid,
@@ -68,10 +68,7 @@ const receiptSchema: z.ZodType<WithdrawalReceiptFile> = z.looseObject({
   quoteDeadline: text,
 });
 
-export type WithdrawalReceiptConfig = Pick<
-  WithdrawalFlowConfig,
-  'btcAssetId' | 'minWithdrawalSats' | 'minFeeCapSats' | 'maxFeeCapSats'
->;
+export type WithdrawalReceiptConfig = Pick<WithdrawalFlowConfig, 'btcAssetId'>;
 
 function hasKind(value: object, kind: string): boolean {
   return 'kind' in value && value.kind === kind;
@@ -107,7 +104,7 @@ function sameInstant(a: string, b: string): boolean {
 
 function addsUp(config: WithdrawalReceiptConfig, r: WithdrawalReceiptFile): void {
   assertMainnetSender(r.sender);
-  assertWithdrawalAmounts(config, r.amountSats, r.maxFeeSats);
+  assertWithdrawalInvariants(r.amountSats, r.maxFeeSats);
   const encoded = encodeWithdrawalRecipient(r.depositAddress);
   check(encoded.address === r.depositAddress, 'its swap address is not in standard form');
   check(sameRecipient(encoded.recipient, r.recipient), 'its recipient is not its swap address');

@@ -84,12 +84,30 @@ describe('verifyWithdrawalReceipt', () => {
     ['another amount', { amountSats: 20_000 }],
     ['another refund address', { refundTo: 'bc1qm4uwx6n3usjgul5madqtr4khhlglr7xnagmvxf' }],
     ['another deadline', { quoteDeadline: '2026-11-17T16:41:38.000Z' }],
-    ['a fee cap outside the limits', { maxFeeSats: 100 }],
+    ['an amount at the dust limit', { amountSats: 546 }],
+    ['an amount whose fee cap overflows', { amountSats: Number.MAX_SAFE_INTEGER }],
     ['a creation time that is not a date', { createdAt: 'yesterday' }],
   ])('refuses %s', (_label, over) => {
     expect(() => verifyWithdrawalReceipt(W, json(receiptFixture(over)))).toThrow(
       /Receipt does not add up/
     );
+  });
+
+  it('checks invariants, not the policy limits in force today', () => {
+    const stricter = {
+      ...W,
+      minWithdrawalSats: 50_000,
+      minFeeCapSats: 5_000,
+      maxFeeCapSats: 4_000,
+    };
+    const receipt = receiptFixture();
+    expect(verifyWithdrawalReceipt(stricter, json(receipt))).toEqual(receipt);
+    expect(verifyWithdrawalReceipt(W, json(receiptFixture({ maxFeeSats: 100 }))).maxFeeSats).toBe(
+      100
+    );
+    expect(() =>
+      verifyWithdrawalReceipt(stricter, json(receiptFixture({ amountSats: 546 })))
+    ).toThrow(/above 546/);
   });
 
   it('refuses a destination that the quote does not pay', () => {
@@ -234,6 +252,20 @@ describe('withdrawal storage', () => {
     store.setItem(WITHDRAWALS_KEY, '{broken');
     expect(rememberWithdrawal(W, receiptFixture())).toBe(false);
     expect(store.getItem(WITHDRAWALS_KEY)).toBe('{broken');
+  });
+
+  it('keeps in-flight withdrawals after the policy limits change', () => {
+    stubStorage();
+    rememberWithdrawal(W, receiptFixture());
+    setActiveWithdrawal(receiptFixture());
+    const stricter = {
+      ...W,
+      minWithdrawalSats: 50_000,
+      minFeeCapSats: 5_000,
+      maxFeeCapSats: 4_000,
+    };
+    expect(loadWithdrawals(stricter)).toEqual([receiptFixture()]);
+    expect(activeWithdrawal(stricter)).toEqual(receiptFixture());
   });
 
   it('forgets only drafts', () => {

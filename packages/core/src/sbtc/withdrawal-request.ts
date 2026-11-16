@@ -95,15 +95,27 @@ export function sbtcAssetIdentifier(
   return `${config.sbtcContract}.${config.tokenContractName}::${config.tokenAssetName}`;
 }
 
+export function assertWithdrawalInvariants(amountSats: number, maxFeeSats: number): void {
+  if (!Number.isSafeInteger(amountSats) || amountSats <= SBTC_WITHDRAWAL_DUST_LIMIT_SATS) {
+    throw new Error(
+      `The withdrawal amount must be a whole number of sats above ${SBTC_WITHDRAWAL_DUST_LIMIT_SATS}`
+    );
+  }
+  if (!Number.isSafeInteger(maxFeeSats) || maxFeeSats <= 0) {
+    throw new Error('The withdrawal fee cap must be a positive whole number of sats');
+  }
+  if (!Number.isSafeInteger(amountSats + maxFeeSats)) {
+    throw new Error('The withdrawal amount plus its fee cap is too large');
+  }
+}
+
 export function assertWithdrawalAmounts(
   config: Pick<WithdrawalContractConfig, 'minWithdrawalSats' | 'minFeeCapSats' | 'maxFeeCapSats'>,
   amountSats: number,
   maxFeeSats: number
 ): void {
   if (!Number.isSafeInteger(amountSats) || amountSats <= SBTC_WITHDRAWAL_DUST_LIMIT_SATS) {
-    throw new Error(
-      `The withdrawal amount must be a whole number of sats above ${SBTC_WITHDRAWAL_DUST_LIMIT_SATS}`
-    );
+    assertWithdrawalInvariants(amountSats, maxFeeSats);
   }
   if (amountSats < config.minWithdrawalSats) {
     throw new Error(`The withdrawal amount must be at least ${config.minWithdrawalSats} sats`);
@@ -117,9 +129,7 @@ export function assertWithdrawalAmounts(
       `The withdrawal fee cap must be a whole number of sats between ${config.minFeeCapSats} and ${config.maxFeeCapSats}`
     );
   }
-  if (!Number.isSafeInteger(amountSats + maxFeeSats)) {
-    throw new Error('The withdrawal amount plus its fee cap is too large');
-  }
+  assertWithdrawalInvariants(amountSats, maxFeeSats);
 }
 
 function recipientCV(recipient: WithdrawalRecipient) {
