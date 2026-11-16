@@ -13,8 +13,12 @@ export const EVM_CHAIN_IDS: Readonly<Record<string, number>> = Object.freeze({
   scroll: 534352,
 });
 
+export function evmChainIdOf(blockchain: string): number | undefined {
+  return Object.hasOwn(EVM_CHAIN_IDS, blockchain) ? EVM_CHAIN_IDS[blockchain] : undefined;
+}
+
 export function isEvmChain(blockchain: string): boolean {
-  return blockchain in EVM_CHAIN_IDS;
+  return evmChainIdOf(blockchain) !== undefined;
 }
 
 export const SUPPORTED_ORIGIN_CHAINS: ReadonlySet<string> = new Set(Object.keys(EVM_CHAIN_IDS));
@@ -45,5 +49,6 @@ export const EVM_NATIVE_ASSETS: Readonly<Record<string, readonly string[]>> = Ob
 export const EVM_NATIVE_DECIMALS = 18;
 
 export function isKnownEvmNative(token: Pick<OneClickToken, 'assetId' | 'blockchain'>): boolean {
+  if (!Object.hasOwn(EVM_NATIVE_ASSETS, token.blockchain)) return false;
   return (EVM_NATIVE_ASSETS[token.blockchain] ?? []).includes(token.assetId);
 }

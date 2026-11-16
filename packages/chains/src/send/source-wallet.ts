@@ -1,8 +1,8 @@
 import { type OneClickToken, errorMessage, parseWith, z } from '@satway/core';
 
 import {
-  EVM_CHAIN_IDS,
   EVM_NATIVE_DECIMALS,
+  evmChainIdOf,
   isEvmChain,
   isKnownEvmNative,
 } from '../metadata/index.js';
@@ -129,7 +129,7 @@ export function buildEvmTransfer(input: {
   amount: string;
 }): EvmTransfer {
   const { token } = input;
-  const chainId = EVM_CHAIN_IDS[token.blockchain];
+  const chainId = evmChainIdOf(token.blockchain);
   if (chainId === undefined)
     throw new Error(`Sending from a wallet is not supported on ${token.blockchain}`);
   if (!EVM_ADDRESS.test(input.from)) throw new Error('Sender is not an EVM address');
