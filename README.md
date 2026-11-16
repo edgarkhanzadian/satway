@@ -88,6 +88,21 @@ The rules, in plain words:
 
 - Every address money is sent to is built locally from the user's own keys and
   can be recomputed by anyone from the receipt file.
+- Every deposit has its own Bitcoin deposit address. The standard sBTC deposit
+  script is kept; only its signer fee cap differs: `baseSignerFeeSats + n`
+  (80,000 + n sats) for a deposit index `0 ≤ n < DEPOSIT_INDEX_LIMIT` (65,536).
+  Before the live quote the page collects the indices already used (Emily's
+  lookup by reclaim key, plus receipts and deposits started in this browser),
+  draws `n` at random from the `DEPOSIT_INDEX_WINDOW` (256) values above the
+  lowest unused one, and requires the address to have no transactions on
+  mempool.space, drawing again (up to 8 times) if it has. If Emily cannot be
+  reached it goes on with what the browser knows; the emptiness check is the
+  guarantee. A preview (dry) quote uses index 0 and reserves nothing. Any
+  output of at least the sBTC minimum at the address is this deposit's payout;
+  each is registered and listed, and the deposit is done only when every one
+  is minted. Without a receipt, the Recover tab finds a wallet's deposits
+  through Emily, or by checking its addresses for index 0, 1, 2… until 256 in a
+  row are unused.
 - The Bitcoin chain decides whether BTC arrived. The swap provider's status and
   our own backend records are never the source of truth.
 - The signer key is not trusted from one API: Hiro and a second Stacks node
