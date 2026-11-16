@@ -104,6 +104,16 @@ export function parseRawTransaction(rawHex: string): Omit<ChainTx, 'height' | 's
   return { txid: tx.id, hex: rawHex.toLowerCase(), inputs, outputs, vsize: tx.vsize };
 }
 
+function addressStats(script: string, txs: readonly ChainTx[]) {
+  return {
+    funded_txo_count: txs.reduce(
+      (n, tx) => n + tx.outputs.filter(o => o.script === script).length,
+      0
+    ),
+    tx_count: txs.length,
+  };
+}
+
 export class BitcoinChain {
   readonly blocks: Block[] = [];
   private readonly txs = new Map<string, ChainTx>();
@@ -311,12 +321,36 @@ export class BitcoinChain {
     return notFound('Not found');
   }
 
+  readonly addressLookups: string[] = [];
+
+  beforeAddressStats: ((address: string) => void) | null = null;
+
   private serveAddress(address: string, tail: string[], kind: string | undefined): Reply {
     let script: string;
     try {
       script = scriptOfAddress(address);
     } catch {
       return text(`Invalid Bitcoin address`, 400);
+    }
+    if (kind === undefined && tail.length === 0) {
+      this.addressLookups.push(address);
+      const hook = this.beforeAddressStats;
+      if (hook) {
+        this.beforeAddressStats = null;
+        hook(address);
+      }
+      const involved = [...this.txs.values()].filter(tx => this.touches(tx, script));
+      return json({
+        address,
+        chain_stats: addressStats(
+          script,
+          involved.filter(t => t.height !== null)
+        ),
+        mempool_stats: addressStats(
+          script,
+          involved.filter(t => t.height === null)
+        ),
+      });
     }
     if (kind === 'utxo' && tail.length === 0) {
       const utxos = [...this.txs.values()]

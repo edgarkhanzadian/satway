@@ -40,6 +40,7 @@ export const EMILY_LIMITS = {
 };
 
 const HEX = /^(?:[0-9a-f]{2})+$/;
+const RECLAIM_PAGE_SIZE = 2;
 const TXID = /^[0-9a-f]{64}$/;
 
 export class Emily {
@@ -98,12 +99,43 @@ export class Emily {
         .slice(0, Number.isSafeInteger(pageSize) && pageSize > 0 ? pageSize : 20);
       return json({ deposits: list.map(d => this.summary(d)), nextToken: null });
     }
+    if (parts.length === 3 && parts[1] === 'reclaim-pubkeys' && parts[2] !== undefined) {
+      return this.byReclaimKeys(parts[2], query);
+    }
     const [, txid, voutText] = parts;
     if (parts.length === 3 && txid && voutText !== undefined) {
       const deposit = this.get(txid, Number(voutText));
       return deposit ? json(deposit) : notFound('Deposit not found');
     }
     return notFound('Not found');
+  }
+
+  readonly reclaimKeyLookups: string[] = [];
+
+  private byReclaimKeys(keys: string, query: URLSearchParams): Reply {
+    this.reclaimKeyLookups.push(keys);
+    const wanted = keys.split('-');
+    if (wanted.length === 0 || !wanted.every(k => /^[0-9a-f]{64}$/.test(k)))
+      return json(
+        { message: 'HTTP request failed with status code 400 Bad Request: invalid pubkey' },
+        400
+      );
+    const pageSize = Number(query.get('pageSize') ?? RECLAIM_PAGE_SIZE);
+    const size = Number.isSafeInteger(pageSize) && pageSize > 0 ? pageSize : RECLAIM_PAGE_SIZE;
+    const token = query.get('nextToken');
+    const start = token === null ? 0 : Number(token.replace(/^offset-/, ''));
+    const list = [...this.deposits.values()]
+      .filter(d => {
+        const key = parseReclaimScript(d.reclaimScript)?.key;
+        return key !== undefined && wanted.length === 1 && key === wanted[0];
+      })
+      .sort((a, b) => b.lastUpdateHeight - a.lastUpdateHeight);
+    const page = list.slice(start, start + size);
+    const next = start + size < list.length ? `offset-${start + size}` : null;
+    return json({
+      nextToken: next,
+      deposits: page.map(d => ({ version: 'v1', ...this.summary(d), maxFee: d.parameters.maxFee })),
+    });
   }
 
   private summary(d: EmilyDeposit): Record<string, unknown> {

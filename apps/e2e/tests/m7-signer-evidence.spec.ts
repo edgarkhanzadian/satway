@@ -1,3 +1,4 @@
+import { NEW_ADDRESS_NOTE } from '../src/app/satway-app.js';
 import { expect, test } from '../src/fixtures.js';
 import { FAILED_TO_LOAD } from '../src/scenario/journeys.js';
 import { text } from '../src/world/http.js';
@@ -124,7 +125,7 @@ test.describe('M7. the signer key cannot be verified, so no deposit address is b
     await app.connectEvmWallet();
     await app.fillDeposit({ amount: '100' });
     await app.getQuote();
-    await expect(app.definition('Pays out to')).toHaveText(/^bc1p[0-9a-z]{58}$/);
+    await expect(app.definition('Pays out to')).toHaveText(NEW_ADDRESS_NOTE);
     expect(world.requestsTo('alex', { caller: 'page' }).map(e => e.status)).toEqual([200]);
     expect(world.evidence).toHaveLength(2);
     for (const { deposit, sweep } of world.evidence) {

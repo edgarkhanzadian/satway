@@ -22,6 +22,9 @@ export const PROGRESS = {
   done: 'sBTC has been minted to your Stacks address.',
 } as const;
 
+export const NEW_ADDRESS_NOTE =
+  'A new Bitcoin deposit address for this deposit only, built from your keys when you continue.';
+
 export const STOP_NAMES = [
   'Your chain',
   'Swap to BTC',

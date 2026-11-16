@@ -28,7 +28,10 @@ export function expectReceiptMatchesWorld(
   expect(receipt.reclaimPublicKey).toBe(account.paymentKey.xOnly);
   expect(receipt.reclaimKeyAddress).toBe(account.paymentAddress);
   expect(receipt.signersPublicKey).toBe(world.signer.xOnly);
-  expect(receipt.maxSignerFeeSats).toBe(80_000);
+  expect(Number.isSafeInteger(receipt.depositIndex)).toBe(true);
+  expect(receipt.depositIndex).toBeGreaterThanOrEqual(0);
+  expect(receipt.depositIndex).toBeLessThan(65_536);
+  expect(receipt.maxSignerFeeSats).toBe(80_000 + receipt.depositIndex);
   expect(receipt.reclaimLockBlocks).toBe(950);
   expect(receipt.refundTo).toBe(input.refundTo);
   expect(receipt.origin.assetId).toBe(input.assetId);
@@ -39,7 +42,7 @@ export function expectReceiptMatchesWorld(
 
   const deposit = parseDepositScript(receipt.depositScript);
   expect(deposit).toEqual({
-    maxFee: 80_000,
+    maxFee: receipt.maxSignerFeeSats,
     recipient: stacksPrincipalHex(account.stacksAddress),
     signerKey: world.signer.xOnly,
   });
@@ -55,11 +58,7 @@ export function expectReceiptMatchesWorld(
   expect(swap.recipient).toBe(receipt.depositAddress);
 }
 
-export function expectWatchRegistered(
-  api: ApiWorker,
-  receipt: ReceiptFile,
-  options: { registrations?: number } = {}
-): void {
+export function expectWatchRegistered(api: ApiWorker, receipt: ReceiptFile): void {
   const posts = api.requests.filter(r => r.method === 'POST' && r.path === '/deposits');
   const last = posts.at(-1);
   if (!last?.requestBody) throw new Error('POST /deposits never reached the Worker');
@@ -72,11 +71,9 @@ export function expectWatchRegistered(
   const watch = api.watch(receipt.depositAddress);
   expect(field(watch, 'depositScript')).toBe(receipt.depositScript);
   expect(field(watch, 'reclaimScript')).toBe(receipt.reclaimScript);
-  const registrations = field(watch, 'registrations');
-  expect(Array.isArray(registrations)).toBe(true);
-  const list: unknown[] = Array.isArray(registrations) ? registrations : [];
-  expect(list).toHaveLength(options.registrations ?? 1);
-  expect(field(list.at(-1), 'swapDepositAddress')).toBe(receipt.quoteResponse.quote.depositAddress);
+  expect(field(watch, 'swapDepositAddress')).toBe(receipt.quoteResponse.quote.depositAddress);
+  expect(typeof field(watch, 'deadline')).toBe('string');
+  expect(Array.isArray(field(watch, 'registered'))).toBe(true);
 }
 
 export interface NotifierRun {

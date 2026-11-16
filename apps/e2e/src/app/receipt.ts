@@ -1,12 +1,14 @@
 import { z } from '@satway/core';
 
 export const receiptFileSchema = z.looseObject({
-  version: z.literal(1),
+  version: z.literal(2),
+  scriptVersion: z.literal('v1'),
   createdAt: z.string(),
   stacksAddress: z.string(),
   reclaimPublicKey: z.string(),
   reclaimKeyAddress: z.string(),
   signersPublicKey: z.string(),
+  depositIndex: z.number(),
   maxSignerFeeSats: z.number(),
   reclaimLockBlocks: z.number(),
   depositAddress: z.string(),
@@ -32,8 +34,6 @@ export const receiptFileSchema = z.looseObject({
     timestamp: z.string(),
     correlationId: z.string(),
   }),
-  priorOutpoints: z.array(z.string()).optional(),
-  priorTruncated: z.boolean().optional(),
 });
 
 export type ReceiptFile = z.infer<typeof receiptFileSchema>;

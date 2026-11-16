@@ -1,4 +1,4 @@
-import { PROGRESS } from '../src/app/satway-app.js';
+import { NEW_ADDRESS_NOTE, PROGRESS } from '../src/app/satway-app.js';
 import { expect, test } from '../src/fixtures.js';
 import {
   erc20TransferData,
@@ -40,7 +40,8 @@ test.describe('A. USDC on Base from the injected EVM wallet', () => {
     expect(fileName).toBe(
       `satway-deposit-${receipt.createdAt.slice(0, 10)}-${receipt.depositAddress.slice(-8)}.json`
     );
-    expect(preview.paysOutTo).toBe(receipt.depositAddress);
+    expect(preview.paysOutTo).toBe(NEW_ADDRESS_NOTE);
+    expect(receipt.quoteResponse.quoteRequest.recipient).toBe(receipt.depositAddress);
     expectReceiptMatchesWorld(receipt, {
       world,
       wallets,

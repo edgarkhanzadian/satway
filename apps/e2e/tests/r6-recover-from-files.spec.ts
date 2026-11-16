@@ -99,12 +99,21 @@ test.describe('R6. recovering a deposit from a receipt file', () => {
       },
       {
         file: await variant(
-          'version-2.json',
+          'version-3.json',
           edited(started.receipt, r => {
-            r.version = 2;
+            r.version = 3;
           })
         ),
         message: 'Unsupported receipt version',
+      },
+      {
+        file: await variant(
+          'other-index.json',
+          edited(started.receipt, r => {
+            r.depositIndex = Number(r.depositIndex) + 1;
+          })
+        ),
+        message: 'Receipt does not add up: its address does not match its parameters',
       },
       {
         file: await variant(

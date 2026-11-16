@@ -235,7 +235,8 @@ test.describe('S5. interruptions', () => {
       await app.resumeSaved(savedLabel(target));
       await app.waitForProgress(progress);
       const body = await app.page.locator('main').innerText();
-      expect(other.receipt.depositAddress).toBe(target.receipt.depositAddress);
+      expect(other.receipt.depositAddress).not.toBe(target.receipt.depositAddress);
+      expect(body).not.toContain(other.receipt.depositAddress);
       expect(body).not.toContain(other.receipt.quoteResponse.quote.depositAddress);
       expect(body).not.toContain(
         `${other.receipt.quoteResponse.quote.amountInFormatted} USDC on base`

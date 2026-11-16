@@ -52,9 +52,7 @@ function sortedReport(report: unknown): unknown {
 }
 
 function deadlineOf(api: ApiWorker, address: string): number {
-  const registrations = field(api.watch(address), 'registrations');
-  const first: unknown = Array.isArray(registrations) ? registrations[0] : undefined;
-  return Date.parse(String(field(first, 'deadline')));
+  return Date.parse(String(field(api.watch(address), 'deadline')));
 }
 
 test.describe('R8. the Worker watch for a deposit whose tab was closed', () => {
@@ -65,15 +63,15 @@ test.describe('R8. the Worker watch for a deposit whose tab was closed', () => {
   }) => {
     const { receipt } = await startDeposit(app);
     await app.page.close();
-    const watch = api.watch(receipt.depositAddress);
-    expect(field(watch, 'registrations')).toEqual([
-      expect.objectContaining({
-        swapDepositAddress: receipt.quoteResponse.quote.depositAddress,
-        deadline: receipt.quoteResponse.quoteRequest.deadline,
-        priorOutpoints: [],
-      }),
-    ]);
-    expect(api.kv.metadataOf(`dep:${receipt.depositAddress}`)).toEqual({ registrations: 1 });
+    expect(api.watch(receipt.depositAddress)).toEqual({
+      depositScript: receipt.depositScript,
+      reclaimScript: receipt.reclaimScript,
+      createdAt: expect.any(String),
+      swapDepositAddress: receipt.quoteResponse.quote.depositAddress,
+      deadline: receipt.quoteResponse.quoteRequest.deadline,
+      registered: [],
+    });
+    expect(api.kv.metadataOf(`dep:${receipt.depositAddress}`)).toBeUndefined();
     for (let run = 0; run < 2; run++) {
       expect(await api.runScheduled()).toEqual(notifierRun({ watched: 1 }));
       expect(api.watched()).toEqual([receipt.depositAddress]);
@@ -203,9 +201,9 @@ test.describe('R8. the Worker watch for a deposit whose tab was closed', () => {
     await app.fastForward(2_000);
     await expect.poll(() => api.depositPosts().map(r => r.status)).toEqual([400, 201]);
     expect(api.watched()).toEqual([receipt.depositAddress]);
-    expect(field(api.watch(receipt.depositAddress), 'registrations')).toEqual([
-      expect.objectContaining({ swapDepositAddress: receipt.quoteResponse.quote.depositAddress }),
-    ]);
+    expect(field(api.watch(receipt.depositAddress), 'swapDepositAddress')).toBe(
+      receipt.quoteResponse.quote.depositAddress
+    );
     await app.fastForward(30_000);
     expect(api.depositPosts()).toHaveLength(2);
 
