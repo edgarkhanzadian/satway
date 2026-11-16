@@ -62,10 +62,13 @@ const coreNetworkExports = [
   'assertActiveWithdrawalContract',
   'callReadOnly',
   'checkPastedWithdrawalTransaction',
+  'chooseDepositIndex',
   'fetchActiveWithdrawalContract',
   'fetchAddressHistory',
+  'fetchAddressTxCount',
   'fetchAndVerifyWithdrawalPayout',
   'fetchDeposit',
+  'fetchDepositsByReclaimKey',
   'fetchDepositOutputs',
   'fetchEmilyWithdrawal',
   'fetchFeeEstimate',
@@ -86,6 +89,7 @@ const coreNetworkExports = [
   'fetchWithdrawalLimits',
   'fetchWithdrawalStatus',
   'fetchWithdrawalSweepData',
+  'findDepositsByReclaimKey',
   'findReplacementTransaction',
   'followWithdrawalStatus',
   'isOutputSpent',
@@ -95,7 +99,7 @@ const coreNetworkExports = [
   'prepareWithdrawal',
   'previewWithdrawal',
   'registerOutputs',
-  'snapshotOutpoints',
+  'scanDepositAddresses',
 ];
 
 const stylesOnlyInWeb = {

@@ -257,24 +257,6 @@ export async function fetchDepositOutputs(
   return { outputs, truncated: history.truncated, foreignTxids, requests };
 }
 
-export interface OutpointSnapshot {
-  outpoints: string[];
-  truncated: boolean;
-}
-
-export async function snapshotOutpoints(
-  btcApiUrl: string,
-  depositAddress: string,
-  depositScriptPubKey: string,
-  options: { maxPages?: number; fetchFn?: FetchLike } = {}
-): Promise<OutpointSnapshot> {
-  const res = await fetchDepositOutputs(btcApiUrl, depositAddress, depositScriptPubKey, {
-    maxPages: options.maxPages,
-    fetchFn: options.fetchFn,
-  });
-  return { outpoints: res.outputs.map(outpointOf).sort(), truncated: res.truncated };
-}
-
 const addressStatsSchema = z.looseObject({
   chain_stats: z.looseObject({ tx_count: z.number() }),
   mempool_stats: z.looseObject({ tx_count: z.number() }),

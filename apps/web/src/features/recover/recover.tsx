@@ -1,31 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
-import { css, cx } from 'satway-styles/css';
 import { styled } from 'satway-styles/jsx';
 import { actions, button, details, field, notice, sheet } from 'satway-styles/recipes';
 
-import {
-  type AddressOutput,
-  type ReclaimFeeQuote,
-  type ReclaimOption,
-  type ReclaimPlan,
-  broadcastTransaction,
-  buildReclaimPsbt,
-  MAINNET_CONFIG as config,
-  errorMessage,
-  fetchReclaimFeeRate,
-  finalizeSignedReclaim,
-  findReclaimOption,
-  isOutputSpent,
-  outpointOf,
-  planReclaim,
-} from '@satway/core';
+import { type FoundDeposit, MAINNET_CONFIG as config, errorMessage } from '@satway/core';
 
 import {
   type Backend,
   type Receipt,
   type Snapshot,
-  StacksWalletDeclinedError,
   type WalletAccount,
   checkProgress,
   latestRequests,
@@ -42,33 +25,10 @@ import {
   RefundNote,
   type RouteUpdate,
 } from '../../ui/index.js';
+import { FindDeposits, FoundDepositView } from './find-deposits.js';
+import { ReclaimForm } from './reclaim-form.js';
 
 const fields = field();
-
-const afterActions = cx(notice(), css({ marginTop: 'space.08' }));
-
-interface ReclaimReview {
-  output: AddressOutput;
-  to: string;
-  psbtHex: string;
-  fee: ReclaimFeeQuote;
-}
-
-function sats(n: number): string {
-  return `${n.toLocaleString('en-US')} sats`;
-}
-
-function chooseOption(plan: ReclaimPlan, chosen: string | null): ReclaimOption | null {
-  if (chosen !== null) return findReclaimOption(plan, chosen);
-  return plan.target?.ready ? plan.target : null;
-}
-
-function optionLabel(o: ReclaimOption): string {
-  const amount = `${o.output.amountSats.toLocaleString('en-US')} sats, ${outpointOf(o.output)}`;
-  if (o.ready) return `${amount}: reclaimable now`;
-  if (o.blocksUntilReclaim === null) return `${amount}: waiting for its first confirmation`;
-  return `${amount}: reclaimable in about ${o.blocksUntilReclaim} blocks`;
-}
 
 export function Recover(props: {
   backend: Backend;
@@ -80,26 +40,16 @@ export function Recover(props: {
   const { onRoute } = props;
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
-  const [to, setTo] = useState('');
-  const [chosen, setChosen] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const [found, setFound] = useState<FoundDeposit | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [review, setReview] = useState<ReclaimReview | null>(null);
-  const reviewRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (review !== null) reviewRef.current?.focus();
-  }, [review]);
   const [requests] = useState(latestRequests);
   const saved = loadReceipts();
 
   function clearSelection() {
     setError(null);
-    setMessage(null);
     setReceipt(null);
     setSnapshot(null);
-    setChosen(null);
-    setReview(null);
+    setFound(null);
   }
 
   async function open(value: unknown, isLatest: () => boolean = requests.begin()) {
@@ -130,89 +80,19 @@ export function Recover(props: {
     if (isLatest()) await open(value, isLatest);
   }
 
-  const plan = snapshot
-    ? planReclaim({
-        outputs: snapshot.outputs,
-        selected: snapshot.payouts.find(o => !o.spent) ?? null,
-        tipHeight: snapshot.tipHeight,
-        reclaimLockBlocks: receipt?.reclaimLockBlocks ?? config.reclaimLockBlocks,
-      })
-    : null;
-  const choice = plan ? chooseOption(plan, chosen) : null;
-
-  async function prepareReclaim() {
-    if (!receipt || !choice || !props.account) return;
-    const output = choice.output;
+  async function refresh(current: Receipt) {
     const isCurrent = requests.current();
-    const destination = to.trim();
-    setBusy(true);
-    setError(null);
-    setReview(null);
-    try {
-      if (props.account.reclaimPublicKey !== receipt.reclaimPublicKey) {
-        throw new Error(
-          `Connect the wallet that owns ${receipt.reclaimKeyAddress}; this deposit can only be reclaimed with its key.`
-        );
-      }
-      if (!choice.ready) {
-        throw new Error('The timelock on that output has not passed yet.');
-      }
-      if (await isOutputSpent(config.btcApiUrl, output.txid, output.vout)) {
-        throw new Error(
-          'That output has already been spent. Choose another one, if any is listed.'
-        );
-      }
-      const feeRate = await fetchReclaimFeeRate(config.btcApiUrl);
-      const { psbtHex, fee } = buildReclaimPsbt({
-        payout: output,
-        bitcoinAddress: destination,
-        stacksAddress: receipt.stacksAddress,
-        reclaimPublicKey: receipt.reclaimPublicKey,
-        signersPublicKey: receipt.signersPublicKey,
-        maxSignerFeeSats: receipt.maxSignerFeeSats,
-        reclaimLockBlocks: receipt.reclaimLockBlocks,
-        feeRate,
-      });
-      if (!isCurrent()) return;
-      setReview({ output, to: destination, psbtHex, fee });
-    } catch (err) {
-      setError(errorMessage(err) ?? null);
-    } finally {
-      setBusy(false);
-    }
+    const next = await checkProgress(config, props.backend, current);
+    if (isCurrent()) setSnapshot(next);
   }
 
-  async function signAndSend(current: ReclaimReview) {
-    if (!receipt || !props.account) return;
-    const isCurrent = requests.current();
-    setBusy(true);
-    setError(null);
-    try {
-      const signed = await props.signReclaim(current.psbtHex, props.account);
-      const { txHex, txid } = finalizeSignedReclaim(signed);
-      await broadcastTransaction(config.btcApiUrl, txHex);
-      setReview(null);
-      setMessage(`Reclaim sent for ${outpointOf(current.output)}. Transaction ${txid}.`);
-      if (!isCurrent()) return;
-      setChosen(null);
-      const next = await checkProgress(config, props.backend, receipt);
-      if (isCurrent()) setSnapshot(next);
-    } catch (err) {
-      setError(
-        err instanceof StacksWalletDeclinedError
-          ? 'You declined the request in your wallet, so nothing was signed or broadcast.'
-          : (errorMessage(err) ?? null)
-      );
-    } finally {
-      setBusy(false);
-    }
+  function pickFound(deposit: FoundDeposit) {
+    requests.begin();
+    clearSelection();
+    setFound(deposit);
   }
 
   const progress = snapshot?.progress;
-  const reclaimable =
-    plan !== null && (progress?.stage === 'reclaimable' || plan.options.some(o => o.ready));
-  const nothingLeft = plan !== null && plan.nothingLeft && (snapshot?.outputs.length ?? 0) > 0;
-
   const stage = progress?.stage ?? null;
   useEffect(() => {
     onRoute(
@@ -272,11 +152,6 @@ export function Recover(props: {
           {error}
         </p>
       )}
-      {message && (
-        <p className={notice({ tone: 'status' })} role="status">
-          {message}
-        </p>
-      )}
 
       {receipt && (
         <>
@@ -317,114 +192,28 @@ export function Recover(props: {
             </div>
           )}
 
-          {nothingLeft && (
-            <p className={notice()}>
-              No unspent BTC is left at this deposit address. There is nothing left to reclaim.
-            </p>
-          )}
-
-          {reclaimable && plan && (
-            <>
-              <label className={fields.label}>
-                Output to reclaim
-                <select
-                  className={fields.control}
-                  value={choice ? outpointOf(choice.output) : ''}
-                  onChange={e => {
-                    setChosen(e.target.value);
-                    setReview(null);
-                  }}
-                >
-                  <option value="" disabled>
-                    Choose an output
-                  </option>
-                  {plan.options.map(o => (
-                    <option
-                      key={outpointOf(o.output)}
-                      value={outpointOf(o.output)}
-                      disabled={!o.ready}
-                    >
-                      {optionLabel(o)}
-                    </option>
-                  ))}
-                </select>
-                <small className={fields.hint}>
-                  Each output is reclaimed in its own transaction. Outputs too small to cover the
-                  network fee are refused.
-                </small>
-              </label>
-              <label className={fields.label}>
-                Send the reclaimed BTC to
-                <input
-                  className={fields.control}
-                  value={to}
-                  spellCheck={false}
-                  placeholder="A Bitcoin address you control"
-                  onChange={e => {
-                    setTo(e.target.value);
-                    setReview(null);
-                  }}
-                />
-              </label>
-              {review === null ? (
-                <div className={actions()}>
-                  <button
-                    className={button({ variant: 'primary' })}
-                    disabled={busy || !to || !props.account || !choice?.ready}
-                    onClick={() => void prepareReclaim()}
-                  >
-                    {busy ? 'Working…' : 'Reclaim BTC'}
-                  </button>
-                </div>
-              ) : (
-                <div ref={reviewRef} tabIndex={-1}>
-                  <dl className={details()} aria-label="Reclaim to sign">
-                    <dt>Output</dt>
-                    <dd>
-                      {sats(review.output.amountSats)}, <code>{outpointOf(review.output)}</code>
-                    </dd>
-                    <dt>Network fee rate</dt>
-                    <dd>{review.fee.feeRate.toLocaleString('en-US')} sat/vB</dd>
-                    <dt>Network fee</dt>
-                    <dd>{sats(review.fee.feeSats)}</dd>
-                    <dt>You receive</dt>
-                    <dd>
-                      {sats(review.fee.netSats)} at <code>{review.to}</code>
-                    </dd>
-                  </dl>
-                  <p className={notice()}>
-                    Your wallet asks you to sign this transaction next. Nothing is sent until you
-                    approve it there.
-                  </p>
-                  <div className={actions()}>
-                    <button
-                      className={button({ variant: 'primary' })}
-                      aria-disabled={busy}
-                      onClick={() => {
-                        if (!busy) void signAndSend(review);
-                      }}
-                    >
-                      {busy ? 'Confirm in your wallet…' : 'Sign and send'}
-                    </button>
-                    <button
-                      className={button()}
-                      disabled={busy}
-                      onClick={() => {
-                        setReview(null);
-                        setError(null);
-                      }}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              )}
-              {!props.account && (
-                <p className={afterActions}>Connect the wallet that made the deposit to reclaim.</p>
-              )}
-            </>
+          {snapshot && (
+            <ReclaimForm
+              key={receiptId(receipt)}
+              deposit={receipt}
+              snapshot={snapshot}
+              stage={progress?.stage ?? null}
+              account={props.account}
+              signReclaim={props.signReclaim}
+              onSent={() => refresh(receipt)}
+            />
           )}
         </>
+      )}
+
+      <FindDeposits account={props.account} selected={found} onSelect={pickFound} />
+      {found && (
+        <FoundDepositView
+          key={found.depositAddress}
+          deposit={found}
+          account={props.account}
+          signReclaim={props.signReclaim}
+        />
       )}
     </section>
   );

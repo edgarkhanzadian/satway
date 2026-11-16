@@ -114,8 +114,21 @@ export async function checkProgress(
       err
     );
   }
-  const results = await registerOutputs(config, receipt, observed.toRegister, fetchFn);
-  const o = applyRegistrations(observed, results, receipt.reclaimLockBlocks);
+  return {
+    ...(await registerObserved(config, depositContextOf(receipt), observed, fetchFn)),
+    remaining: remainingDepositOf(status, receipt.quoteResponse.quote.amountIn),
+    refund: refundOf(status, receipt.origin.decimals),
+  };
+}
+
+async function registerObserved(
+  config: NetworkConfig,
+  ctx: WatchedDepositContext,
+  observed: DepositObservation,
+  fetchFn: FetchLike | undefined
+): Promise<Omit<Snapshot, 'remaining' | 'refund'>> {
+  const results = await registerOutputs(config, ctx, observed.toRegister, fetchFn);
+  const o = applyRegistrations(observed, results, ctx.reclaimLockBlocks);
   const registrationErrors = results.flatMap(r =>
     r.failure === null
       ? []
@@ -141,7 +154,18 @@ export async function checkProgress(
     truncated: o.truncated,
     registrationError: registrationErrors.map(e => e.message).join(' ') || null,
     registrationErrors,
-    remaining: remainingDepositOf(status, receipt.quoteResponse.quote.amountIn),
-    refund: refundOf(status, receipt.origin.decimals),
+  };
+}
+
+export async function checkFoundDeposit(
+  config: NetworkConfig,
+  ctx: WatchedDepositContext,
+  fetchFn?: FetchLike
+): Promise<Snapshot> {
+  const observed = await observeDeposit(config, ctx, null, { fetchFn });
+  return {
+    ...(await registerObserved(config, ctx, observed, fetchFn)),
+    remaining: null,
+    refund: null,
   };
 }
