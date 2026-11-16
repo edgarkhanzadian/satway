@@ -18,6 +18,7 @@ export default {
     const report = await runNotifier(env.DEPOSITS, config, undefined, {
       now,
       runIndex: Math.floor(now.getTime() / CRON_PERIOD_MS),
+      oneClickJwt: env.ONECLICK_JWT,
     });
     console.log(JSON.stringify(report));
   },

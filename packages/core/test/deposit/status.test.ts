@@ -22,6 +22,7 @@ function payout(over: Partial<Payout> = {}): Payout {
 }
 interface Single {
   swap?: Observations['swap'];
+  payoutTxids?: string[];
   payout?: Payout | null;
   mint?: MintStatus;
   payoutSpent?: boolean;
@@ -42,8 +43,9 @@ function obs(over: Single): Observations {
       ]
     : [];
   return {
-    swap: over.swap ?? null,
+    swap: over.swap === undefined ? 'SUCCESS' : over.swap,
     payouts: over.payouts ?? single,
+    ...(over.payoutTxids ? { payoutTxids: over.payoutTxids } : {}),
     tipHeight: over.tipHeight === undefined ? 1_002 : over.tipHeight,
     reclaimLockBlocks: LOCK,
   };
@@ -86,7 +88,7 @@ describe('deriveProgress: after the payout', () => {
   });
 
   it('trusts the chain over the swap provider', () => {
-    for (const swap of ['PROCESSING', 'FAILED', null] as const) {
+    for (const swap of ['PROCESSING', 'SUCCESS', null] as const) {
       const p = deriveProgress(obs({ swap, payout: payout() }));
       expect(p.stage).toBe('awaiting-notification');
       expect(p.needsNotification).toBe(true);
@@ -309,9 +311,10 @@ describe('deriveProgress: more than one payment to the deposit address', () => {
       expect(p.terminal).toBe(false);
       expect(p.message).toMatch(/^sBTC was minted for a payment/);
     }
-    expect(deriveProgress(obs({ swap: null, payout: first, mint: 'confirmed' })).stage).toBe(
-      'done'
-    );
+    expect(deriveProgress(obs({ swap: null, payout: first, mint: 'confirmed' }))).toMatchObject({
+      stage: 'done',
+      terminal: false,
+    });
   });
 
   it('every state has a message that says what happens next', () => {
@@ -336,5 +339,81 @@ describe('deriveProgress: more than one payment to the deposit address', () => {
             if (progress.stage === 'done') expect(mint).toBe('confirmed');
             if (progress.needsNotification) expect(p).not.toBeNull();
           }
+  });
+});
+
+describe('deriveProgress: a minted output that may not be this swap’s payout', () => {
+  const ours = payout({ txid: 'c3'.repeat(32), blockHeight: 1_001 });
+  const extra = payout({ txid: 'd4'.repeat(32), blockHeight: 1_000 });
+  const mintedExtra = { payout: extra, mint: 'confirmed' as const };
+
+  it('with the swap status unknown it says minted but keeps checking', () => {
+    const p = deriveProgress(obs({ swap: null, payouts: [mintedExtra] }));
+    expect(p).toMatchObject({ stage: 'done', terminal: false });
+    expect(p.message).toMatch(/could not be read, so this page keeps checking\.$/);
+  });
+
+  it('with the swap paid out but its named payout not seen yet it waits for that payout', () => {
+    const p = deriveProgress(
+      obs({ swap: 'SUCCESS', payoutTxids: [ours.txid], payouts: [mintedExtra] })
+    );
+    expect(p).toMatchObject({ stage: 'awaiting-payout', terminal: false });
+    expect(p.message).toMatch(/before your swap paid out/);
+  });
+
+  it('is done once the payout 1Click names is minted too', () => {
+    const p = deriveProgress(
+      obs({
+        swap: 'SUCCESS',
+        payoutTxids: [ours.txid],
+        payouts: [mintedExtra, { payout: ours, mint: 'confirmed' }],
+      })
+    );
+    expect(p).toMatchObject({ stage: 'done', terminal: true });
+  });
+
+  it('follows the named payout while it is still on its way', () => {
+    const p = deriveProgress(
+      obs({
+        swap: 'SUCCESS',
+        payoutTxids: [ours.txid],
+        payouts: [
+          mintedExtra,
+          { payout: { ...ours, confirmed: false, blockHeight: null }, mint: null },
+        ],
+      })
+    );
+    expect(p).toMatchObject({
+      stage: 'payout-unconfirmed',
+      terminal: false,
+      needsNotification: true,
+    });
+  });
+
+  it('with no payout named by 1Click any minted output counts', () => {
+    const p = deriveProgress(obs({ swap: 'SUCCESS', payouts: [mintedExtra] }));
+    expect(p).toMatchObject({ stage: 'done', terminal: true });
+  });
+
+  it.each([
+    ['REFUNDED', 'refunded'],
+    ['FAILED', 'swap-failed'],
+  ] as const)(
+    'a %s swap shows its outcome, not done, and still lists the minted output',
+    (swap, stage) => {
+      const p = deriveProgress(obs({ swap, payouts: [mintedExtra] }));
+      expect(p).toMatchObject({ stage, terminal: true, needsNotification: false });
+      expect(p.message).toMatch(/sBTC was minted for a payment that reached your deposit address/);
+    }
+  );
+
+  it('a refunded swap keeps checking while an output at the address still needs registering', () => {
+    const p = deriveProgress(
+      obs({ swap: 'REFUNDED', payouts: [mintedExtra, { payout: ours, mint: null }] })
+    );
+    expect(p).toMatchObject({ stage: 'refunded', terminal: false, needsNotification: true });
+    expect(p.message).toMatch(
+      /2 payments arrived at your deposit address anyway.*minted for 1 of them/
+    );
   });
 });

@@ -447,9 +447,14 @@ What `POST /deposits` accepts, and what it costs:
   `RUN_SUBREQUEST_BUDGET` fetch and KV calls (under the Workers Free limit of
   50 subrequests). Every deposit has its own address, so any unspent output at
   the address of at least the sBTC minimum is registered with Emily. A watch
-  ends once at least one such output is registered and none is left
-  unregistered, or when its swap is 24 hours past its deadline with no eligible
-  output unregistered, and in any case after 14 days (the KV TTL). A second
+  ends when no eligible output is left unregistered and its swap is final by a
+  live 1Click status read (one subrequest, made only once an output is
+  registered): `SUCCESS` with the payout 1Click names among the registered
+  outputs (any registered output when 1Click names none), or `REFUNDED` or
+  `FAILED`. A registered output that is not the swap's payout, such as someone
+  else's payment to the address, does not end it. Otherwise it ends when its
+  swap is 24 hours past its deadline with no eligible output unregistered, and
+  in any case after 14 days (the KV TTL). A second
   payment to the same address after the watch ended is left to the open page or
   a later receipt load. The constants live in
   `apps/api/src/store/limits.ts`.

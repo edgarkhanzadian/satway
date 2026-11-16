@@ -711,3 +711,66 @@ describe('listWatchedAddresses and loadWatched', () => {
     expect(await loadWatched(kv, 'bc1pmissing')).toEqual({ deposit: null, broken: false });
   });
 });
+
+describe('runNotifier: a watch ends only when its swap is final', () => {
+  const stranger = payoutTx(3);
+  const strangerOut = `${CHAIN[3]?.txid}:3`;
+
+  it('keeps watching after registering an output that is not the payout 1Click names', async () => {
+    const swaps = { '0xswap0': { hashes: [D.txid] } };
+    const w = world({ txs: [stranger], swaps });
+    const kv = await watching(w);
+    const first = await runNotifier(kv, endpoints, w.fetchFn, run);
+    expect(outpointsPosted(w)).toEqual([strangerOut]);
+    expect(first.finished).toEqual([]);
+    expect(record(kv)).toMatchObject({ registered: [{ outpoint: strangerOut }] });
+
+    w.arrive(payoutTx(0));
+    const second = await runNotifier(kv, endpoints, w.fetchFn, run);
+    expect(outpointsPosted(w)).toEqual([strangerOut, `${D.txid}:0`]);
+    expect(second.finished).toEqual([D.address]);
+    expect(watchKeys(kv)).toEqual([]);
+  });
+
+  it.each(['PENDING_DEPOSIT', 'KNOWN_DEPOSIT_TX', 'PROCESSING'])(
+    'keeps watching a registered output while the swap is %s',
+    async status => {
+      const w = world({ txs: [stranger], swaps: { '0xswap0': { status } } });
+      const kv = await watching(w);
+      const report = await runNotifier(kv, endpoints, w.fetchFn, run);
+      expect(outpointsPosted(w)).toEqual([strangerOut]);
+      expect(report.finished).toEqual([]);
+      expect(watchKeys(kv).length).toBe(1);
+    }
+  );
+
+  it('keeps watching when the swap status cannot be read', async () => {
+    const w = world({ txs: [payoutTx(0)] });
+    const kv = await watching(w);
+    w.state.oneClickDown = true;
+    const report = await runNotifier(kv, endpoints, w.fetchFn, run);
+    expect(outpointsPosted(w)).toEqual([`${D.txid}:0`]);
+    expect(report.finished).toEqual([]);
+    expect(record(kv)).toMatchObject({ registered: [{ outpoint: `${D.txid}:0` }] });
+  });
+
+  it.each(['REFUNDED', 'FAILED'])(
+    'ends the watch for a %s swap once nothing at the address is pending',
+    async status => {
+      const kv = await watching(world());
+      const w = world({ txs: [stranger], swaps: { '0xswap0': { status } } });
+      w.arrive();
+      const report = await runNotifier(kv, endpoints, w.fetchFn, run);
+      expect(outpointsPosted(w)).toEqual([strangerOut]);
+      expect(report.finished).toEqual([D.address]);
+    }
+  );
+
+  it('asks 1Click with the Worker key', async () => {
+    const w = world({ txs: [payoutTx(0)] });
+    const kv = await watching(w);
+    await runNotifier(kv, endpoints, w.fetchFn, { ...run, oneClickJwt: 'worker-key' });
+    const reads = w.calls.filter(c => c.url.includes('/v0/status?'));
+    expect(reads.at(-1)?.auth).toBe('Bearer worker-key');
+  });
+});

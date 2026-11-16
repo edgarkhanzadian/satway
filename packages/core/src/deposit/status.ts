@@ -34,6 +34,7 @@ export interface PayoutObservation {
 export interface Observations {
   swap: OneClickSwapStatus | null;
   payouts: readonly PayoutObservation[];
+  payoutTxids?: readonly string[];
   tipHeight: number | null;
   reclaimLockBlocks: number;
 }
@@ -185,17 +186,36 @@ function mintedEarlyNote(count: number): string {
     : `sBTC was minted for ${count} payments that reached your deposit address before this swap finished.`;
 }
 
-export function deriveProgress(o: Observations): Progress {
-  if (o.payouts.length === 0) return swapProgress(o.swap);
-  const each = o.payouts.map(p => payoutProgress(o, p));
-  const allDone = each.every(p => p.stage === 'done');
-  if (allDone && o.swap !== null && SWAP_IN_FLIGHT.has(o.swap)) {
-    const waiting = swapProgress(o.swap);
-    return { ...waiting, message: `${mintedEarlyNote(each.length)} ${waiting.message}` };
+function arrivedEarlyNote(count: number): string {
+  return count === 1
+    ? 'A payment arrived at this address before your swap paid out. It is listed below.'
+    : `${count} payments arrived at this address before your swap paid out. They are listed below.`;
+}
+
+function arrivedAnywayNote(each: readonly Progress[]): string {
+  const minted = each.filter(p => p.stage === 'done').length;
+  if (each.length === 1) {
+    return minted === 1
+      ? 'sBTC was minted for a payment that reached your deposit address. It is listed below.'
+      : 'A payment arrived at your deposit address anyway. It is listed below.';
   }
+  const arrived = `${each.length} payments arrived at your deposit address anyway. Each is handled on its own and listed below.`;
+  return minted === 0 ? arrived : `${arrived} sBTC was minted for ${minted} of them.`;
+}
+
+function alongside(swap: Progress, each: readonly Progress[], note: string): Progress {
+  return {
+    ...swap,
+    terminal: swap.terminal && each.every(p => p.terminal),
+    needsNotification: each.some(p => p.needsNotification),
+    message: `${swap.message} ${note}`,
+  };
+}
+
+function combined(each: readonly Progress[]): Progress | null {
   const [only] = each;
   if (only && each.length === 1) return only;
-  if (allDone) {
+  if (each.every(p => p.stage === 'done')) {
     return {
       needsNotification: false,
       blocksUntilReclaim: null,
@@ -205,13 +225,42 @@ export function deriveProgress(o: Observations): Progress {
     };
   }
   const primary = each.find(p => p.stage !== 'done') ?? only;
-  if (!primary) return swapProgress(o.swap);
+  if (!primary) return null;
   return {
     ...primary,
     terminal: each.every(p => p.terminal),
     needsNotification: each.some(p => p.needsNotification),
     message: `${each.length} payments arrived at your deposit address. Each is handled on its own and listed below. ${primary.message}`,
   };
+}
+
+function swapPaidOut(o: Observations): boolean {
+  const named = o.payoutTxids ?? [];
+  return named.length === 0 || o.payouts.some(p => named.includes(p.payout.txid));
+}
+
+const STATUS_UNKNOWN_NOTE = 'The swap status could not be read, so this page keeps checking.';
+
+export function deriveProgress(o: Observations): Progress {
+  if (o.payouts.length === 0) return swapProgress(o.swap);
+  const each = o.payouts.map(p => payoutProgress(o, p));
+  if (o.swap === 'REFUNDED' || o.swap === 'FAILED') {
+    return alongside(swapProgress(o.swap), each, arrivedAnywayNote(each));
+  }
+  const allDone = each.every(p => p.stage === 'done');
+  if (allDone && o.swap !== null && SWAP_IN_FLIGHT.has(o.swap)) {
+    const waiting = swapProgress(o.swap);
+    return { ...waiting, message: `${mintedEarlyNote(each.length)} ${waiting.message}` };
+  }
+  if (o.swap === 'SUCCESS' && !swapPaidOut(o)) {
+    return alongside(swapProgress(o.swap), each, arrivedEarlyNote(each.length));
+  }
+  const all = combined(each) ?? swapProgress(o.swap);
+  if (o.swap === 'SUCCESS') return all;
+  if (o.swap === null && all.terminal) {
+    return { ...all, terminal: false, message: `${all.message} ${STATUS_UNKNOWN_NOTE}` };
+  }
+  return { ...all, terminal: false };
 }
 
 function swapProgress(swap: OneClickSwapStatus | null): Progress {

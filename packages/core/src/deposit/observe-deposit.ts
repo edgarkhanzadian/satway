@@ -41,6 +41,7 @@ export interface WatchedDepositContext {
 
 export interface DepositObservation {
   swap: OneClickSwapStatus | null;
+  payoutTxids: string[];
   outputs: AddressOutput[];
   payouts: AddressOutput[];
   belowMinimum: AddressOutput[];
@@ -93,7 +94,10 @@ export function classifyRegistrationError(err: unknown, sbtcApiUrl: string): Reg
 }
 
 function progressFor(
-  o: Pick<DepositObservation, 'swap' | 'payouts' | 'mints' | 'tipHeight' | 'spenders'>,
+  o: Pick<
+    DepositObservation,
+    'swap' | 'payoutTxids' | 'payouts' | 'mints' | 'tipHeight' | 'spenders'
+  >,
   reclaimLockBlocks: number
 ): Progress {
   const payouts: PayoutObservation[] = o.payouts.map(payout => ({
@@ -102,7 +106,13 @@ function progressFor(
     spender: o.spenders.get(outpointOf(payout)) ?? null,
     mint: o.mints.get(outpointOf(payout)) ?? null,
   }));
-  return deriveProgress({ swap: o.swap, payouts, tipHeight: o.tipHeight, reclaimLockBlocks });
+  return deriveProgress({
+    swap: o.swap,
+    payouts,
+    payoutTxids: o.payoutTxids,
+    tipHeight: o.tipHeight,
+    reclaimLockBlocks,
+  });
 }
 
 async function optional<T>(load: () => Promise<T>): Promise<T | null> {
@@ -142,11 +152,12 @@ export async function observeDeposit(
     optional(() => fetchTipHeight(config.btcApiUrl, fetchFn)),
   ]);
   const perDepositMinimum = limits?.perDepositMinimum ?? null;
+  const payoutTxids = destinationTxHashesOf(status);
   const fetched = await fetchDepositOutputs(
     config.btcApiUrl,
     ctx.depositAddress,
     ctx.depositScriptPubKey,
-    { txids: destinationTxHashesOf(status), maxPages: options.maxPages, fetchFn }
+    { txids: payoutTxids, maxPages: options.maxPages, fetchFn }
   );
   const { payouts, belowMinimum } = depositPayouts(fetched.outputs, perDepositMinimum);
   const toRegister = outputsToRegister(fetched.outputs, {
@@ -173,7 +184,7 @@ export async function observeDeposit(
   }
 
   const swap = status?.status ?? null;
-  const observed = { swap, payouts, mints, tipHeight, spenders };
+  const observed = { swap, payoutTxids, payouts, mints, tipHeight, spenders };
   return {
     ...observed,
     outputs: fetched.outputs,

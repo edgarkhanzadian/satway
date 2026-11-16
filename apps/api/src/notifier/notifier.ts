@@ -1,7 +1,10 @@
 import {
   type FetchLike,
   type NetworkConfig,
+  OneClickClient,
+  type OneClickStatusResponse,
   depositAddressFromScripts,
+  destinationTxHashesOf,
   errorMessage,
   fetchDeposit,
   fetchLimits,
@@ -21,7 +24,9 @@ import {
   RECORD_WRITE_COST,
   REGISTRATION_COST,
   RUN_SUBREQUEST_BUDGET,
+  type RegisteredOutput,
   SHARED_LOOKUP_COST,
+  SWAP_STATUS_COST,
   type WatchedDeposit,
   deleteWatched,
   listWatchedAddresses,
@@ -37,7 +42,10 @@ import {
   runClock,
 } from './budget.js';
 
-type Endpoints = Pick<NetworkConfig, 'btcApiUrl' | 'sbtcApiUrl' | 'reclaimLockBlocks'>;
+type Endpoints = Pick<
+  NetworkConfig,
+  'btcApiUrl' | 'sbtcApiUrl' | 'reclaimLockBlocks' | 'oneClickBaseUrl'
+>;
 
 export const PAYOUT_GRACE_MS = PAYOUT_GRACE_HOURS * 60 * 60 * 1000;
 export const CRON_PERIOD_MS = CRON_PERIOD_MINUTES * 60 * 1000;
@@ -62,6 +70,7 @@ export interface NotifierOptions {
   budget?: number;
   maxAddresses?: number;
   clock?: RunClock;
+  oneClickJwt?: string;
 }
 
 interface Shared {
@@ -77,8 +86,28 @@ function once<T>(load: () => Promise<T>): () => Promise<T> {
   };
 }
 
-export function watchSatisfied(deposit: WatchedDeposit): boolean {
-  return deposit.registered.length > 0;
+export function swapFinal(
+  status: OneClickStatusResponse,
+  registered: readonly RegisteredOutput[]
+): boolean {
+  if (status.status === 'REFUNDED' || status.status === 'FAILED') return true;
+  if (status.status !== 'SUCCESS') return false;
+  const named = destinationTxHashesOf(status);
+  if (named.length === 0) return registered.length > 0;
+  return registered.some(r => named.some(txid => r.outpoint.startsWith(`${txid}:`)));
+}
+
+async function liveSwapFinal(ctx: RunContext, deposit: WatchedDeposit): Promise<boolean> {
+  const client = new OneClickClient(ctx.config.oneClickBaseUrl, {
+    jwt: ctx.oneClickJwt,
+    fetchFn: ctx.fetchFn,
+  });
+  try {
+    return swapFinal(await client.status(deposit.swapDepositAddress), deposit.registered);
+  } catch (err) {
+    if (err instanceof BudgetExhausted) throw err;
+    return false;
+  }
 }
 
 export function watchExpired(deposit: WatchedDeposit, now: Date): boolean {
@@ -102,6 +131,7 @@ interface RunContext {
   fetchFn: FetchLike;
   budget: Budget;
   now: Date;
+  oneClickJwt?: string;
 }
 
 async function watchAddress(
@@ -175,10 +205,14 @@ async function watchAddress(
     ...deposit,
     registered: [...registered].sort().map(outpoint => ({ outpoint })),
   };
-  if (!pending && watchSatisfied(next)) {
-    await deleteWatched(kv, address);
-    report.finished.push(address);
-    return;
+  if (!pending && next.registered.length > 0) {
+    if (budget.remaining() < SWAP_STATUS_COST + RECORD_WRITE_COST) {
+      report.deferred.push(address);
+    } else if (await liveSwapFinal(ctx, next)) {
+      await deleteWatched(kv, address);
+      report.finished.push(address);
+      return;
+    }
   }
   if (!pending && watchExpired(next, ctx.now)) {
     await deleteWatched(kv, address);
@@ -243,6 +277,7 @@ export async function runNotifier(
     fetchFn: fetching,
     budget,
     now,
+    oneClickJwt: options.oneClickJwt,
   };
 
   let addresses: string[] = [];

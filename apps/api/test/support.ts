@@ -37,7 +37,12 @@ export const BTC = 'https://btc.example';
 export const EMILY = 'https://emily.example';
 export const HIRO_KEY_URL = `${config.stxApiUrl}/v2/contracts/call-read/${config.sbtcContract}/sbtc-registry/get-current-aggregate-pubkey`;
 export const STATUS_URL = `${config.oneClickBaseUrl}/v0/status`;
-export const endpoints = { btcApiUrl: BTC, sbtcApiUrl: EMILY, reclaimLockBlocks: 950 };
+export const endpoints = {
+  btcApiUrl: BTC,
+  sbtcApiUrl: EMILY,
+  reclaimLockBlocks: 950,
+  oneClickBaseUrl: config.oneClickBaseUrl,
+};
 export const registerConfig = config;
 export const STACKS = 'SP1Q6W6VADA7V12SEVH6VNDNN4N7RX1PQ949EQPQ';
 export const RECLAIM_KEY = '51b397d3ad5ab4f803565c0243d3c1fa9d5a8124b33547bb993ee1ebeb729ff2';
@@ -172,12 +177,13 @@ export interface SwapFake {
   status?: string;
   depositAddress?: string;
   omitQuoteResponse?: boolean;
+  hashes?: string[];
 }
 
 export function swapStatus(swapAddress: string, swap: SwapFake = {}) {
   return {
     correlationId: 'c',
-    status: swap.status ?? 'PENDING_DEPOSIT',
+    status: swap.status ?? 'SUCCESS',
     updatedAt: NOW.toISOString(),
     swapDetails: {
       depositedAmount: null,
@@ -199,7 +205,7 @@ export function swapStatus(swapAddress: string, swap: SwapFake = {}) {
       refundFee: '9972',
       withdrawFee: '1900',
       originChainTxHashes: [],
-      destinationChainTxHashes: [],
+      destinationChainTxHashes: (swap.hashes ?? []).map(hash => ({ hash, explorerUrl: '' })),
     },
     ...(swap.omitQuoteResponse
       ? {}

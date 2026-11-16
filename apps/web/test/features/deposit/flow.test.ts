@@ -847,6 +847,23 @@ function postedOutpoints(w: ReturnType<typeof world>): string[] {
 }
 
 describe('checkProgress: payments to the deposit address', () => {
+  it('a minted output is not the end while the payout 1Click names has not appeared', async () => {
+    const unseen = '9e'.repeat(32);
+    const w = world({ swap: 'SUCCESS', payoutVout: 0, mint: 'confirmed', hashes: [unseen] });
+    const snap = await checkProgress(config, w.backend, await receiptFor(w), w.fetchFn);
+    expect(snap.progress).toMatchObject({ stage: 'awaiting-payout', terminal: false });
+
+    const named = world({ swap: 'SUCCESS', payoutVout: 0, mint: 'confirmed', hashes: [D.txid] });
+    const done = await checkProgress(config, named.backend, await receiptFor(named), named.fetchFn);
+    expect(done.progress).toMatchObject({ stage: 'done', terminal: true });
+  });
+
+  it('a minted output with the swap status unreadable keeps the page checking', async () => {
+    const w = world({ payoutVout: 0, mint: 'confirmed' });
+    const snap = await checkProgress(config, w.backend, await receiptFor(w), w.fetchFn);
+    expect(snap.progress).toMatchObject({ stage: 'done', terminal: false });
+  });
+
   it('a later unconfirmed 546-sat output does not hijack status or registration', async () => {
     const w = world({
       swap: 'SUCCESS',
@@ -880,7 +897,7 @@ describe('checkProgress: payments to the deposit address', () => {
     [null, 'minting'],
     ['SUCCESS', 'minting'],
     ['PROCESSING', 'minting'],
-    ['REFUNDED', 'minting'],
+    ['REFUNDED', 'refunded'],
   ] as const)(
     'with the swap status %s, any payment at the address is the payout',
     async (swap, stage) => {
