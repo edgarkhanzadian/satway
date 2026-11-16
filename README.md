@@ -447,16 +447,23 @@ What `POST /deposits` accepts, and what it costs:
   from the sBTC registry; cached 10 minutes in memory and in KV), then
   `GET /v0/status` at 1Click with the Worker's key (the swap must pay the
   derived address in native BTC, not be refunded or failed, and its deadline
-  must not have passed). Only a request that passes all of that reads KV:
-  one `get` for this swap's key (409 when this same swap is already
-  registered for the address), one `get` of the small load key the scheduled
-  run publishes (409 with `code: "swap-limit"` when the address already
-  follows `MAX_EXTRA_SWAPS + 1` swaps; 503 with `Retry-After` when
-  `MAX_ACTIVE_WATCHES` addresses are followed and this is not one of them),
-  then at most two writes: the registration signal (skipped when it is less
-  than 10 minutes old) and the registration itself. The request path never
-  lists keys. Invalid requests make no outbound call; 503 means an
-  upstream (Hiro, 1Click) could not be read. When 1Click does not know the swap
+  must not have passed). Before the 1Click check the only KV read is the signer-key
+  cache; only a request that passes all of the above reads more: one `get` for
+  this swap's key (409 when this same swap is already registered for the
+  address), one `get` of the load the scheduled run publishes (followed and
+  not-yet-folded swaps per address, how many are waiting to be folded, and when
+  it last listed) and one `get` of the recent-registrations key (what the
+  handler accepted in the last hour, which the published load may not show yet).
+  From those it answers 409 with `code: "swap-limit"` when the address already
+  has `MAX_EXTRA_SWAPS + 1` swaps followed, waiting or just registered, and 503
+  with `Retry-After` (the page keeps itself open) when a new address would pass
+  `MAX_ACTIVE_WATCHES`, when `MAX_UNFOLDED_ADMITTED` (48) registrations are
+  already waiting to be folded, when a registration accepted more than 45 minutes
+  ago has still not been listed, or when the load is more than 7 hours old (the
+  scheduled run is not running). Otherwise it writes the recent-registrations key
+  and the registration itself. The request path never lists keys. Invalid requests
+  make no outbound call; 503 also means an upstream (Hiro, 1Click) could not be read.
+  When 1Click does not know the swap
   the 400 body carries `code: "unknown-swap"`; the web app retries that one
   answer five times in the background, after 5 s, 20 s, 1 min, 2 min and 4 min
   (about seven and a half minutes in all), since 1Click's status can lag behind
@@ -465,26 +472,34 @@ What `POST /deposits` accepts, and what it costs:
 
 How the Worker keeps its watches in KV (`apps/api/src/store/store.ts`):
 
-| Key                    | Written by                              | Read by                         |
-| ---------------------- | --------------------------------------- | ------------------------------- |
-| `dep:<address>:<swap>` | the handler, once per swap (14-day TTL) | the scheduled run, when folding |
-| `meta:registered-at`   | the handler, at most every 10 minutes   | the scheduled run               |
-| `meta:watch-index`     | the scheduled run only                  | the scheduled run               |
-| `meta:watch-load`      | the scheduled run only                  | the handler                     |
-| `meta:signer-key`      | the handler                             | the handler                     |
+| Key                         | Written by                                                           | Read by                        |
+| --------------------------- | -------------------------------------------------------------------- | ------------------------------ |
+| `dep:<address>:<swap>`      | the handler, once per swap (14-day TTL; metadata: created, deadline) | the scheduled run (list, fold) |
+| `meta:recent-registrations` | the handler, on every accepted registration                          | the handler, the scheduled run |
+| `meta:watch-index`          | the scheduled run only                                               | the scheduled run              |
+| `meta:watch-load`           | the scheduled run only                                               | the handler                    |
+| `meta:signer-key`           | the handler                                                          | the handler                    |
 
-Every swap registration is its own key, so two handlers never read-modify-write the
-same key and no registration can overwrite another. The index holds everything the
+Every swap registration is its own key, so no registration can overwrite another.
+The recent-registrations key is read-modify-written by handlers; two accepted at
+the same moment in different locations can lose one entry, which only makes the
+next admission decision slightly less conservative. The index holds everything the
 run needs per followed address (scripts, followed swaps, registered outpoints), the
-queue of eligible outputs still to register, the rotation cursor, the names of
-registrations it has not folded in yet, and the registrations it ended in the last
-6 hours. The run lists `dep:` only to discover new registrations: on its first run;
-after a registration signal it has not yet listed 12 minutes past, once 15 minutes
-have gone by since its last list and again once the signal is 12 minutes old (so
-that list sees every key written before the signal, which is never more than 10
-minutes older than the registration it announces), never closer than 6 minutes
-apart; every 6 hours as a backstop; and while a list spans pages. Folding a registration costs one `get`; a new address is visited in
-the run that folds it. A watch ends by deleting the registration keys it followed
+queue of eligible outputs still to register with their retry state, the rotation
+cursor, the registrations listed but not folded in yet (at most `MAX_PENDING`, 320,
+oldest first; ones already 48 hours past their deadline are skipped from the list
+metadata without a `get`), and the registrations it ended in the last 6 hours. The
+run lists `dep:` only to discover new registrations: on its first run; after a
+registration it has not yet listed 12 minutes past, once 15 minutes have gone by
+since its last list and again once that registration is 12 minutes old, never closer
+than 6 minutes apart; every 6 hours as a backstop; and while a list spans pages. A
+list that fails drops its cursor and does not stop folding. Each run folds as many
+waiting registrations as its budget leaves after its other work (each costs one
+`get` and, for a new address, a `/utxo` read in the same run): at least
+`MIN_FOLDS_PER_RUN` (4). A swap beyond `MAX_SWAPS_PER_WATCH` (4) that slipped past
+the handler is still followed: its status is not read, so it keeps the watch until
+it is 24 hours past its deadline; only past `MAX_SWAPS_FOLLOWED` (16) is one dropped.
+A watch ends by deleting the registration keys it followed
 and remembering their names; a swap registered while the run was deciding is a
 different key, is not deleted, and is picked up by a later list as a new watch, so
 the handler never needs to re-open anything. Cloudflare KV is eventually consistent:
@@ -493,14 +508,16 @@ keys included) are cached per location. Each stale read here can only make a wat
 live longer: a stale index makes the run redo work it already did (Emily is checked
 before every registration, so nothing is posted twice) and a list or `get` that
 still shows a deleted registration is ignored for 6 hours; a lost index is rebuilt
-from the registration keys. A registration written while the run lists is seen by
-the next list, which comes at least 12 minutes after the signal that announced it.
+from the registration keys. The settle list comes 12 minutes after the latest
+registration, so a key that takes up to about 12 minutes to appear in a list is still
+found then; a slower one waits for a later registration's lists or the 6-hour
+backstop.
 
 The scheduled run (`apps/api/src/notifier/notifier.ts`), at most
 `RUN_SUBREQUEST_BUDGET` (40) fetch and KV calls under the Workers Free limit of 50:
 
-1. One `get` of the index; the signal `get` and the list only when discovery is due;
-   at most `MAX_FOLDS_PER_RUN` (2) new registrations folded in.
+1. One `get` of the index; the recent-registrations `get` and the list only when
+   discovery may be due; then folding as above.
 2. One `/utxo` read for each of the next `MAX_ADDRESSES_PER_RUN` (16) followed
    addresses, starting where the previous run stopped. The cursor is written only
    when the run changes the index anyway or stops early (out of time or budget);
@@ -508,58 +525,83 @@ The scheduled run (`apps/api/src/notifier/notifier.ts`), at most
 3. Every eligible unregistered output found (no cap per address) joins one queue;
    queued outputs are registered first-in first-out with what the budget leaves (each
    registration reads Emily, then the raw transaction, then posts; at least
-   `MIN_REGISTRATIONS_PER_RUN` (2) a run, 4 on a run without discovery); a failed one
-   moves to the back.
+   `MIN_REGISTRATIONS_PER_RUN` (2) a run). A failed registration is retried on the
+   next run, then after 2, 4, 8 … minutes, at most an hour apart; a run with no retry
+   due writes nothing. One Emily refuses with a 4xx (not 408, 425 or 429) is still
+   retried that way but no longer keeps the watch open.
 4. Only then, for visited addresses with nothing queued, the end check: a watch
    whose swaps are all 24 hours past their deadline ends without a 1Click read;
-   otherwise one 1Click status read per swap still inside that window. A swap is
-   final when `REFUNDED` or `FAILED`, or `SUCCESS` with the payout 1Click names among
-   the registered outputs. `SUCCESS` without a named payout counts only when the
-   address follows that one swap and has a registered output, or when enough
-   registered outputs that no other swap names exist for every such swap. A
+   otherwise one 1Click status read per swap still inside that window (at most 4).
+   A swap is final when `REFUNDED` or `FAILED`, or `SUCCESS` with the payout 1Click
+   names among the registered outputs. `SUCCESS` without a named payout counts only
+   when the address follows that one swap and has a registered output, or when
+   enough registered outputs that no other swap names exist for every such swap. A
    registered output that is not the swap's payout, such as someone else's payment
-   to the address, does not end it.
+   to the address, does not end it. A watch whose swaps are all 48 hours past their
+   deadline ends even if an output is still queued or its address cannot be read.
 
-So every followed address gets its `/utxo` read once every `FULL_CYCLE_RUNS` (20)
-runs, 40 minutes, whatever the other watches cost, and an output found joins the
-queue at once. The worst case for registering a payout with the tab closed is
-therefore 40 minutes plus 2 minutes for every two outputs queued ahead of it, plus
-up to about 15 minutes before a brand-new registration is listed: with all 320
-watches paid at the same moment, about 6 hours, some 40 blocks, against the
-950-block reclaim timelock.
+What a 201 promises: the registration is listed within about 15 minutes, folded in
+within 12 runs after that (at most 48 wait, at least 4 fold a run), and its address
+is read in the run that folds it, then every 40 minutes. In
+`apps/api/test/flood.test.ts`, with one IP registering 5 a minute for 3 hours (and
+with 50 a minute, as from ten IPs), every 201 was folded and its address read within
+16 and 23 minutes, a paid deposit accepted during the flood was registered within 6
+minutes of its payout, at most 40 registrations waited and the index stayed under
+190 KB; the rest of the requests got 503. With an eventually consistent KV fake (three
+locations, reads cached 150 to 300 seconds including misses, lists lagging 90 to 600
+seconds, 10% of runs overlapping), all 150 deposits of each run were registered,
+at most 14 minutes after their payout. An output found joins the queue at once, so
+the worst case with the tab closed is 40 minutes plus 2 minutes for every two
+outputs queued ahead of it: with all 320 watches paid at the same moment, about 6
+hours, some 40 blocks, against the 950-block reclaim timelock.
 
 KV operations a day (from `apps/api/test/kv-day.ts`, which runs 720 scheduled runs
 and the handler against an in-memory KV; payouts that the page has not registered,
 so the Worker posts nothing but registers each in KV):
 
-| Day                                 |   Reads | Writes | Deletes | Lists |
-| ----------------------------------- | ------: | -----: | ------: | ----: |
-| Idle, no watches                    |   1,428 |      5 |       0 |     4 |
-| 20 deposits, each paid              |   1,459 |    160 |      20 |    40 |
-| 100 deposits, each paid             |   1,739 |    639 |      98 |   100 |
-| 150 deposits, each paid             |   1,959 |    820 |     147 |   116 |
-| 320 watches refilled as they expire |   2,846 |  1,243 |     292 |    92 |
-| Workers Free plan limit             | 100,000 |  1,000 |   1,000 | 1,000 |
+| Day                                        |   Reads | Writes | Deletes | Lists |
+| ------------------------------------------ | ------: | -----: | ------: | ----: |
+| Idle, no watches                           |   1,428 |      8 |       0 |     4 |
+| 20 deposits, each paid                     |   1,459 |    180 |      20 |    40 |
+| 20 deposits, each paid, Emily down all day |   1,459 |    332 |       0 |    40 |
+| 100 deposits, each paid                    |   1,739 |    640 |      98 |   100 |
+| 150 deposits, each paid                    |   2,008 |    880 |     147 |    90 |
+| 320 watches refilled as they expire        |   2,826 |  1,304 |     290 |    89 |
+| Workers Free plan limit                    | 100,000 |  1,000 |   1,000 | 1,000 |
 
-A paid deposit costs about 3 handler writes (its key, the signal, the signer-key
-cache when the cached key is older than 10 minutes) and about 5 index writes
-(folding it, registering its payout, ending it, and the list and load updates it
-causes). Writes are the limit: the Free plan carries roughly 150 to 180 deposits a day.
-Keeping all 320 watches busy, which anyone can do with free quotes, needs the Paid
-plan; on the Free plan, past 1,000 writes a day new registrations fail with 500
-(the open page still registers the payout) and the scheduled run cannot save its
-progress until the daily reset at 00:00 UTC.
+A paid deposit costs about 3 handler writes (its key, the recent-registrations key,
+the signer-key cache when the cached key is older than 10 minutes) and about 5
+index and load writes (folding it, registering its payout, ending it, and the list
+and load updates it causes). Writes are the limit: the Free plan carries roughly
+150 deposits a day. A day of Emily being down adds about 8 writes per paid deposit
+for the backed-off retries. Keeping all 320 watches busy, which anyone can do with
+free quotes, needs the Paid plan; on the Free plan, past 1,000 writes a day new
+registrations fail with 500 (the open page still registers the payout) and the
+scheduled run cannot save its progress until the daily reset at 00:00 UTC.
 
 What someone with free quotes can still do: register a live 1Click swap that pays
 any address they can derive, which keeps that address watched until the swap is 24
 hours past its deadline (each registration is checked live, at 5 a minute per IP);
 fill the 3 extra-swap slots of an address, so its owner's own second swap is
-answered 409 `swap-limit` and the page says to keep the tab open; or fill the 320
-watches (about an hour of registrations from one IP, renewed each day), after which
-other deposits get 503 and are tracked only while their tab is open, and the KV
-writes pass the Free plan limit as above. None of this can stop a payout from being
-registered by an open page, move funds or end someone else's watch early. The
-constants live in `apps/api/src/store/limits.ts`.
+answered 409 `swap-limit` and the page says to keep the tab open; or keep 48
+registrations waiting, or fill the 320 watches (about an hour of registrations from
+one IP, renewed each day), after which other deposits get 503 and are tracked only
+while their tab is open, and the KV writes pass the Free plan limit as above. None
+of this can stop a payout from being registered by an open page, move funds or end
+someone else's watch early, and a 201 is not given for a registration the run
+cannot reach soon. The constants live in `apps/api/src/store/limits.ts`.
+
+After the first deploy, watch these:
+
+- CPU time per scheduled run and any exceeded-CPU errors. The Free plan allows 10 ms;
+  the first taproot derivation in a cold isolate measured 24 to 42 ms in Node.
+- Daily KV writes, deletes and lists against 1,000 each.
+- Repeated `Registering … failed` errors in the cron log.
+- The report's `pending` against `watched`, and the time from a 201 to the first
+  visit of that address.
+- Cron runs per hour and their wall time.
+- Counts of 503 and 409 answers to `POST /deposits`.
+- KV 429s on `meta:watch-index` or `meta:recent-registrations`.
 
 ## Notes
 
