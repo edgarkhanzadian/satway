@@ -1,5 +1,4 @@
 import { hex } from '@scure/base';
-import * as btc from '@scure/btc-signer';
 
 import {
   type BtcTxStatus,
@@ -8,6 +7,7 @@ import {
   fetchTransactionHex,
 } from '../bitcoin/index.js';
 import { type FetchLike, type NetworkConfig, errorMessage } from '../shared/index.js';
+import { parseTransaction, txidOf } from './raw-transaction.js';
 
 export interface PayoutExpectation {
   txid: string;
@@ -39,28 +39,6 @@ export interface PayoutVerification {
 
 const TXID = /^[0-9a-f]{64}$/;
 
-function parseTransaction(transactionHex: string): btc.Transaction | null {
-  try {
-    const bytes = hex.decode(transactionHex);
-    if (hex.encode(btc.RawTx.encode(btc.RawTx.decode(bytes))) !== transactionHex) return null;
-    return btc.Transaction.fromRaw(bytes, {
-      allowUnknownInputs: true,
-      allowUnknownOutputs: true,
-      disableScriptCheck: true,
-    });
-  } catch {
-    return null;
-  }
-}
-
-function idOf(tx: btc.Transaction): string | null {
-  try {
-    return tx.id;
-  } catch {
-    return null;
-  }
-}
-
 function confirmationsOf(status: BtcTxStatus | null, tipHeight: number | null): number | null {
   if (!status?.confirmed || status.block_height === undefined || tipHeight === null) return null;
   return Math.max(0, tipHeight - status.block_height + 1);
@@ -86,7 +64,7 @@ export function verifyPayoutTransaction(
 
   const tx = parseTransaction(transactionHex.toLowerCase());
   if (!tx) return failed('tx-unparseable');
-  if (idOf(tx) !== txid) return failed('txid-mismatch');
+  if (txidOf(tx) !== txid) return failed('txid-mismatch');
 
   const outputs = Array.from({ length: tx.outputsLength }, (_, i) => {
     const out = tx.getOutput(i);

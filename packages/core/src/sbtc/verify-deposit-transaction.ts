@@ -1,35 +1,13 @@
 import { hex } from '@scure/base';
-import * as btc from '@scure/btc-signer';
 
 import { depositAddressFromScripts } from './deposit-address.js';
+import { parseTransaction, txidOf } from './raw-transaction.js';
 
 export interface DepositOutpoint {
   txid: string;
   vout: number;
   depositScript: string;
   reclaimScript: string;
-}
-
-function parseTransaction(transactionHex: string): btc.Transaction | null {
-  try {
-    const bytes = hex.decode(transactionHex);
-    if (hex.encode(btc.RawTx.encode(btc.RawTx.decode(bytes))) !== transactionHex) return null;
-    return btc.Transaction.fromRaw(bytes, {
-      allowUnknownInputs: true,
-      allowUnknownOutputs: true,
-      disableScriptCheck: true,
-    });
-  } catch {
-    return null;
-  }
-}
-
-function txidOf(tx: btc.Transaction): string | null {
-  try {
-    return tx.id;
-  } catch {
-    return null;
-  }
 }
 
 export class DepositCheckError extends Error {
