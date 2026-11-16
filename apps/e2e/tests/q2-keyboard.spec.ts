@@ -1,8 +1,10 @@
 import { PROGRESS, type SatwayApp } from '../src/app/satway-app.js';
+import { WITHDRAW_PROGRESS } from '../src/app/withdraw-app.js';
 import { expect, test } from '../src/fixtures.js';
 import { activeFocus, startFocusAtTop, tabWalk } from '../src/quality/page-checks.js';
 import { RECLAIM_COPY } from '../src/scenario/reclaim.js';
 import { toReclaimable } from '../src/scenario/states.js';
+import { startWithdrawal } from '../src/scenario/withdrawal.js';
 import { EVM_WALLET_NAME } from '../src/wallets/evm-wallet.js';
 import { STACKS_WALLET_NAME } from '../src/wallets/stacks-wallet.js';
 import type { World } from '../src/world/world.js';
@@ -71,6 +73,37 @@ test.describe('Q2. keyboard only', () => {
       'Connect Stacks wallet',
       'Receipt file',
     ]);
+  });
+
+  test('the Withdraw tab focus order runs through Your withdrawals, and Follow works by keyboard', async ({
+    app,
+    world,
+    wallets,
+  }) => {
+    const { withdraw } = await startWithdrawal(app, world, wallets);
+    await withdraw.waitFor(WITHDRAW_PROGRESS.awaitingTx);
+    await app.page.getByRole('button', { name: 'Hide' }).click();
+    await app.page.reload();
+    await app.open();
+    await expect(app.from.getByRole('button', { name: new RegExp(EVM_WALLET_NAME) })).toBeVisible();
+    await startFocusAtTop(app.page);
+    await tabTo(app, /^Withdraw$/);
+    await press(app, 'Enter');
+    await expect(app.page.getByRole('heading', { name: 'Your withdrawals' })).toBeVisible();
+    const stops = await tabWalk(app.page);
+    expect(stops.map(s => s.name)).toEqual([
+      'Deposit',
+      'Withdraw',
+      `${EVM_WALLET_NAME}For Ethereum, Base, Arbitrum and other EVM chains`,
+      'Connect Stacks wallet',
+      'Follow',
+      'Remove',
+      'Withdrawal receipt (JSON)',
+    ]);
+    await startFocusAtTop(app.page);
+    await tabTo(app, /^Follow$/);
+    await press(app, 'Enter');
+    await expect(app.page.getByRole('heading', { name: 'Withdrawal in progress' })).toBeFocused();
   });
 
   test('a full USDC-on-Base deposit to Done, including the Stacks wallet modal', async ({
