@@ -328,28 +328,9 @@ allowed per test with `harness.allowConsoleErrors(pattern)`.
 - `q1-…` to `q7-…` (phase 3, quality gates): axe (`@axe-core/playwright`, serious and critical
   fail) plus structure, names, route `aria-current`, live regions and visible focus in every
   main state in both themes; keyboard-only deposit and reclaim; 390x844 and 360x640 with touch;
-  reduced motion and theme tokens; visual snapshots; WebKit download and reclaim; the CSP,
+  reduced motion and theme tokens; WebKit download and reclaim; the CSP,
   `eval`/`Function`, allowed origins, referrer and secrets of the production build.
 - `w1-…`, `w2-…`: WalletConnect pairing and a full session against the fake relay.
-
-### Visual snapshots
-
-`tests/q5-visual.spec.ts` runs in its own project, `visual`, on Chromium only, with the world
-and the page clock frozen at a fixed instant (`test.use({ frozenClock })`), the world seed not
-varying with `--repeat-each`, animations disabled, reduced motion and fonts loaded. Baselines
-live in `apps/e2e/visual-baselines/<state>-<width>-<theme>-visual-<platform>.png` and are
-committed. Screenshots differ between operating systems, so the `visual` project only exists
-when baselines for the current platform are present (or `E2E_VISUAL=1` is set): on a machine or
-CI runner without them it is left out instead of comparing against another platform's images.
-Today only macOS (`darwin`) baselines exist, so CI on Linux skips it.
-
-```sh
-pnpm test:e2e:visual:update   # rebuild, then write this platform's baselines (review the diff!)
-```
-
-To produce Linux baselines, run the manual `e2e-visual-baselines` workflow (Actions tab), download
-its `visual-baselines-linux` artifact into `apps/e2e/visual-baselines/` and commit the
-`*-linux.png` files; from then on CI compares against them.
 
 ### Live canary (real services, read-only, not part of `pnpm test:e2e`)
 
@@ -400,7 +381,7 @@ stand in; Solana over WalletConnect is not driven), real 1Click, Emily and signe
 beyond what the read-only canary sees (no live quote, no payout), Bitcoin scripts other than
 p2wpkh, taproot key paths and the two sBTC deposit leaves, absolute locktimes, RBF,
 cross-process `localStorage` timing beyond what Chromium does locally, Firefox, visual
-baselines for Linux, and screen-reader output (axe and role checks only).
+regressions (there are no screenshot tests), and screen-reader output (axe and role checks only).
 
 ## Mainnet proof (moves real funds, small amounts)
 

@@ -25,7 +25,6 @@ interface TestOptions {
   evmStartChainId: number;
   workerEnv: WorkerEnvOverrides;
   walletConnect: WalletConnectMode;
-  frozenClock: number | null;
 }
 
 interface TestFixtures {
@@ -64,7 +63,6 @@ export const test = base.extend<TestOptions & TestFixtures, WorkerFixtures>({
   evmStartChainId: [1, { option: true }],
   workerEnv: [{}, { option: true }],
   walletConnect: ['blocked', { option: true }],
-  frozenClock: [null, { option: true }],
 
   realNodeFetches: [
     async ({}, use) => {
@@ -80,10 +78,9 @@ export const test = base.extend<TestOptions & TestFixtures, WorkerFixtures>({
     { scope: 'worker', auto: true },
   ],
 
-  async world({ frozenClock }, use, testInfo) {
+  async world({}, use, testInfo) {
     const title = testInfo.titlePath.join(' / ');
-    const seed = frozenClock === null ? `${title}#${testInfo.repeatEachIndex}` : title;
-    await use(new World(seed, frozenClock === null ? {} : { frozenAt: frozenClock }));
+    await use(new World(`${title}#${testInfo.repeatEachIndex}`));
   },
 
   async api({ world, workerEnv }, use) {
@@ -100,11 +97,10 @@ export const test = base.extend<TestOptions & TestFixtures, WorkerFixtures>({
     });
   },
 
-  async context({ context, world, api, wallets, walletSetup, walletConnect, frozenClock }, use) {
+  async context({ context, world, api, wallets, walletSetup, walletConnect }, use) {
     const harness = new Harness(context, world, api, wallets);
     harnesses.set(context, harness);
     await context.clock.install({ time: world.now() });
-    if (frozenClock !== null) await context.clock.setFixedTime(world.now());
     await harness.install(walletSetup, walletConnect);
     await use(context);
   },

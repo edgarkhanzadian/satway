@@ -169,10 +169,7 @@ export class World {
   private seq = 0;
   private parkedCount = 0;
 
-  private readonly frozenAt: number | null;
-
-  constructor(seed: string, options: { frozenAt?: number } = {}) {
-    this.frozenAt = options.frozenAt ?? null;
+  constructor(seed: string) {
     this.rng = new Rng(seed);
     this.evidenceRng = new Rng(`${seed}#signer-evidence`);
     this.bitcoin = new BitcoinChain(this.rng, START_HEIGHT, Math.floor(this.baseNow() / 1000));
@@ -201,7 +198,7 @@ export class World {
   }
 
   private baseNow(): number {
-    return this.frozenAt ?? realNow();
+    return realNow();
   }
 
   now(): Date {

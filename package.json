@@ -23,7 +23,6 @@
     "test:e2e:canary": "pnpm --filter @satway/e2e test:e2e:canary",
     "test:e2e:smoke": "pnpm --filter @satway/e2e test:e2e:smoke",
     "test:e2e:ui": "pnpm --filter @satway/e2e test:e2e:ui",
-    "test:e2e:visual:update": "pnpm --filter @satway/e2e test:e2e:visual:update",
     "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {

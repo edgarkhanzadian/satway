@@ -136,9 +136,3 @@ export async function expectNoHorizontalScroll(page: Page, step: string): Promis
     overflow.clientWidth
   );
 }
-
-export async function fontsReady(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    await document.fonts.ready;
-  });
-}
