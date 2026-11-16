@@ -100,9 +100,10 @@ The rules, in plain words:
   guarantee. A preview (dry) quote uses index 0 and reserves nothing. Any
   output of at least the sBTC minimum at the address is this deposit's payout;
   each is registered and listed, and the deposit is done only when every one
-  is minted. Without a receipt, the Recover tab finds a wallet's deposits
-  through Emily, or by checking its addresses for index 0, 1, 2… until 256 in a
-  row are unused.
+  is minted. Without a receipt, the Recover tab finds a wallet's registered
+  deposits through Emily; when Emily knows none or cannot be reached (a payout
+  that was never registered is known only to Bitcoin), it checks the wallet's
+  addresses for index 0, 1, 2… until 256 in a row are unused.
 - The Bitcoin chain decides whether BTC arrived. The swap provider's status and
   our own backend records are never the source of truth.
 - The signer key is not trusted from one API: Hiro and a second Stacks node

@@ -6,6 +6,7 @@ import { actions, button, details, notice } from 'satway-styles/recipes';
 import {
   type FoundDeposit,
   type ScanProgress,
+  type WalletDeposits,
   MAINNET_CONFIG as config,
   errorMessage,
   fetchVerifiedSigners,
@@ -24,7 +25,56 @@ import { ReclaimForm } from './reclaim-form.js';
 
 type Phase = 'idle' | 'asking' | 'scanning' | 'done';
 
-type Source = 'emily' | 'scan';
+export type Source = 'emily' | 'scan';
+
+export type EmilyAnswer =
+  | { kind: 'read'; result: WalletDeposits }
+  | { kind: 'failed'; error: unknown };
+
+export interface AfterEmily {
+  found: FoundDeposit[];
+  note: string | null;
+  scan: boolean;
+}
+
+export const EMILY_KNOWS_NONE_NOTE =
+  'The sBTC signers’ API knows no registered deposits for this wallet. A payment that was never registered is found only on Bitcoin, so this page checks your possible deposit addresses there one by one.';
+
+export const EMILY_TRUNCATED_NOTE =
+  'The sBTC signers’ API lists more deposits for this wallet than this page reads at once, so only part of them is shown. Check your addresses on Bitcoin to find the rest.';
+
+export function afterEmily(answer: EmilyAnswer): AfterEmily {
+  if (answer.kind === 'failed') {
+    return {
+      found: [],
+      scan: true,
+      note: `The sBTC signers’ API could not be reached (${errorMessage(answer.error) ?? String(answer.error)}), so this page checks your possible deposit addresses on Bitcoin one by one instead.`,
+    };
+  }
+  const { deposits, truncated } = answer.result;
+  if (deposits.length === 0 && !truncated) {
+    return { found: [], scan: true, note: EMILY_KNOWS_NONE_NOTE };
+  }
+  return { found: deposits, scan: false, note: truncated ? EMILY_TRUNCATED_NOTE : null };
+}
+
+function foundHead(count: number, source: Source | null): string {
+  const registered = source === 'emily' ? 'registered ' : '';
+  if (count > 0) {
+    return `Found ${countText(count, `${registered}deposit address`, `${registered}deposit addresses`)} for this wallet.`;
+  }
+  if (source === 'scan')
+    return 'No deposits were found at your possible deposit addresses on Bitcoin.';
+  return `No ${registered}deposits were found for this wallet.`;
+}
+
+export function foundText(count: number, source: Source | null, cancelled: boolean): string {
+  const head = foundHead(count, source);
+  if (cancelled) return `${head} Checking was stopped early, so the list may be incomplete.`;
+  if (source === 'scan')
+    return `${head} Deposits made while the sBTC signers used an earlier key are not found this way.`;
+  return head;
+}
 
 function countText(n: number, one: string, many: string): string {
   return `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
@@ -101,23 +151,23 @@ export function FindDeposits(props: {
     setNote(null);
     setFound([]);
     setSource(null);
+    let answer: EmilyAnswer;
     try {
-      const result = await findDepositsByReclaimKey(config, account.reclaimPublicKey);
-      if (!isLatest()) return;
-      setFound(result.deposits);
+      answer = {
+        kind: 'read',
+        result: await findDepositsByReclaimKey(config, account.reclaimPublicKey),
+      };
+    } catch (error) {
+      answer = { kind: 'failed', error };
+    }
+    if (!isLatest()) return;
+    const next = afterEmily(answer);
+    setNote(next.note);
+    if (!next.scan) {
+      setFound(next.found);
       setSource('emily');
-      setNote(
-        result.truncated
-          ? 'The sBTC signers’ API lists more deposits for this wallet than this page reads at once, so only part of them is shown. Check your addresses on Bitcoin to find the rest.'
-          : null
-      );
       setPhase('done');
       return;
-    } catch (err) {
-      if (!isLatest()) return;
-      setNote(
-        `The sBTC signers’ API could not be reached (${errorMessage(err) ?? String(err)}), so this page checks your possible deposit addresses on Bitcoin one by one instead.`
-      );
     }
     await scanAddresses(account, isLatest);
   }
@@ -137,8 +187,8 @@ export function FindDeposits(props: {
       </styled.h3>
       <p className={notice()}>
         The connected wallet can find the deposits it made. This page asks the sBTC signers’ API for
-        the deposits locked to your reclaim key, and if that API cannot be reached, it checks your
-        possible deposit addresses on Bitcoin one by one.
+        the registered deposits locked to your reclaim key, and if that API cannot be reached or
+        knows none, it checks your possible deposit addresses on Bitcoin one by one.
       </p>
       <div className={actions()}>
         <button
@@ -179,13 +229,7 @@ export function FindDeposits(props: {
       )}
       {phase === 'done' && (
         <p className={notice({ tone: 'status' })} role="status">
-          {found.length === 0
-            ? 'No deposits were found for this wallet.'
-            : `Found ${countText(found.length, 'deposit address', 'deposit addresses')} for this wallet.`}
-          {cancelled && ' Checking was stopped early, so the list may be incomplete.'}
-          {!cancelled &&
-            source === 'scan' &&
-            ' Deposits made while the sBTC signers used an earlier key are not found this way.'}
+          {foundText(found.length, source, cancelled)}
         </p>
       )}
       {found.length > 0 && (

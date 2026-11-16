@@ -86,7 +86,7 @@ test.describe('R9. one Bitcoin deposit address per deposit', () => {
 
     await reopenWithoutReceipts(app);
     await app.page.getByRole('button', { name: 'Search with my wallet' }).click();
-    await expect(app.progress('Found 1 deposit address for this wallet.')).toBeVisible();
+    await expect(app.progress('Found 1 registered deposit address for this wallet.')).toBeVisible();
     expect(world.emily.reclaimKeyLookups.at(-1)).toBe(wallets.stacks.account.paymentKey.xOnly);
     await foundButton(app, started.receipt.depositAddress).click();
     await expect(app.progress(RECLAIM_COPY.signersMayMint)).toBeVisible();
@@ -149,5 +149,29 @@ test.describe('R9. one Bitcoin deposit address per deposit', () => {
     await foundButton(app, started.receipt.depositAddress).click();
     await expect(app.progress(PROGRESS.minting)).toBeVisible();
     await expect(app.definition('Bitcoin payout')).toContainText(payout.outpoint.txid);
+  });
+
+  test('when Emily knows no registered deposit, the page scans Bitcoin by itself and finds it', async ({
+    app,
+    world,
+  }) => {
+    const started = await startAwaitingFunds(app);
+    await toPayoutConfirmed(app, world);
+    await reopenWithoutReceipts(app);
+    world.addFault({
+      service: 'emily',
+      path: /^\/deposit\/reclaim-pubkeys\//,
+      outcome: json({ nextToken: null, deposits: [] }, 200),
+    });
+    await app.page.getByRole('button', { name: 'Search with my wallet' }).click();
+    await expect(
+      app.progress(/^The sBTC signers’ API knows no registered deposits for this wallet\./)
+    ).toBeVisible();
+    await expect(
+      app.progress(
+        'Found 1 deposit address for this wallet. Deposits made while the sBTC signers used an earlier key are not found this way.'
+      )
+    ).toBeVisible({ timeout: 60_000 });
+    await expect(foundButton(app, started.receipt.depositAddress)).toBeVisible();
   });
 });
