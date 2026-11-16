@@ -200,16 +200,6 @@ describe('send record keys', () => {
     expect(offered(records.read(TWO, 'evm'), 'PENDING_DEPOSIT')).toBe('offer');
     expect(offered(records.read(ONE, 'evm'), 'PENDING_DEPOSIT')).toBe('record');
   });
-
-  it('ignores the old session records keyed by the Bitcoin address', () => {
-    const storage = fakeStorage([
-      ['portage:sent-tx:bc1pytlwt3qfg4rdrk3yxtmdhcjvy0l63yp7qh3jra5xwq8yt6w4fvhqyjl7dx', HASH],
-      ['stxonector:sent-tx:bc1pytlwt3qfg4rdrk3yxtmdhcjvy0l63yp7qh3jra5xwq8yt6w4fvhqyjl7dx', HASH],
-    ]);
-    const records = createSendRecords(() => storage, browserLocks().tab());
-    expect(records.read(ONE, 'evm')).toBeNull();
-    expect(offered(records.read(ONE, 'evm'), 'PENDING_DEPOSIT')).toBe('offer');
-  });
 });
 
 describe('when the send button is offered', () => {

@@ -6,7 +6,6 @@ import { SOLANA_MAINNET_CAIP2, type SourceWallet, WALLETCONNECT_PROJECT_ID } fro
 import {
   WALLETCONNECT_RELAY_URL,
   WALLETCONNECT_STORAGE_PREFIX,
-  migrateWalletConnectStorage,
   walletConnectMetadata,
 } from '../../shared/index.js';
 import {
@@ -53,8 +52,7 @@ function ignore(): undefined {
   return undefined;
 }
 
-async function initClient(): Promise<Client> {
-  await migrateWalletConnectStorage();
+function initClient(): Promise<Client> {
   return UniversalProvider.init({
     projectId: WALLETCONNECT_PROJECT_ID,
     relayUrl: WALLETCONNECT_RELAY_URL,

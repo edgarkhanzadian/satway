@@ -32,10 +32,6 @@ import {
   sendAmountOf,
   verifyReceipt,
 } from '../../../src/shared/receipt.js';
-import {
-  STXONECTOR_RECEIPTS_KEY,
-  migrateBrowserStorage,
-} from '../../../src/shared/storage-migration.js';
 
 const D = {
   txid: '5ab7ae554358d3ffdab7cc48db49ff144c5ae4fdd617b4140eac1b1936109bf5',
@@ -1237,45 +1233,8 @@ describe('downloadReceipt', () => {
   });
 });
 
-describe('receipts saved under the old project name', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  async function oldStyleReceipt(): Promise<Receipt> {
-    const receipt = await receiptFor(world());
-    receipt.quoteResponse.quoteRequest.referral = 'stxonector';
-    return receipt;
-  }
-
-  it('still load and verify from an old-style receipt file', async () => {
-    const file: unknown = JSON.parse(JSON.stringify(await oldStyleReceipt(), null, 2));
-    const verified = verifyReceipt(file);
-    expect(verified.depositAddress).toBe(D.address);
-    expect(verified.quoteResponse.quoteRequest.referral).toBe('stxonector');
-  });
-
-  it('are found after the storage migration', async () => {
-    const data = new Map<string, string>([
-      [STXONECTOR_RECEIPTS_KEY, JSON.stringify([await oldStyleReceipt()])],
-    ]);
-    vi.stubGlobal('localStorage', {
-      get length() {
-        return data.size;
-      },
-      key: (i: number) => [...data.keys()][i] ?? null,
-      getItem: (k: string) => data.get(k) ?? null,
-      setItem: (k: string, v: string) => void data.set(k, v),
-      removeItem: (k: string) => void data.delete(k),
-    });
-    vi.stubGlobal('sessionStorage', undefined);
-    migrateBrowserStorage();
-    expect(data.has(STXONECTOR_RECEIPTS_KEY)).toBe(false);
-    expect(data.has(RECEIPTS_KEY)).toBe(true);
-    expect(loadReceipts().map(r => r.depositAddress)).toEqual([D.address]);
-  });
-
-  it('new receipt files use the new name', async () => {
+describe('receipt files', () => {
+  it('are named after the project', async () => {
     expect(receiptFileName(await receiptFor(world()))).toMatch(/^satway-deposit-/);
   });
 });

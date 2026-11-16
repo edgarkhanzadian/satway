@@ -42,10 +42,7 @@ async function freshStorage(app: SatwayApp): Promise<void> {
 }
 
 test.describe('R6. recovering a deposit from a receipt file', () => {
-  test('a valid receipt in a browser with no storage is tracked; one from the old project name too', async ({
-    app,
-    world,
-  }) => {
+  test('a valid receipt in a browser with no storage is tracked', async ({ app, world }) => {
     const started = await startAwaitingFunds(app);
     world.reportDeposit();
     await freshStorage(app);
@@ -61,15 +58,6 @@ test.describe('R6. recovering a deposit from a receipt file', () => {
     expect(Object.keys(await app.storage()).filter(k => k.startsWith('satway.receipts'))).toEqual(
       []
     );
-
-    const old = await variant(
-      'old-name.json',
-      edited(started.receipt, r => setQuoteRequest(r, 'referral', 'stxonector'))
-    );
-    await app.openRecover();
-    await app.uploadReceipt(old);
-    await expect(app.progress(PROGRESS.swapping)).toBeVisible();
-    await expect(app.sendError).toHaveCount(0);
   });
 
   test('a corrupt or inconsistent file is refused with a clear message and nothing is tracked', async ({

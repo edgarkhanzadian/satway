@@ -42,7 +42,7 @@ apps/web/src/
   app/         main.tsx, app.tsx, app.css: composes the page
   features/    deposit, recover, chain-wallets (From panel), stacks-wallet (To panel)
   ui/          presentational components and shared panel styles
-  shared/      backend client, receipts, progress checks, storage and its migration, config
+  shared/      backend client, receipts, progress checks, storage, config
 apps/api/src/
   http/        routes, the 1Click proxy, POST /deposits
   notifier/    the scheduled signer notifier
@@ -322,9 +322,8 @@ allowed per test with `harness.allowConsoleErrors(pattern)`.
   on (spend validation, world clock and KV expiry, EVM pending/reverted/lost replies and events,
   Solana blockhash expiry, commitments and send faults, held requests).
 - `s1-…` to `s6-…` (phase 3, resilience): our backend down at each step, each upstream down,
-  hanging or malformed while a deposit is tracked, browser storage blocked or full, the
-  `stxonector` and `portage` to `satway` storage migration, reloads, history and tab switches mid-flow, and
-  a deposit left open for hours (requests and timers per poll stay constant; terminal states
+  hanging or malformed while a deposit is tracked, browser storage blocked or full, reloads,
+  history and tab switches mid-flow, and a deposit left open for hours (requests and timers per poll stay constant; terminal states
   stop polling).
 - `q1-…` to `q7-…` (phase 3, quality gates): axe (`@axe-core/playwright`, serious and critical
   fail) plus structure, names, route `aria-current`, live regions and visible focus in every
