@@ -12,6 +12,7 @@ import {
 } from '@satway/core';
 
 import {
+  claimDepositIndex,
   depositOrigins,
   liveQuoteWorse,
   localDepositIndices,
@@ -663,6 +664,7 @@ describe('prepareDeposit: one deposit address per deposit', () => {
       fetchFn: w.fetchFn,
       randomInt: () => 0,
     });
+    expect(claimDepositIndex(first.receipt, [])).toBe(true);
     const second = await prepareDeposit(config, w.backend, other, {
       dry: false,
       fetchFn: w.fetchFn,
@@ -671,6 +673,25 @@ describe('prepareDeposit: one deposit address per deposit', () => {
     expect(first.receipt.depositIndex).toBe(0);
     expect(second.receipt.depositIndex).toBe(1);
     expect(second.receipt.depositAddress).not.toBe(first.receipt.depositAddress);
+  });
+
+  it('a live quote that is never activated gives its index back, and a taken index cannot be claimed twice', async () => {
+    const owner = {
+      stacksAddress: 'SP2J6ZY48GV1EZ5V2V5RB9MP66SW86PYKKNRV9EJ7',
+      reclaimPublicKey: D.reclaimPublicKey,
+    };
+    const w = world();
+    const other = { ...input, ...owner };
+    const options = { dry: false, fetchFn: w.fetchFn, randomInt: () => 0 };
+    const discarded = await prepareDeposit(config, w.backend, other, options);
+    const kept = await prepareDeposit(config, w.backend, other, options);
+    expect(discarded.receipt.depositIndex).toBe(0);
+    expect(kept.receipt.depositIndex).toBe(0);
+    expect(claimDepositIndex(kept.receipt, [])).toBe(true);
+    expect(claimDepositIndex(discarded.receipt, [])).toBe(false);
+    const next = await prepareDeposit(config, w.backend, other, options);
+    expect(next.receipt.depositIndex).toBe(1);
+    expect(claimDepositIndex(next.receipt, [next.receipt])).toBe(false);
   });
 
   it('counts receipts saved in this browser for the same wallet and signer key only', async () => {

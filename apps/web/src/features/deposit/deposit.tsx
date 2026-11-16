@@ -63,7 +63,13 @@ import {
   keepRegistering,
   registeredThisSession,
 } from './background-registration.js';
-import { type Prepared, depositOrigins, liveQuoteWorse, prepareDeposit } from './flow.js';
+import {
+  type Prepared,
+  claimDepositIndex,
+  depositOrigins,
+  liveQuoteWorse,
+  prepareDeposit,
+} from './flow.js';
 
 const fields = field();
 
@@ -230,6 +236,11 @@ export function Deposit(props: {
   }
 
   async function activate(prepared: Prepared) {
+    if (!claimDepositIndex(prepared.receipt)) {
+      throw new Error(
+        'Another deposit in this browser already uses this Bitcoin deposit address. Get a new quote to continue.'
+      );
+    }
     const remembered = rememberReceipt(prepared.receipt);
     downloadReceipt(prepared.receipt);
     const swapAddress = prepared.receipt.quoteResponse.quote.depositAddress;

@@ -105,13 +105,6 @@ function ownerKey(owner: DepositIndexOwner): string {
 
 const reservedThisSession = new Map<string, Set<number>>();
 
-function reserve(owner: DepositIndexOwner, depositIndex: number): void {
-  const key = ownerKey(owner);
-  const set = reservedThisSession.get(key) ?? new Set<number>();
-  set.add(depositIndex);
-  reservedThisSession.set(key, set);
-}
-
 export function localDepositIndices(
   owner: DepositIndexOwner,
   receipts: readonly Receipt[] = loadReceipts()
@@ -119,6 +112,18 @@ export function localDepositIndices(
   const key = ownerKey(owner);
   const saved = receipts.filter(r => ownerKey(r) === key).map(r => r.depositIndex);
   return [...new Set([...saved, ...(reservedThisSession.get(key) ?? [])])].sort((a, b) => a - b);
+}
+
+export function claimDepositIndex(
+  receipt: Receipt,
+  receipts: readonly Receipt[] = loadReceipts()
+): boolean {
+  if (localDepositIndices(receipt, receipts).includes(receipt.depositIndex)) return false;
+  const key = ownerKey(receipt);
+  const set = reservedThisSession.get(key) ?? new Set<number>();
+  set.add(receipt.depositIndex);
+  reservedThisSession.set(key, set);
+  return true;
 }
 
 export interface PrepareOptions {
@@ -142,7 +147,6 @@ async function depositAddressFor(
     randomInt: options.randomInt ?? randomBelow,
     fetchFn: options.fetchFn,
   });
-  reserve(owner, choice.deposit.depositIndex);
   return choice.deposit;
 }
 
