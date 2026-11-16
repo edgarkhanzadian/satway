@@ -47,7 +47,7 @@ async function settled(): Promise<void> {
   for (let i = 0; i < 10; i++) await Promise.resolve();
 }
 
-function harness(initial: TrackingState, options: { holdPolls?: boolean } = {}) {
+function harness(initial: TrackingState, options: { holdPolls?: boolean; pollError?: Error } = {}) {
   const polls: { effect: PollEffect; signal: AbortSignal }[] = [];
   const txids: {
     effect: TxidEffect;
@@ -58,6 +58,7 @@ function harness(initial: TrackingState, options: { holdPolls?: boolean } = {}) 
     check(effect, signal) {
       polls.push({ effect, signal });
       if (options.holdPolls === true) return deferred<WithdrawalSnapshot>().promise;
+      if (options.pollError) return Promise.reject(options.pollError);
       return Promise.resolve(snapshot(effect.stacksTxid));
     },
     checkTxid(effect) {
@@ -95,6 +96,15 @@ describe('the tracking effects, run against the store as the screen mounts and u
     await settled();
     expect(polls).toHaveLength(2);
     expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it('a poll failure with no message says the check failed, never an empty reason', async () => {
+    const { store } = harness(initialTracking(SENT, false), { pollError: new Error() });
+    store.dispatch({ type: 'shown', receipt: SENT, walletPrompt: false });
+    await settled();
+    expect(store.get()).toMatchObject({
+      problem: 'Could not refresh: the check failed without saying why. Retrying.',
+    });
   });
 
   it('Hide then Follow leaves one timer: the hidden screen’s timer and poll are stopped', async () => {

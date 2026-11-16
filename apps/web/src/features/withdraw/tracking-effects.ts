@@ -1,6 +1,10 @@
 import { type PastedWithdrawalCheck, errorMessage } from '@satway/core';
 
-import type { WithdrawalReceiptFile, WithdrawalSnapshot } from '../../shared/index.js';
+import {
+  type WithdrawalReceiptFile,
+  type WithdrawalSnapshot,
+  failureReason,
+} from '../../shared/index.js';
 import type { TrackingEffect, TrackingEvent } from './tracking-state.js';
 
 export type PollEffect = Extract<TrackingEffect, { type: 'check' }>;
@@ -32,7 +36,7 @@ export function trackingRunner(
       flow.dispatch({
         type: 'poll-failed',
         request: effect.request,
-        message: errorMessage(err) ?? 'unknown error',
+        message: failureReason(err),
       });
     }
   }

@@ -300,6 +300,15 @@ describe('tracking: polling', () => {
     expect(h.view().panel).toEqual({ kind: 'unknown' });
   });
 
+  it('a poll failure with no message says the check failed, never "undefined"', async () => {
+    const h = harness({ polls: [new Error()] });
+    h.store.dispatch({ type: 'shown', first: undefined, registered: false });
+    await settle();
+    expect(h.store.get().problem).toBe(
+      'Could not refresh: the check failed without saying why. Retrying.'
+    );
+  });
+
   it('a poll failure with no reading at all leaves the payment unknown, not offered', async () => {
     const h = harness({ polls: [new Error('offline')] });
     h.store.dispatch({ type: 'shown', first: undefined, registered: false });

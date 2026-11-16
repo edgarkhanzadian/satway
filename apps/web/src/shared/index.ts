@@ -1,6 +1,7 @@
 export * from './abortable-fetch.js';
 export * from './backend.js';
 export * from './browser-storage.js';
+export * from './failure-reason.js';
 export * from './flow-store.js';
 export * from './latest-request.js';
 export * from './progress.js';

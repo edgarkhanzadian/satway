@@ -21,6 +21,7 @@ import {
   ProgressReadError,
   type Receipt,
   type Snapshot,
+  failureReason,
 } from '../../shared/index.js';
 import type { RegisteredSwaps } from './background-registration.js';
 import {
@@ -70,7 +71,7 @@ export function createTrackingRunner(deps: TrackingDeps): TrackingRunner {
         type: 'poll-failed',
         request: effect.request,
         reading: err instanceof ProgressReadError ? err.reading : { swap: null, remaining: null },
-        message: String(errorMessage(err)),
+        message: failureReason(err),
       });
     }
   }
