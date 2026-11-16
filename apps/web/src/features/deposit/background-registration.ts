@@ -62,16 +62,6 @@ export function registrationStep(
   };
 }
 
-async function attempt(
-  register: () => Promise<BackgroundRegistration>
-): Promise<BackgroundRegistration | null> {
-  try {
-    return await register();
-  } catch {
-    return null;
-  }
-}
-
 export interface RegisteredSwaps {
   has(swapAddress: string): boolean;
   add(swapAddress: string): void;
@@ -88,51 +78,6 @@ export function registeredSwapsInMemory(): RegisteredSwaps {
 }
 
 export const registeredThisSession: RegisteredSwaps = registeredSwapsInMemory();
-
-export function keepRegistering(
-  register: () => Promise<BackgroundRegistration>,
-  options: {
-    first?: BackgroundRegistration | null;
-    known?: { swaps: RegisteredSwaps; swapAddress: string };
-    onState(state: RegistrationState): void;
-  }
-): () => void {
-  let live = true;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const counts: AttemptCounts = { transient: 0, unknownSwap: 0 };
-  const known = options.known;
-
-  if (known?.swaps.has(known.swapAddress) === true) {
-    options.onState({ kind: 'registered' });
-    return () => undefined;
-  }
-
-  function settle(result: BackgroundRegistration | null): void {
-    if (!live) return;
-    const step = registrationStep(result, counts);
-    if (step.state.kind === 'registered' && known) known.swaps.add(known.swapAddress);
-    if (result === null || result.kind === 'unavailable') counts.transient += 1;
-    if (result?.kind === 'rejected' && result.code === UNKNOWN_SWAP) counts.unknownSwap += 1;
-    options.onState(step.state);
-    if (step.delayMs !== null) timer = setTimeout(() => void next(), step.delayMs);
-  }
-
-  async function next(): Promise<void> {
-    settle(await attempt(register));
-  }
-
-  if (options.first === undefined) {
-    options.onState({ kind: 'registering' });
-    void next();
-  } else {
-    settle(options.first);
-  }
-
-  return () => {
-    live = false;
-    clearTimeout(timer);
-  };
-}
 
 export const CLOSE_PAGE_NOTE =
   'You can close this page. The deposit continues, and you can check on it later by loading the receipt file.';
@@ -151,6 +96,16 @@ export function closingNote(state: RegistrationState, terminal: boolean): string
   if (state.kind === 'retrying')
     return `Keep this page open: the deposit is not registered for background tracking yet, because ${REASONS[state.problem]}. This page keeps trying. Until it succeeds, only this page can register your Bitcoin payment with the sBTC signers, so if you close it, open it again later and load the receipt file.`;
   return `Keep this page open until the deposit completes: it could not be registered for background tracking (${state.message}). While it is open, this page registers your Bitcoin payment with the sBTC signers itself. If you close it, open it again later and load the receipt file.`;
+}
+
+async function attempt(
+  register: () => Promise<BackgroundRegistration>
+): Promise<BackgroundRegistration | null> {
+  try {
+    return await register();
+  } catch {
+    return null;
+  }
 }
 
 export async function firstRegistration(
