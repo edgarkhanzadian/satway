@@ -178,6 +178,19 @@ describe('previewFor', () => {
     expect(w.urls).toHaveLength(0);
   });
 
+  it('refuses the delivered token’s own contract as the recipient, before any request', async () => {
+    const w = world();
+    const contract = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913';
+    const form = { ...FORM, token: token({ contractAddress: contract }) };
+    await expect(
+      previewFor(w.deps, { ...form, recipient: `0x${contract.slice(2).toUpperCase()}` })
+    ).rejects.toThrow(/contract of the token you receive/);
+    await expect(
+      liveQuoteFor(w.deps, { ...form, recipient: contract }, SENDER, null)
+    ).rejects.toThrow(/contract of the token you receive/);
+    expect(w.urls).toHaveLength(0);
+  });
+
   it('explains an amount below the minimum without asking for a quote', async () => {
     const w = world();
     await expect(previewFor(w.deps, { ...FORM, amount: '9000' })).rejects.toThrow(

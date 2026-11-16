@@ -95,7 +95,7 @@ function amountProblem(check: WithdrawalAmountCheck): Error {
 }
 
 function checkedRecipient(form: WithdrawalForm): string {
-  const check = checkDestinationAddress(form.token.blockchain, form.recipient.trim());
+  const check = checkDestinationAddress(form.token.blockchain, form.recipient.trim(), form.token);
   if (!check.ok) throw new Error(check.message);
   return check.address;
 }

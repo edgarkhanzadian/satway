@@ -97,6 +97,35 @@ test.describe('X2. a withdrawal that is refused before anything is signed or sen
     expect(world.oneClick.quotes).toHaveLength(0);
   });
 
+  test('a recipient that would burn the delivery is refused before any quote', async ({
+    app,
+    world,
+    wallets,
+  }) => {
+    const withdraw = await openWithdraw(app, world, wallets);
+    const getQuote = app.page.getByRole('button', { name: 'Get quote' });
+    await withdraw.fill({
+      asset: 'USDC on base',
+      amount: String(WITHDRAW_SATS),
+      recipient: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+    });
+    await getQuote.click();
+    await expect(app.page.getByRole('alert')).toHaveText(
+      'This is the contract of the token you receive, not a wallet. Funds sent there are lost. Enter an address you control.'
+    );
+    for (const recipient of [
+      '0x0000000000000000000000000000000000000001',
+      '0x000000000000000000000000000000000000dEaD',
+    ]) {
+      await withdraw.fill({ amount: String(WITHDRAW_SATS), recipient });
+      await getQuote.click();
+      await expect(app.page.getByRole('alert')).toHaveText(
+        'This is a reserved system or burn address, not a wallet. Funds sent there are lost.'
+      );
+    }
+    expect(world.oneClick.quotes).toHaveLength(0);
+  });
+
   test('the live quote is worse than the preview: the confirm step says so before signing', async ({
     app,
     world,
