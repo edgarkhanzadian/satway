@@ -1,6 +1,5 @@
 export * from './backend.js';
 export * from './browser-storage.js';
-export * from './config.js';
 export * from './latest-request.js';
 export * from './progress.js';
 export * from './receipt.js';

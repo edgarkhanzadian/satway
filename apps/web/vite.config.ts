@@ -10,11 +10,7 @@ function contentSecurityPolicy(apiUrl: string): Plugin {
     'https://stacks-node.alexlab.co',
     'https://mempool.space',
     'https://sbtc-emily.com',
-    'https://*.walletconnect.com',
-    'https://*.walletconnect.org',
-    'wss://*.walletconnect.com',
-    'wss://*.walletconnect.org',
-    'wss://relay.walletconnect.org',
+    'https://rpc.walletconnect.org',
   ];
   const policy = [
     "default-src 'self'",
@@ -23,7 +19,7 @@ function contentSecurityPolicy(apiUrl: string): Plugin {
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
     `connect-src ${connect.join(' ')}`,
-    'frame-src https://verify.walletconnect.org',
+    "frame-src 'none'",
     "base-uri 'self'",
     "object-src 'none'",
     "form-action 'none'",

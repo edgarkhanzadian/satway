@@ -213,15 +213,4 @@ test.describe('Q1. accessibility of every main state, light and dark', () => {
     await expect(app.page.getByText(/^Could not refresh: /)).toBeVisible();
     await audit(app, 'refresh error', { tracking: true });
   });
-
-  test.describe('WalletConnect', () => {
-    test.use({ walletConnect: 'fake-relay' });
-
-    test('the pairing box', async ({ app }) => {
-      await app.open();
-      await app.from.getByRole('button', { name: /WalletConnect/ }).click();
-      await expect(app.page.getByRole('img', { name: 'WalletConnect pairing code' })).toBeVisible();
-      await audit(app, 'walletconnect pairing', { tracking: false });
-    });
-  });
 });

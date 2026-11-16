@@ -936,7 +936,7 @@ describe('a wallet request that may still be open', () => {
     return { records, record };
   }
 
-  it('waits out the WalletConnect request expiry before an attempt can be cleared', () => {
+  it('waits out the wallet prompt window before an attempt can be cleared', () => {
     const { record } = recordInProgress();
     expect(WALLET_PROMPT_WINDOW_MS).toBe(15 * 60_000);
     expect(promptWaitMs(record, NOW)).toBe(WALLET_PROMPT_WINDOW_MS);

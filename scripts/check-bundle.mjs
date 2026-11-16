@@ -55,12 +55,10 @@ if (!csp) {
   if (!/object-src\s+'none'/.test(csp)) problems.push("CSP must set object-src 'none'");
   if (!/base-uri\s+'self'/.test(csp)) problems.push("CSP must set base-uri 'self'");
 
-  // The only page the app may frame is the WalletConnect Verify attestation.
+  // The app frames nothing.
   const frameSrc = /frame-src([^;]*)/.exec(csp)?.[1]?.trim() ?? '';
-  if (frameSrc !== 'https://verify.walletconnect.org')
-    problems.push(
-      `CSP frame-src must be exactly https://verify.walletconnect.org (found: ${frameSrc})`
-    );
+  if (frameSrc !== "'none'")
+    problems.push(`CSP frame-src must be exactly 'none' (found: ${frameSrc})`);
   if (/(?:^|;)\s*child-src/.test(csp)) problems.push('CSP must not set child-src');
 
   // Connections go to a fixed list, plus the backend API origin from VITE_API_URL.
@@ -72,22 +70,11 @@ if (!csp) {
     'https://stacks-node.alexlab.co',
     'https://mempool.space',
     'https://sbtc-emily.com',
-    'https://*.walletconnect.com',
-    'https://*.walletconnect.org',
-    'wss://*.walletconnect.com',
-    'wss://*.walletconnect.org',
-    'wss://relay.walletconnect.org',
+    'https://rpc.walletconnect.org',
   ]);
   const connectSrc = (/connect-src([^;]*)/.exec(csp)?.[1] ?? '').trim().split(/\s+/);
-  if (!connectSrc.includes('wss://relay.walletconnect.org'))
-    problems.push(
-      'CSP connect-src must allow the WalletConnect relay wss://relay.walletconnect.org'
-    );
   // Solana sends read and simulate through Reown's RPC at rpc.walletconnect.org.
-  if (
-    !connectSrc.includes('https://rpc.walletconnect.org') &&
-    !connectSrc.includes('https://*.walletconnect.org')
-  )
+  if (!connectSrc.includes('https://rpc.walletconnect.org'))
     problems.push('CSP connect-src must allow the Solana RPC https://rpc.walletconnect.org');
   const extra = connectSrc.filter(source => !allowedConnect.has(source));
   const apiOrigin =

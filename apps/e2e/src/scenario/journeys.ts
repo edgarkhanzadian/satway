@@ -22,7 +22,7 @@ export const SEND_COPY = {
     'A payment from your wallet was started for this swap, in this tab or another one, and this page has not heard back from the wallet.',
   uncertainHeadline: 'Your wallet may have sent this payment, but this page could not confirm it.',
   promptOpen:
-    'The request may still be open in your wallet, in this browser or on your phone. Approve or reject it there. If your wallet shows no request, this page lets you start again 15 minutes after the payment was started.',
+    'The request may still be open in your wallet. Approve or reject it there. If your wallet shows no request, this page lets you start again 15 minutes after the payment was started.',
   checkWallet:
     'Check your wallet’s activity before doing anything else. Do not send again, from this wallet or any other, unless you are sure nothing left your wallet.',
   recordedNoTx: 'A payment has been recorded for this swap. Do not send again.',

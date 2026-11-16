@@ -21,22 +21,10 @@ import {
 } from '../wallets/stacks-wallet.js';
 import type { ApiWorker } from '../worker/worker.js';
 import { type Gate, gate } from '../world/clock.js';
-import { RELAY_ORIGIN, VERIFY_ORIGIN } from '../world/walletconnect-relay.js';
 import type { World } from '../world/world.js';
 import { type PageScriptOptions, installSatwayPage } from './page-script.js';
 
 export const BINDING = '__satwayE2E';
-
-export type WalletConnectMode = 'blocked' | 'fake-relay';
-
-const VERIFY_PAGE = [
-  '<!doctype html><html><head><title>verify</title><script>',
-  'const query = new URLSearchParams(location.search);',
-  "const part = value => btoa(JSON.stringify(value)).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '');",
-  "const attestation = [part({ alg: 'none', typ: 'JWT' }), part({ id: query.get('id'), origin: query.get('origin'), isVerified: true, isScam: false }), 'AAAA'].join('.');",
-  "parent.postMessage(JSON.stringify({ type: 'verify_attestation', attestation }), '*');",
-  '</script></head><body></body></html>',
-].join('\n');
 
 const ICON =
   'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiBmaWxsPSIjMzMzIi8+PC9zdmc+';
@@ -143,7 +131,6 @@ export class Harness {
   private lastActivity = performance.now();
   readonly consoleAllowances: RegExp[] = [];
   private counter = 0;
-  private walletConnect: WalletConnectMode = 'blocked';
   private readonly outages: BackendOutage[] = [];
   private heldByOutage = 0;
   private outageGate: Gate = gate();
@@ -159,8 +146,7 @@ export class Harness {
     this.wallets = wallets;
   }
 
-  async install(setup: WalletSetup, walletConnect: WalletConnectMode = 'blocked'): Promise<void> {
-    this.walletConnect = walletConnect;
+  async install(setup: WalletSetup): Promise<void> {
     this.wallets.evm.attach((event, payload) => this.emitEvm(event, payload));
     this.context.on('page', page => this.watchPage(page));
     for (const page of this.context.pages()) this.watchPage(page);
@@ -180,25 +166,6 @@ export class Harness {
       handledBy: 'blocked',
     };
     this.network.push(entry);
-    if (this.walletConnect === 'fake-relay' && new URL(ws.url()).origin === RELAY_ORIGIN) {
-      entry.handledBy = 'world';
-      const relay = this.world.relay;
-      const socket = {
-        send: (text: string) => ws.send(text),
-        close() {
-          void unlessClosed(() => ws.close({ code: 1001, reason: 'The fake relay went away' }));
-        },
-      };
-      const onFrame = relay.accept(socket, ws.url());
-      if (!onFrame) {
-        entry.status = 'network-error';
-        return;
-      }
-      entry.status = 101;
-      ws.onMessage(message => onFrame(typeof message === 'string' ? message : message.toString()));
-      ws.onClose(() => relay.closed(socket));
-      return;
-    }
     this.blocked.push(entry);
     await ws.close({ code: 1008, reason: 'Blocked by the e2e network layer' });
   }
@@ -393,23 +360,6 @@ export class Harness {
         entry.status = reply.status;
         await unlessClosed(() =>
           route.fulfill({ status: reply.status, headers: reply.headers, body: reply.body })
-        );
-        return;
-      }
-      if (
-        this.walletConnect === 'fake-relay' &&
-        url.origin === VERIFY_ORIGIN &&
-        url.pathname === '/v3/attestation'
-      ) {
-        entry.handledBy = 'world';
-        entry.status = 200;
-        this.world.relay.verifyLoads.push(request.url());
-        await unlessClosed(() =>
-          route.fulfill({
-            status: 200,
-            headers: { 'content-type': 'text/html; charset=utf-8' },
-            body: VERIFY_PAGE,
-          })
         );
         return;
       }

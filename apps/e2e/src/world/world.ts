@@ -23,7 +23,6 @@ import { BTC_ASSET_ID, OneClick, type Swap, TOKENS } from './oneclick.js';
 import { Rng } from './random.js';
 import { parseDepositScript } from './sbtc-scripts.js';
 import { type Credit, NATIVE_SOL_ASSET, SolanaChain } from './solana.js';
-import { FakeRelay } from './walletconnect-relay.js';
 import { WithdrawalWorld } from './withdrawals.js';
 
 export type Caller = 'page' | 'worker' | 'notifier' | 'wallet' | 'test';
@@ -149,7 +148,6 @@ export class World {
   readonly oneClick: OneClick;
   readonly solana: SolanaChain;
   readonly evm: EvmChains;
-  readonly relay: FakeRelay;
   readonly withdrawals: WithdrawalWorld;
   readonly log: WorldLogEntry[] = [];
   readonly unexpected: string[] = [];
@@ -173,7 +171,6 @@ export class World {
     this.rng = new Rng(seed);
     this.evidenceRng = new Rng(`${seed}#signer-evidence`);
     this.bitcoin = new BitcoinChain(this.rng, START_HEIGHT, Math.floor(this.baseNow() / 1000));
-    this.relay = new FakeRelay(this.rng, () => this.now().getTime());
     this.treasury = new Wallet(this.bitcoin, bitcoinKey(this.rng), this.rng, 5_000_000_000);
     this.signer = bitcoinKey(this.rng);
     this.emily = new Emily(this.bitcoin, () => this.signer.xOnly);

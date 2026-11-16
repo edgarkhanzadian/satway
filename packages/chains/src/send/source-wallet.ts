@@ -98,7 +98,7 @@ export class SendError extends Error {
   }
 }
 
-const USER_REJECTED_CODES: ReadonlySet<unknown> = new Set([4001, 5000]);
+const USER_REJECTED_CODES: ReadonlySet<unknown> = new Set([4001]);
 
 export function isUserRejection(err: unknown): boolean {
   if (typeof err !== 'object' || err === null || !('code' in err)) return false;

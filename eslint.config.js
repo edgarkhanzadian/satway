@@ -158,8 +158,7 @@ const chainsRestrictedImports = {
     { group: ['react/*', 'react-dom/*'], message: 'packages/chains is UI-free.' },
     {
       group: ['@walletconnect/*', '@reown/*'],
-      message:
-        'packages/chains does not connect wallets. WalletConnect lives in apps/web/src/features/chain-wallets.',
+      message: 'packages/chains does not connect wallets. That lives in apps/web.',
     },
     stylesOnlyInWeb,
     {

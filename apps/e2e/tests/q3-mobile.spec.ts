@@ -131,18 +131,5 @@ for (const size of SIZES) {
       await expect(app.progress(/^Reclaim sent for /)).toBeVisible();
       await step(app, 'reclaim sent');
     });
-
-    test.describe('WalletConnect', () => {
-      test.use({ walletConnect: 'fake-relay' });
-
-      test('"Open in wallet" is offered at mobile width', async ({ app }) => {
-        await app.open();
-        await tap(app.from.getByRole('button', { name: /WalletConnect/ }), 'WalletConnect');
-        const open = app.page.getByRole('link', { name: 'Open in wallet' });
-        await expectTapTarget(open, 'Open in wallet');
-        await expect(open).toHaveAttribute('href', /^wc:[0-9a-f]{64}@2\?/);
-        await step(app, 'walletconnect pairing');
-      });
-    });
   });
 }

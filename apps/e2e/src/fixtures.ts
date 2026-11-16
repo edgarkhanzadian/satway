@@ -1,12 +1,7 @@
 import { type BrowserContext, test as base, expect } from '@playwright/test';
 
 import { SatwayApp } from './app/satway-app.js';
-import {
-  Harness,
-  type WalletConnectMode,
-  type WalletSetup,
-  type Wallets,
-} from './browser/harness.js';
+import { Harness, type WalletSetup, type Wallets } from './browser/harness.js';
 import {
   type Allowances,
   NO_ALLOWANCES,
@@ -24,7 +19,6 @@ interface TestOptions {
   allow: Allowances;
   evmStartChainId: number;
   workerEnv: WorkerEnvOverrides;
-  walletConnect: WalletConnectMode;
 }
 
 interface TestFixtures {
@@ -62,7 +56,6 @@ export const test = base.extend<TestOptions & TestFixtures, WorkerFixtures>({
   allow: [NO_ALLOWANCES, { option: true }],
   evmStartChainId: [1, { option: true }],
   workerEnv: [{}, { option: true }],
-  walletConnect: ['blocked', { option: true }],
 
   realNodeFetches: [
     async ({}, use) => {
@@ -97,11 +90,11 @@ export const test = base.extend<TestOptions & TestFixtures, WorkerFixtures>({
     });
   },
 
-  async context({ context, world, api, wallets, walletSetup, walletConnect }, use) {
+  async context({ context, world, api, wallets, walletSetup }, use) {
     const harness = new Harness(context, world, api, wallets);
     harnesses.set(context, harness);
     await context.clock.install({ time: world.now() });
-    await harness.install(walletSetup, walletConnect);
+    await harness.install(walletSetup);
     await use(context);
   },
 

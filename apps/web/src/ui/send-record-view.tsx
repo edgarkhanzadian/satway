@@ -68,9 +68,9 @@ export function SendRecordView(props: {
       {props.note && <p className={uncertainLine}>{props.note}</p>}
       {promptOpen && needsConfirmation(record) && (
         <p className={uncertainLine}>
-          The request may still be open in your wallet, in this browser or on your phone. Approve or
-          reject it there. If your wallet shows no request, this page lets you start again{' '}
-          {WALLET_PROMPT_WINDOW_MS / 60_000} minutes after the payment was started.
+          The request may still be open in your wallet. Approve or reject it there. If your wallet
+          shows no request, this page lets you start again {WALLET_PROMPT_WINDOW_MS / 60_000}{' '}
+          minutes after the payment was started.
         </p>
       )}
       {(canResendSigned(record) || confirmable) && (

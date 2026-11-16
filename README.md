@@ -215,8 +215,8 @@ requests), and `world.log`, `world.requestsTo(service, filter)` for assertions.
 Every browser request goes through one route handler (`src/browser/harness.ts`): the app
 origin passes through to the static server, the API origin goes to the in-process Worker,
 Hiro, mempool.space, Emily and the Solana RPC go to the world, and anything else (including
-1Click from the page, the WalletConnect relay and its verify page unless a test opts into the
-fake relay below, and every other WebSocket) is aborted and recorded. On top of that the browser runs behind a proxy that does not exist
+1Click from the page and every WebSocket) is aborted and recorded. On top of that the browser
+runs behind a proxy that does not exist
 (`127.0.0.1:9`, loopback excluded), so a request that escaped the routing layer would fail,
 and each test process replaces the global `fetch` with a trap. After every test the fixture
 fails it on any blocked request, CSP violation, CORS failure, uncaught page error, console
@@ -228,21 +228,6 @@ prove that each guard fires.
 
 `harness.backendDown({ method, path, mode: 'refused' | 'hang', times })` takes our Worker
 off the network for matching requests (connection refused, or held until `backendUp()`).
-
-**WalletConnect against a fake relay.** With `test.use({ walletConnect: 'fake-relay' })`, and
-only then, the relay WebSocket (`wss://relay.walletconnect.org`) is routed to
-`world.relay` (`src/world/walletconnect-relay.ts`) and `https://verify.walletconnect.org/v3/attestation`
-is served a small page that posts an unsigned attestation back, as the real Verify iframe
-does. The fake relay speaks the relay JSON-RPC the 2.26 client uses (`wc_proposeSession`,
-`irn_subscribe`, `irn_batchSubscribe`, `irn_unsubscribe`, `irn_publish`,
-`irn_batchFetchMessages`, `irn_subscription` deliveries and their acknowledgements); the
-client's auth JWT is in the connect URL and is not checked. `world.relay.mode = 'unreachable'`
-closes every connection. `src/wallets/walletconnect-wallet.ts` plays the wallet side in Node
-with the protocol's own crypto (X25519, HKDF-SHA256, ChaCha20-Poly1305 envelopes, from
-`node:crypto` and `@noble/curves`): it reads and decrypts the proposal, approves a session
-with chosen EVM chains and Solana, answers session requests (an `eth_sendTransaction` reaches
-`world.evm`) and has the same scriptable `behaviour`. Every other WalletConnect host stays
-blocked.
 
 ### Wallets (`src/wallets`, `src/browser/page-script.ts`)
 
@@ -263,7 +248,7 @@ binding, where the wallet logic, keys and request log live:
   taproot addresses from real keys, and signs PSBTs for real (`signPsbt`).
 
 Script any wallet per test through `wallets.<evm|solana|stacks>.behaviour`: `reject(method,
-{ code: 4001 | 5000 })`, `hang(method)`, `late(method)` (returns a gate to `release()`),
+{ code: 4001 })`, `hang(method)`, `late(method)` (returns a gate to `release()`),
 `malformed(method, value)`, `loseReply(method, 'hang' | { code, message })` (the wallet does
 the work, for example broadcasts, and then the reply never comes or is an error); every request
 is in `behaviour.requests`. The EVM wallet also has `switchMode = 'ignore'` (answers
@@ -330,7 +315,6 @@ allowed per test with `harness.allowConsoleErrors(pattern)`.
   main state in both themes; keyboard-only deposit and reclaim; 390x844 and 360x640 with touch;
   reduced motion and theme tokens; WebKit download and reclaim; the CSP,
   `eval`/`Function`, allowed origins, referrer and secrets of the production build.
-- `w1-…`, `w2-…`: WalletConnect pairing and a full session against the fake relay.
 
 ### Live canary (real services, read-only, not part of `pnpm test:e2e`)
 
@@ -376,8 +360,7 @@ unexpected pass) once the app is fixed, and should then become a normal test.
 ### Not covered
 
 workerd and Cloudflare KV semantics beyond TTL expiry, real wallets and their UIs (only the
-manual smoke test), the real WalletConnect relay and wallets (a fake relay and a Node wallet
-stand in; Solana over WalletConnect is not driven), real 1Click, Emily and signer behaviour
+manual smoke test), real 1Click, Emily and signer behaviour
 beyond what the read-only canary sees (no live quote, no payout), Bitcoin scripts other than
 p2wpkh, taproot key paths and the two sBTC deposit leaves, absolute locktimes, RBF,
 cross-process `localStorage` timing beyond what Chromium does locally, Firefox, visual

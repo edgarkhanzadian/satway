@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { css, cx } from 'satway-styles/css';
 import { actions, button, details, notice } from 'satway-styles/recipes';
@@ -21,8 +21,6 @@ import {
   connectStandardSolana,
   discoverSolanaWallets,
 } from './solana-wallet.js';
-import { WalletConnectOption } from './walletconnect-panel.js';
-import { endWalletSession, sessionKey } from './walletconnect.js';
 
 const toSideActions = cx(
   actions(),
@@ -67,33 +65,10 @@ export function SourceWalletPanel(props: {
   const [hasSolana, setHasSolana] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const current = useRef(props.wallet);
-  const { onChange } = props;
 
-  useEffect(() => {
-    current.current = props.wallet;
-  }, [props.wallet]);
-
-  function onWalletConnectEnded(key: object) {
-    if (sessionKey(current.current) !== key) return;
-    onChange(null);
-    setError('The wallet ended the WalletConnect session.');
-  }
-
-  async function disconnect() {
-    const wallet = props.wallet;
-    setBusy(true);
+  function disconnect() {
     setError(null);
-    try {
-      await endWalletSession(wallet);
-    } catch (err) {
-      setError(
-        `The WalletConnect session may still be open in your wallet: ${errorMessage(err) ?? 'unknown error'}`
-      );
-    } finally {
-      setBusy(false);
-      onChange(null);
-    }
+    props.onChange(null);
   }
 
   useEffect(() => {
@@ -153,7 +128,7 @@ export function SourceWalletPanel(props: {
           )}
           <p className={notice()}>{connectedNote(props.wallet, withdraw)}</p>
           <div className={withdraw ? toSideActions : actions()}>
-            <button className={button()} disabled={busy} onClick={() => void disconnect()}>
+            <button className={button()} disabled={busy} onClick={disconnect}>
               Disconnect
             </button>
           </div>
@@ -200,20 +175,9 @@ export function SourceWalletPanel(props: {
                 </WalletNote>
               </button>
             )}
-            <WalletConnectOption
-              disabled={busy}
-              onConnected={wallet => {
-                setError(null);
-                onChange(wallet);
-              }}
-              onEnded={onWalletConnectEnded}
-            />
           </div>
           {evmWallets.length === 0 && solanaWallets.length === 0 && !hasSolana && (
-            <p className={notice()}>
-              No EVM or Solana wallet was found in this browser. WalletConnect works with a wallet
-              on your phone.
-            </p>
+            <p className={notice()}>No EVM or Solana wallet was found in this browser.</p>
           )}
           <p className={notice()}>
             {withdraw

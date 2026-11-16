@@ -11,18 +11,18 @@ test.describe('harness self-checks: the always-on guards see what they must', ()
     harness,
     world,
   }) => {
-    await app.page.evaluate(async () => {
+    const outside = await app.page.context().newPage();
+    await outside.evaluate(async () => {
       try {
-        await fetch('https://explorer-api.walletconnect.com/v3/wallets');
+        await fetch('https://outside.example/v3/wallets');
       } catch {
         return;
       }
     });
+    await outside.close();
     await harness.idle();
     const found = collectViolations(harness, world, [], NO_ALLOWANCES);
-    expect(found.blockedRequests.map(r => r.url)).toEqual([
-      'https://explorer-api.walletconnect.com/v3/wallets',
-    ]);
+    expect(found.blockedRequests.map(r => r.url)).toEqual(['https://outside.example/v3/wallets']);
     harness.acknowledge();
   });
 

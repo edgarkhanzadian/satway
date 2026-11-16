@@ -1,7 +1,6 @@
 import { realNow } from '../world/clock.js';
 
 export const USER_REJECTED = 4001;
-export const WALLET_REJECTED = 5000;
 
 export type Reaction =
   | { kind: 'approve' }

@@ -291,9 +291,9 @@ describe('isSentTxFor', () => {
 });
 
 describe('where a wallet send failed', () => {
-  it('recognises the user-rejection codes of EIP-1193 and WalletConnect only', () => {
+  it('recognises the EIP-1193 user-rejection code only', () => {
     expect(isUserRejection({ code: 4001, message: 'User rejected the request.' })).toBe(true);
-    expect(isUserRejection({ code: 5000, message: 'User rejected.' })).toBe(true);
+    expect(isUserRejection({ code: 5000, message: 'User rejected.' })).toBe(false);
     expect(isUserRejection({ code: -32603, message: 'User rejected' })).toBe(false);
     expect(isUserRejection(new Error('User rejected the request'))).toBe(false);
     expect(isUserRejection(null)).toBe(false);
