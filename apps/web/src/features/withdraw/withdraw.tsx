@@ -15,12 +15,7 @@ import {
   type WalletAccount,
   type WithdrawalBackend,
   activeWithdrawal,
-  downloadWithdrawalReceipt,
-  forgetWithdrawalDraft,
-  loadWithdrawals,
-  rememberWithdrawal,
   setActiveWithdrawal,
-  withdrawalId,
 } from '../../shared/index.js';
 import type { WithdrawalRouteUpdate } from '../../ui/index.js';
 import { WithdrawalTracking } from './tracking.js';
@@ -51,28 +46,9 @@ export function Withdraw(props: WithdrawProps) {
     return (
       <WithdrawalTracking
         backend={props.backend}
-        receipt={active.receipt}
-        receiptUnsaved={active.receiptUnsaved}
-        walletPrompt={active.walletPrompt}
+        active={active}
+        onActive={onActive}
         onRoute={onRoute}
-        onReceipt={receipt => {
-          const remembered = rememberWithdrawal(config, receipt);
-          setActiveWithdrawal(receipt);
-          downloadWithdrawalReceipt(receipt);
-          onActive(() => ({ receipt, receiptUnsaved: !remembered, walletPrompt: false }));
-        }}
-        onDiscard={receipt => {
-          const id = withdrawalId(receipt);
-          const stored = loadWithdrawals(config).find(r => withdrawalId(r) === id);
-          if (stored && stored.stacksTxid !== null) {
-            setActiveWithdrawal(stored);
-            onActive(() => ({ receipt: stored, receiptUnsaved: false, walletPrompt: false }));
-            return;
-          }
-          forgetWithdrawalDraft(config, receipt);
-          setActiveWithdrawal(null);
-          onActive(() => null);
-        }}
         onDone={() => {
           setActiveWithdrawal(null);
           onActive(() => null);

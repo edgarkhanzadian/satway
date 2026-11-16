@@ -1,38 +1,24 @@
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef } from 'react';
 
 import { css, cx } from 'satway-styles/css';
 import { styled } from 'satway-styles/jsx';
 import { actions, button, details, field, notice, sheet } from 'satway-styles/recipes';
 
 import {
-  type WithdrawalStatus,
-  checkPastedWithdrawalTransaction,
-  MAINNET_WITHDRAWAL_FLOW_CONFIG as config,
-  errorMessage,
-  normalizeStacksTxid,
-} from '@satway/core';
-
-import {
+  type ActiveWithdrawal,
   type Backend,
   type WithdrawalReceiptFile,
-  type WithdrawalSnapshot,
-  checkWithdrawal,
   downloadWithdrawalReceipt,
-  latestRequests,
-  withStacksTxid,
-  withdrawalAdvice,
-  withdrawalHeading,
 } from '../../shared/index.js';
 import { RefundNote, type WithdrawalRouteUpdate, WithdrawalSteps } from '../../ui/index.js';
 import { formatTokenAmount, sats } from './flow.js';
+import type { FollowingView, TrackingEvent, TxidEntryView } from './tracking-state.js';
+import { useTracking } from './use-tracking.js';
 
 const fields = field();
 
 const afterActions = cx(notice(), css({ marginTop: 'space.08' }));
 const advice = css({ marginTop: 'space.06' });
-
-export const POLL_INTERVAL_MS = 20_000;
-export const SETTLED_POLL_INTERVAL_MS = 120_000;
 
 function destinationOf(receipt: WithdrawalReceiptFile): string {
   return `${receipt.destination.symbol} on ${receipt.destination.chain}`;
@@ -72,41 +58,47 @@ function ReceiptFacts(props: { receipt: WithdrawalReceiptFile }) {
 
 export function WithdrawalTracking(props: {
   backend: Backend;
-  receipt: WithdrawalReceiptFile;
-  receiptUnsaved: boolean;
-  walletPrompt: boolean;
+  active: ActiveWithdrawal;
+  onActive(update: (current: ActiveWithdrawal | null) => ActiveWithdrawal | null): void;
   onRoute(route: WithdrawalRouteUpdate | null): void;
-  onReceipt(receipt: WithdrawalReceiptFile): void;
-  onDiscard(receipt: WithdrawalReceiptFile): void;
   onDone(): void;
 }) {
-  const { receipt } = props;
-  if (receipt.stacksTxid === null && props.walletPrompt) {
-    return <WaitingForWallet receipt={receipt} onRoute={props.onRoute} />;
-  }
-  if (receipt.stacksTxid === null) {
-    return (
-      <UnconfirmedSignature
-        receipt={receipt}
-        onRoute={props.onRoute}
-        onReceipt={props.onReceipt}
-        onDiscard={props.onDiscard}
-      />
-    );
-  }
-  return <Following {...props} stacksTxid={receipt.stacksTxid} />;
-}
-
-function WaitingForWallet(props: {
-  receipt: WithdrawalReceiptFile;
-  onRoute(route: WithdrawalRouteUpdate | null): void;
-}) {
-  const { receipt, onRoute } = props;
+  const { onRoute } = props;
+  const { view, dispatch, discard } = useTracking(props);
+  const { receipt } = view;
+  const milestones = view.kind === 'following' ? view.milestones : null;
 
   useEffect(() => {
-    onRoute({ destination: destinationOf(receipt), milestones: null });
-  }, [onRoute, receipt]);
+    onRoute({ destination: destinationOf(receipt), milestones });
+  }, [onRoute, receipt, milestones]);
 
+  switch (view.kind) {
+    case 'wallet-prompt':
+      return <WaitingForWallet receipt={receipt} />;
+    case 'unconfirmed':
+      return (
+        <UnconfirmedSignature
+          receipt={receipt}
+          entry={view.entry}
+          dispatch={dispatch}
+          onDiscard={discard}
+        />
+      );
+    case 'following':
+      return (
+        <Following
+          view={view}
+          receiptUnsaved={props.active.receiptUnsaved}
+          dispatch={dispatch}
+          onDone={props.onDone}
+        />
+      );
+    default:
+      throw new Error(`Unknown tracking view ${String(view satisfies never)}`);
+  }
+}
+
+function WaitingForWallet(props: { receipt: WithdrawalReceiptFile }) {
   return (
     <section className={sheet()}>
       <styled.h2 textStyle="heading" marginBottom="space.06">
@@ -117,94 +109,45 @@ function WaitingForWallet(props: {
         page updates as soon as the wallet answers.
       </p>
       <dl className={details()}>
-        <ReceiptFacts receipt={receipt} />
+        <ReceiptFacts receipt={props.receipt} />
       </dl>
     </section>
   );
 }
 
 function TxidEntry(props: {
-  receipt: WithdrawalReceiptFile;
-  onReceipt(receipt: WithdrawalReceiptFile): void;
+  entry: TxidEntryView;
+  dispatch(event: TrackingEvent): void;
   children?: ReactNode;
 }) {
-  const { receipt } = props;
-  const [txid, setTxid] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [checking, setChecking] = useState(false);
-  const [requests] = useState(latestRequests);
-
-  async function follow() {
-    let id: string;
-    try {
-      id = normalizeStacksTxid(txid);
-    } catch {
-      setError('That is not a Stacks transaction ID. It is 64 hex characters, often with 0x.');
-      return;
-    }
-    const isLatest = requests.begin();
-    setChecking(true);
-    setError(null);
-    try {
-      const check = await checkPastedWithdrawalTransaction(config, id, {
-        sender: receipt.sender,
-        amountSats: receipt.amountSats,
-        maxFeeSats: receipt.maxFeeSats,
-        recipient: receipt.recipient,
-      });
-      if (!isLatest()) return;
-      if (check.kind === 'matches') {
-        props.onReceipt(withStacksTxid(receipt, check.stacksTxid));
-        return;
-      }
-      setError(
-        check.kind === 'not-found'
-          ? 'Stacks does not know this transaction yet. If your wallet sent it just now, wait a minute and try again.'
-          : `That transaction is not this withdrawal. ${check.message} Check the ID in your wallet’s activity.`
-      );
-    } catch (err) {
-      if (isLatest()) {
-        setError(
-          `Could not check that transaction: ${errorMessage(err) ?? 'unknown error'}. Try again.`
-        );
-      }
-    } finally {
-      if (isLatest()) setChecking(false);
-    }
-  }
-
+  const { entry, dispatch } = props;
   return (
     <>
       <label className={fields.label}>
         Stacks transaction ID
         <input
           className={fields.control}
-          value={txid}
+          value={entry.text}
           spellCheck={false}
           placeholder="0x…"
-          onChange={e => {
-            requests.cancel();
-            setChecking(false);
-            setTxid(e.target.value);
-            setError(null);
-          }}
+          onChange={e => dispatch({ type: 'txid-typed', text: e.target.value })}
         />
       </label>
-      {error && (
+      {entry.error && (
         <p className={notice({ tone: 'error' })} role="alert">
-          {error}
+          {entry.error}
         </p>
       )}
       <div className={actions()}>
         <button
           className={button({ variant: 'primary' })}
-          disabled={!txid}
-          aria-disabled={checking}
+          disabled={!entry.text}
+          aria-disabled={entry.checking}
           onClick={() => {
-            if (!checking) void follow();
+            if (!entry.checking) dispatch({ type: 'txid-submitted' });
           }}
         >
-          {checking ? 'Checking…' : 'Follow this transaction'}
+          {entry.checking ? 'Checking…' : 'Follow this transaction'}
         </button>
         {props.children}
       </div>
@@ -214,16 +157,10 @@ function TxidEntry(props: {
 
 function UnconfirmedSignature(props: {
   receipt: WithdrawalReceiptFile;
-  onRoute(route: WithdrawalRouteUpdate | null): void;
-  onReceipt(receipt: WithdrawalReceiptFile): void;
-  onDiscard(receipt: WithdrawalReceiptFile): void;
+  entry: TxidEntryView;
+  dispatch(event: TrackingEvent): void;
+  onDiscard(): void;
 }) {
-  const { receipt, onRoute } = props;
-
-  useEffect(() => {
-    onRoute({ destination: destinationOf(receipt), milestones: null });
-  }, [onRoute, receipt]);
-
   return (
     <section className={sheet()}>
       <styled.h2 textStyle="heading" marginBottom="space.06">
@@ -238,103 +175,36 @@ function UnconfirmedSignature(props: {
         its transaction ID here to follow it. If it sent nothing, discard this withdrawal; your sBTC
         has not moved.
       </p>
-      <TxidEntry receipt={receipt} onReceipt={props.onReceipt}>
-        <button className={button()} onClick={() => props.onDiscard(receipt)}>
+      <TxidEntry entry={props.entry} dispatch={props.dispatch}>
+        <button className={button()} onClick={props.onDiscard}>
           Nothing was sent. Discard it
         </button>
       </TxidEntry>
       <dl className={details()}>
-        <ReceiptFacts receipt={receipt} />
+        <ReceiptFacts receipt={props.receipt} />
       </dl>
     </section>
   );
 }
 
-function mayBeTheWrongTransaction(status: WithdrawalStatus | null): boolean {
-  if (status === null) return false;
-  if (status.kind === 'mismatch') return status.requestId === null;
-  return status.kind === 'unknown-tx' || status.kind === 'not-a-withdrawal';
-}
-
 function Following(props: {
-  backend: Backend;
-  receipt: WithdrawalReceiptFile;
-  stacksTxid: string;
+  view: FollowingView;
   receiptUnsaved: boolean;
-  onRoute(route: WithdrawalRouteUpdate | null): void;
-  onReceipt(receipt: WithdrawalReceiptFile): void;
+  dispatch(event: TrackingEvent): void;
   onDone(): void;
 }) {
-  const { backend, receipt, stacksTxid, onRoute } = props;
-  const [snapshot, setSnapshot] = useState<WithdrawalSnapshot | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
-  const [changing, setChanging] = useState(false);
+  const { view, dispatch } = props;
+  const { receipt, progress, facts, milestones } = view;
   const headingRef = useRef<HTMLHeadingElement>(null);
-  const onReceiptRef = useRef(props.onReceipt);
-  onReceiptRef.current = props.onReceipt;
-
-  useEffect(() => {
-    let live = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let softMismatches = 0;
-    let delay = POLL_INTERVAL_MS;
-    setSnapshot(null);
-    setProblem(null);
-    setChanging(false);
-    async function tick() {
-      try {
-        const next = await checkWithdrawal(
-          config,
-          backend,
-          receipt,
-          stacksTxid,
-          undefined,
-          softMismatches
-        );
-        if (!live) return;
-        softMismatches = next.observation.facts.softMismatches;
-        const followed = next.observation.facts.stacksTxid;
-        if (followed !== stacksTxid) {
-          onReceiptRef.current(withStacksTxid(receipt, followed));
-          return;
-        }
-        setSnapshot(next);
-        setProblem(null);
-        const progress = next.observation.progress;
-        if (progress.stage === 'done' || progress.stage === 'mismatch') return;
-        delay = progress.terminal ? SETTLED_POLL_INTERVAL_MS : POLL_INTERVAL_MS;
-      } catch (err) {
-        if (!live) return;
-        setProblem(`Could not refresh: ${errorMessage(err) ?? 'unknown error'}. Retrying.`);
-      }
-      timer = setTimeout(() => void tick(), delay);
-    }
-    void tick();
-    return () => {
-      live = false;
-      clearTimeout(timer);
-    };
-  }, [backend, receipt, stacksTxid]);
-
-  const milestones = snapshot?.milestones ?? null;
-  useEffect(() => {
-    onRoute({ destination: destinationOf(receipt), milestones });
-  }, [onRoute, receipt, milestones]);
 
   useEffect(() => {
     headingRef.current?.focus();
   }, []);
 
-  const observation = snapshot?.observation ?? null;
-  const progress = observation?.progress ?? null;
-  const facts = observation?.facts ?? null;
-  const stage = progress?.stage ?? null;
-  const changeable = mayBeTheWrongTransaction(observation?.stacks ?? null);
-
   return (
     <section className={sheet()}>
       <styled.h2 ref={headingRef} tabIndex={-1} textStyle="heading" marginBottom="space.06">
-        {withdrawalHeading(stage)}
+        {view.heading}
       </styled.h2>
 
       {props.receiptUnsaved && (
@@ -347,16 +217,16 @@ function Following(props: {
       <p className={notice({ tone: progress?.warning ? 'warn' : 'status' })} role="status">
         {progress?.message ?? 'Checking…'}
       </p>
-      {stage !== null && <p className={advice}>{withdrawalAdvice(stage, receipt)}</p>}
-      {problem && <p className={notice()}>{problem}</p>}
-      {snapshot?.swapError && !progress?.terminal && (
+      {view.advice !== null && <p className={advice}>{view.advice}</p>}
+      {view.problem && <p className={notice()}>{view.problem}</p>}
+      {view.swapError && (
         <p className={notice()}>
-          Could not read the swap status right now ({snapshot.swapError}). Checking again shortly.
+          Could not read the swap status right now ({view.swapError}). Checking again shortly.
         </p>
       )}
-      {stage === 'mismatch' && facts && facts.mismatches.length > 0 && (
+      {view.mismatches.length > 0 && (
         <ul className={notice({ tone: 'warn' })}>
-          {facts.mismatches.map(m => (
+          {view.mismatches.map(m => (
             <li key={m}>{m}</li>
           ))}
         </ul>
@@ -376,7 +246,7 @@ function Following(props: {
         <ReceiptFacts receipt={receipt} />
         <dt>Stacks transaction</dt>
         <dd>
-          <code>0x{stacksTxid}</code>
+          <code>0x{view.stacksTxid}</code>
         </dd>
         {facts && facts.requestId !== null && (
           <>
@@ -420,7 +290,7 @@ function Following(props: {
         )}
       </dl>
 
-      {changing && changeable && (
+      {view.change && view.changeable && (
         <section aria-labelledby="change-transaction">
           <styled.h3 id="change-transaction" textStyle="emphasis" marginTop="space.10">
             Change the transaction
@@ -429,8 +299,8 @@ function Following(props: {
             Paste the ID of the Stacks transaction your wallet sent for this withdrawal. It is
             checked before it replaces the one above.
           </p>
-          <TxidEntry receipt={receipt} onReceipt={props.onReceipt}>
-            <button className={button()} onClick={() => setChanging(false)}>
+          <TxidEntry entry={view.change} dispatch={dispatch}>
+            <button className={button()} onClick={() => dispatch({ type: 'change-closed' })}>
               Cancel
             </button>
           </TxidEntry>
@@ -438,8 +308,8 @@ function Following(props: {
       )}
 
       <div className={actions()}>
-        {changeable && !changing && (
-          <button className={button()} onClick={() => setChanging(true)}>
+        {view.changeable && !view.change && (
+          <button className={button()} onClick={() => dispatch({ type: 'change-opened' })}>
             Change transaction
           </button>
         )}
