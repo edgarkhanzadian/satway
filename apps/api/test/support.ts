@@ -75,6 +75,7 @@ export const TIP = 976_000;
 
 export interface MemoryKv extends KV {
   data: Map<string, string>;
+  metadata: Map<string, Record<string, number>>;
   ttls: Map<string, number | null>;
   ops: { op: 'get' | 'put' | 'delete' | 'list'; key: string }[];
   writes(): string[];
@@ -84,8 +85,10 @@ export function memoryKv(pageSize = 1000): MemoryKv {
   const data = new Map<string, string>();
   const ops: MemoryKv['ops'] = [];
   const ttls = new Map<string, number | null>();
+  const metadata = new Map<string, Record<string, number>>();
   return {
     data,
+    metadata,
     ttls,
     ops,
     writes: () => ops.filter(o => o.op === 'put').map(o => o.key),
@@ -97,18 +100,24 @@ export function memoryKv(pageSize = 1000): MemoryKv {
       ops.push({ op: 'put', key });
       data.set(key, value);
       ttls.set(key, options?.expirationTtl ?? null);
+      if (options?.metadata) metadata.set(key, options.metadata);
+      else metadata.delete(key);
       return Promise.resolve();
     },
     delete(key) {
       ops.push({ op: 'delete', key });
       data.delete(key);
+      metadata.delete(key);
       return Promise.resolve();
     },
     list({ prefix, cursor }) {
       ops.push({ op: 'list', key: prefix });
       const all = [...data.keys()].filter(k => k.startsWith(prefix)).sort();
       const start = cursor ? Number(cursor) : 0;
-      const keys = all.slice(start, start + pageSize).map(name => ({ name }));
+      const keys = all.slice(start, start + pageSize).map(name => {
+        const meta = metadata.get(name);
+        return meta ? { name, metadata: meta } : { name };
+      });
       const end = start + keys.length;
       return Promise.resolve(
         end < all.length

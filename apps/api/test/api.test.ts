@@ -335,13 +335,17 @@ describe('registerDeposit', () => {
     expect(kv.ttls.get(`dep:${D.address}`)).toBe(14 * 24 * 60 * 60);
   });
 
-  it('is idempotent: a second registration of the address is refused as already registered', async () => {
+  it('is idempotent for one swap, and adds a second swap without touching the record', async () => {
     const w = world({});
     const kv = await watching(w, memoryKv(), '0xswapA');
     const stored = kv.data.get(`dep:${D.address}`);
     await expect(watching(w, kv, '0xswapA')).rejects.toThrow(AlreadyRegistered);
+    await expect(watching(w, kv, '0xswapB')).resolves.toBe(kv);
     await expect(watching(w, kv, '0xswapB')).rejects.toThrow(AlreadyRegistered);
     expect(kv.data.get(`dep:${D.address}`)).toBe(stored);
+    expect([...kv.data.keys()].filter(k => k.startsWith('swap:'))).toEqual([
+      `swap:${D.address}:0xswapB`,
+    ]);
   });
 
   it('keeps two deposits from one wallet apart, one record each', async () => {
@@ -355,8 +359,8 @@ describe('registerDeposit', () => {
     );
   });
 
-  it('a registration while the notifier is mid-run cannot lose either deposit', async () => {
-    const w = world({ txs: [payoutTx(0)] });
+  it('a registration while the notifier is mid-run cannot lose either deposit or its progress', async () => {
+    const w = world({ txs: [payoutTx(0)], swaps: { '0xswapLate': { status: 'PROCESSING' } } });
     const kv = await watching(w);
     const gate = { open: () => undefined };
     const held = new Promise<undefined>(resolve => {
@@ -377,13 +381,17 @@ describe('registerDeposit', () => {
     await vi.waitFor(() => expect(paused).toBe(true));
     const other = indexedBody(3);
     await registerDeposit(kv, other, registerDeps(w));
-    await expect(registerDeposit(kv, goodBody('0xswapLate'), registerDeps(w))).rejects.toThrow(
-      AlreadyRegistered
-    );
+    await registerDeposit(kv, goodBody('0xswapLate'), registerDeps(w));
     gate.open();
     const report = await running;
-    expect(report.finished).toEqual([D.address]);
-    expect(watchKeys(kv)).toEqual([`dep:${indexedDeposit(3).address}`]);
+    expect(report.finished).toEqual([]);
+    expect(record(kv)).toMatchObject({
+      swapDepositAddress: '0xswap0',
+      registered: [{ outpoint: `${D.txid}:0` }],
+    });
+    expect(watchKeys(kv).sort()).toEqual(
+      [`dep:${D.address}`, `dep:${indexedDeposit(3).address}`].sort()
+    );
     expect(JSON.parse(kv.data.get(`dep:${indexedDeposit(3).address}`) ?? '{}')).toMatchObject({
       swapDepositAddress: other.swapDepositAddress,
       registered: [],

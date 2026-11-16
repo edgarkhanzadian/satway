@@ -22,6 +22,7 @@ import { PAYOUT_GRACE_MS, rotationWindow, runNotifier } from '../src/notifier/in
 import {
   MAX_ACTIVE_WATCHES,
   MAX_ADDRESSES_PER_RUN,
+  MAX_EXTRA_SWAPS,
   RUN_SUBREQUEST_BUDGET,
   SUBREQUEST_LIMIT,
   type WatchedDeposit,
@@ -42,6 +43,7 @@ import {
   indexedBody,
   indexedDeposit,
   memoryKv,
+  outpointsPosted,
   payoutTx,
   postJson,
   record,
@@ -366,29 +368,68 @@ describe('POST /deposits: the swap must be a live 1Click swap that pays this add
     });
   });
 
-  it.each([
-    ['the same swap', '0xswap0'],
-    ['another swap', '0xswapOther'],
-  ])(
-    'answers 409 when %s re-registers a deposit address, without calling 1Click or writing',
-    async (_name, swap) => {
-      const w = liveWorld();
-      const kv = memoryKv();
-      await attempt(goodBody(), { w, kv });
-      const stored = kv.data.get(`dep:${D.address}`);
-      const before = expensive(w);
-      const writes = depositWrites(kv).length;
-      const again = await attempt(goodBody(swap), { w, kv });
-      expect(again.res.status).toBe(409);
-      expect(again.body).toEqual({
-        message: 'This deposit is already registered',
-        address: D.address,
-      });
-      expect(expensive(w)).toEqual(before);
-      expect(depositWrites(kv)).toHaveLength(writes);
-      expect(kv.data.get(`dep:${D.address}`)).toBe(stored);
+  it('answers 409 when the same swap re-registers a deposit address, without calling 1Click or writing', async () => {
+    const w = liveWorld();
+    const kv = memoryKv();
+    await attempt(goodBody(), { w, kv });
+    const stored = kv.data.get(`dep:${D.address}`);
+    const before = expensive(w);
+    const writes = kv.writes().length;
+    const again = await attempt(goodBody('0xswap0'), { w, kv });
+    expect(again.res.status).toBe(409);
+    expect(again.body).toEqual({
+      message: 'This deposit is already registered',
+      address: D.address,
+    });
+    expect(expensive(w)).toEqual(before);
+    expect(kv.writes()).toHaveLength(writes);
+    expect(kv.data.get(`dep:${D.address}`)).toBe(stored);
+  });
+
+  it('adds another live swap to the address under its own key, leaving the record alone', async () => {
+    const w = liveWorld();
+    const kv = memoryKv();
+    await attempt(goodBody(), { w, kv });
+    const stored = kv.data.get(`dep:${D.address}`);
+    const before = expensive(w).oneClick;
+    const other = await attempt(goodBody('0xswapOther'), { w, kv });
+    expect(other.res.status).toBe(201);
+    expect(other.body).toMatchObject({ address: D.address });
+    expect(expensive(w).oneClick).toBe(before + 1);
+    expect(depositWrites(kv)).toHaveLength(1);
+    expect(kv.data.get(`dep:${D.address}`)).toBe(stored);
+    expect(kv.writes()).toContain(`swap:${D.address}:0xswapOther`);
+    const repeat = await attempt(goodBody('0xswapOther'), { w, kv });
+    expect(repeat.res.status).toBe(409);
+    expect(repeat.body).toEqual({
+      message: 'This deposit is already registered',
+      address: D.address,
+    });
+  });
+
+  it('refuses another swap with its own code once the address follows as many as it can', async () => {
+    const w = liveWorld();
+    const kv = memoryKv();
+    await attempt(goodBody(), { w, kv });
+    for (let n = 0; n < MAX_EXTRA_SWAPS; n++) {
+      expect((await attempt(goodBody(`0xswapExtra${n}`), { w, kv })).res.status).toBe(201);
     }
-  );
+    const writes = kv.writes().length;
+    const over = await attempt(goodBody('0xswapOneTooMany'), { w, kv });
+    expect(over.res.status).toBe(409);
+    expect(over.body).toMatchObject({ address: D.address, code: 'swap-limit' });
+    expect(kv.writes()).toHaveLength(writes);
+  });
+
+  it('checks another swap like the first: one that pays another address is refused', async () => {
+    const w = liveWorld({ swaps: { '0xswapElse': { recipient: 'bc1p' + 'q'.repeat(58) } } });
+    const kv = memoryKv();
+    await attempt(goodBody(), { w, kv });
+    const writes = kv.writes().length;
+    const other = await attempt(goodBody('0xswapElse'), { w, kv });
+    expect(other.res.status).toBe(400);
+    expect(kv.writes()).toHaveLength(writes);
+  });
 });
 
 describe('POST /deposits: body size', () => {
@@ -739,14 +780,36 @@ describe('runNotifier: deadline-based expiry', () => {
     expect(report.expired).toEqual([D.address]);
   });
 
-  it('a refused re-registration does not move the deadline', async () => {
+  it('a later swap to the address keeps it watched until that swap’s own deadline and grace', async () => {
     const later = new Date(NOW.getTime() + 20 * 3_600_000);
+    const laterDeadline = new Date(later.getTime() + 2 * 3_600_000);
     const w = world({
-      swaps: { '0xswapB': { deadline: new Date(later.getTime() + 2 * 3_600_000).toISOString() } },
+      swaps: {
+        '0xswapA': { status: 'PENDING_DEPOSIT' },
+        '0xswapB': { deadline: laterDeadline.toISOString() },
+      },
     });
     const kv = await watching(w, memoryKv(), '0xswapA');
-    await expect(watching(w, kv, '0xswapB', { now: later })).rejects.toThrow(/already registered/);
-    const report = await runNotifier(kv, endpoints, w.fetchFn, pastGrace);
+    await watching(w, kv, '0xswapB', { now: later });
+    const quiet = await runNotifier(kv, endpoints, w.fetchFn, pastGrace);
+    expect(quiet).toMatchObject({ expired: [], finished: [] });
+    expect(watchKeys(kv)).toEqual([`dep:${D.address}`]);
+
+    w.arrive(payoutTx(0));
+    const paid = await runNotifier(kv, endpoints, w.fetchFn, pastGrace);
+    expect(outpointsPosted(w)).toEqual([`${D.txid}:0`]);
+    expect(paid.finished).toEqual([D.address]);
+  });
+
+  it('a pre-registered address still expires after the latest swap’s deadline and grace', async () => {
+    const later = new Date(NOW.getTime() + 20 * 3_600_000);
+    const laterDeadline = new Date(later.getTime() + 2 * 3_600_000);
+    const w = world({ swaps: { '0xswapB': { deadline: laterDeadline.toISOString() } } });
+    const kv = await watching(w, memoryKv(), '0xswapA');
+    await watching(w, kv, '0xswapB', { now: later });
+    const report = await runNotifier(kv, endpoints, w.fetchFn, {
+      now: new Date(laterDeadline.getTime() + PAYOUT_GRACE_MS + 60_000),
+    });
     expect(report.expired).toEqual([D.address]);
   });
 });

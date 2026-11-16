@@ -84,6 +84,22 @@ describe('registrationStep', () => {
     });
   });
 
+  it('a swap the Worker cannot add to an address it already follows keeps the page open', () => {
+    const full: BackgroundRegistration = {
+      kind: 'rejected',
+      status: 409,
+      message: 'This deposit address already has as many swaps as background tracking follows',
+    };
+    const step = registrationStep(full, { transient: 0, unknownSwap: 0 });
+    expect(step).toMatchObject({
+      state: { kind: 'not-registered', problem: 'refused' },
+      delayMs: null,
+    });
+    expect(closingNote(step.state, false)).toMatch(
+      /^Keep this page open until the deposit completes/
+    );
+  });
+
   it('retries the rate limit no sooner than the Worker asks', () => {
     expect(registrationStep(LIMITED, { transient: 0, unknownSwap: 0 })).toEqual({
       state: { kind: 'retrying', problem: 'busy' },

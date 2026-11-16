@@ -17,6 +17,7 @@ import {
 
 import {
   CRON_PERIOD_MINUTES,
+  type ExtraSwap,
   IDLE_ADDRESS_COST,
   type KV,
   MAX_ADDRESSES_PER_RUN,
@@ -26,9 +27,11 @@ import {
   RUN_SUBREQUEST_BUDGET,
   type RegisteredOutput,
   SHARED_LOOKUP_COST,
+  SWAP_LIST_COST,
   SWAP_STATUS_COST,
   type WatchedDeposit,
   deleteWatched,
+  listExtraSwaps,
   listWatchedAddresses,
   loadWatched,
   putWatched,
@@ -97,22 +100,75 @@ export function swapFinal(
   return registered.some(r => named.some(txid => r.outpoint.startsWith(`${txid}:`)));
 }
 
-async function liveSwapFinal(ctx: RunContext, deposit: WatchedDeposit): Promise<boolean> {
+interface FollowedSwap {
+  swapDepositAddress: string;
+  deadline: string;
+}
+
+export function deadlinePassed(deadline: string, now: Date): boolean {
+  const ms = Date.parse(deadline);
+  return Number.isFinite(ms) && ms + PAYOUT_GRACE_MS < now.getTime();
+}
+
+export function watchExpired(deposit: Pick<WatchedDeposit, 'deadline'>, now: Date): boolean {
+  return deadlinePassed(deposit.deadline, now);
+}
+
+function followedSwaps(deposit: WatchedDeposit, extras: readonly ExtraSwap[]): FollowedSwap[] {
+  const all = [{ swapDepositAddress: deposit.swapDepositAddress, deadline: deposit.deadline }];
+  for (const e of extras) {
+    if (!all.some(s => s.swapDepositAddress === e.swapDepositAddress)) all.push(e);
+  }
+  return all;
+}
+
+async function liveSwapFinal(
+  ctx: RunContext,
+  swap: FollowedSwap,
+  registered: readonly RegisteredOutput[]
+): Promise<boolean> {
+  if (deadlinePassed(swap.deadline, ctx.now)) return true;
   const client = new OneClickClient(ctx.config.oneClickBaseUrl, {
     jwt: ctx.oneClickJwt,
     fetchFn: ctx.fetchFn,
   });
   try {
-    return swapFinal(await client.status(deposit.swapDepositAddress), deposit.registered);
+    return swapFinal(await client.status(swap.swapDepositAddress), registered);
   } catch (err) {
     if (err instanceof BudgetExhausted) throw err;
     return false;
   }
 }
 
-export function watchExpired(deposit: WatchedDeposit, now: Date): boolean {
-  const deadline = Date.parse(deposit.deadline);
-  return Number.isFinite(deadline) && deadline + PAYOUT_GRACE_MS < now.getTime();
+async function everySwapFinal(
+  ctx: RunContext,
+  swaps: readonly FollowedSwap[],
+  registered: readonly RegisteredOutput[]
+): Promise<boolean> {
+  for (const swap of swaps) {
+    if (!(await liveSwapFinal(ctx, swap, registered))) return false;
+  }
+  return true;
+}
+
+type WatchEnd = 'finished' | 'expired' | 'deferred' | null;
+
+async function watchEnd(
+  ctx: RunContext,
+  address: string,
+  deposit: WatchedDeposit
+): Promise<WatchEnd> {
+  const candidate = deposit.registered.length > 0;
+  if (!candidate && !watchExpired(deposit, ctx.now)) return null;
+  if (ctx.budget.remaining() < SWAP_LIST_COST + RECORD_WRITE_COST) return 'deferred';
+  const swaps = followedSwaps(deposit, await listExtraSwaps(ctx.kv, address, deposit.createdAt));
+  if (candidate) {
+    if (ctx.budget.remaining() < swaps.length * SWAP_STATUS_COST + RECORD_WRITE_COST) {
+      return 'deferred';
+    }
+    if (await everySwapFinal(ctx, swaps, deposit.registered)) return 'finished';
+  }
+  return swaps.every(s => deadlinePassed(s.deadline, ctx.now)) ? 'expired' : null;
 }
 
 export function rotationWindow<T>(items: readonly T[], runIndex: number, size: number): T[] {
@@ -205,18 +261,11 @@ async function watchAddress(
     ...deposit,
     registered: [...registered].sort().map(outpoint => ({ outpoint })),
   };
-  if (!pending && next.registered.length > 0) {
-    if (budget.remaining() < SWAP_STATUS_COST + RECORD_WRITE_COST) {
-      report.deferred.push(address);
-    } else if (await liveSwapFinal(ctx, next)) {
-      await deleteWatched(kv, address);
-      report.finished.push(address);
-      return;
-    }
-  }
-  if (!pending && watchExpired(next, ctx.now)) {
+  const end = pending ? null : await watchEnd(ctx, address, next);
+  if (end === 'deferred') report.deferred.push(address);
+  if (end === 'finished' || end === 'expired') {
     await deleteWatched(kv, address);
-    report.expired.push(address);
+    report[end].push(address);
     return;
   }
   if (registered.size !== deposit.registered.length) {

@@ -429,14 +429,21 @@ What `POST /deposits` accepts, and what it costs:
   reclaim script carries `reclaimLockBlocks`), then the per-IP rate limit (429 with
   `Retry-After`), then the signer key (it must be the current aggregate key
   from the sBTC registry; cached 10 minutes in memory and in KV), then
-  duplicates (409: the deposit address already has a record, whichever swap
-  registered it), then `GET /v0/status` at 1Click with the Worker's key
-  (the swap must pay the derived address in native BTC, not be refunded or
-  failed, and its deadline must not have passed), then the cap on watched
-  deposits (`MAX_ACTIVE_WATCHES`, one KV key per deposit address, counted in
-  one list call; 503 with `Retry-After` when full), then one KV write. That
-  record is written once here and afterwards changed only by the scheduled run,
-  so the request handler and the cron never rewrite each other's data. Invalid requests make no outbound call; 503 means an
+  duplicates (409 when this same swap is already followed for the address),
+  then `GET /v0/status` at 1Click with the Worker's key (the swap must pay the
+  derived address in native BTC, not be refunded or failed, and its deadline
+  must not have passed), then the cap on watched deposits
+  (`MAX_ACTIVE_WATCHES`, one KV key per deposit address, counted in one list
+  call; 503 with `Retry-After` when full), then one KV write. That record is
+  written once here and afterwards changed only by the scheduled run. A
+  different live swap that pays an address already watched (a second swap of
+  the same deposit, or one registered first by someone who derived the address)
+  is stored under its own key, `swap:<address>:<swap>`, with its deadline in the
+  key's metadata, so the handler never rewrites the record the scheduled run
+  updates; the watch then lasts until every followed swap is final or 24 hours
+  past its own deadline. Up to `MAX_EXTRA_SWAPS` (3) are followed per address;
+  past that the answer is 409 with `code: "swap-limit"`, and the page says to
+  keep it open rather than that it can be closed. Invalid requests make no outbound call; 503 means an
   upstream (Hiro, 1Click) could not be read. When 1Click does not know the swap
   the 400 body carries `code: "unknown-swap"`; the web app retries that one
   answer five times in the background, after 5 s, 20 s, 1 min, 2 min and 4 min

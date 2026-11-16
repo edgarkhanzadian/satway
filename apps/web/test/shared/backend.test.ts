@@ -168,6 +168,11 @@ describe('createBackend register', () => {
       { kind: 'registered', address: 'bc1pw' },
     ],
     [
+      409,
+      { message: 'Too many swaps', address: 'bc1pw', code: 'swap-limit' },
+      { kind: 'rejected', status: 409, message: 'Too many swaps' },
+    ],
+    [
       400,
       { message: 'The swap does not pay this deposit address' },
       { kind: 'rejected', status: 400, message: 'The swap does not pay this deposit address' },

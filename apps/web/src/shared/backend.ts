@@ -16,6 +16,7 @@ import {
 import { call, endpointOf, messageOf, send } from './backend-request.js';
 
 export const UNKNOWN_SWAP = 'unknown-swap';
+export const SWAP_LIMIT = 'swap-limit';
 
 export type BackgroundRegistration =
   | { kind: 'registered'; address: string }
@@ -35,6 +36,7 @@ export interface Backend {
 
 const registeredSchema = z.looseObject({ address: z.string() });
 const unknownSwapSchema = z.looseObject({ code: z.literal(UNKNOWN_SWAP) });
+const swapLimitSchema = z.looseObject({ code: z.literal(SWAP_LIMIT) });
 
 function statusFailure(status: number, message: string): Error {
   return status === 404 ? new SwapNotListedError(message) : new Error(message);
@@ -42,7 +44,8 @@ function statusFailure(status: number, message: string): Error {
 
 function registrationFrom(url: string, res: Response, body: unknown): BackgroundRegistration {
   const message = messageOf(body) ?? `Request failed (${res.status})`;
-  if (res.ok || res.status === 409) {
+  const covered = res.status === 409 && !swapLimitSchema.safeParse(body).success;
+  if (res.ok || covered) {
     const { address } = parseWith(registeredSchema, body, `the backend at ${endpointOf(url)}`);
     return { kind: 'registered', address };
   }

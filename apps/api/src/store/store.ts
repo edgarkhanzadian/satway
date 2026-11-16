@@ -40,6 +40,8 @@ const watchedDepositSchema: z.ZodType<WatchedDeposit> = z.looseObject({
 });
 
 const PREFIX = 'dep:';
+const SWAP_PREFIX = 'swap:';
+export const MAX_EXTRA_SWAPS = 3;
 const SIGNER_KEY_CACHE = 'meta:signer-key';
 export const WATCH_TTL_SECONDS = 14 * 24 * 60 * 60;
 export const MAX_LIST_PAGES = 2;
@@ -88,6 +90,48 @@ export async function loadWatched(
 
 export async function deleteWatched(kv: KV, address: string): Promise<void> {
   await kv.delete(PREFIX + address);
+}
+
+export interface ExtraSwap {
+  swapDepositAddress: string;
+  deadline: string;
+  createdAt: string;
+}
+
+const extraSwapMetadataSchema = z.looseObject({ deadline: z.number(), createdAt: z.number() });
+
+function extraSwapPrefix(address: string): string {
+  return `${SWAP_PREFIX}${address}:`;
+}
+
+export async function putExtraSwap(
+  kv: KV,
+  address: string,
+  swap: ExtraSwap,
+  now = new Date()
+): Promise<void> {
+  await kv.put(extraSwapPrefix(address) + swap.swapDepositAddress, JSON.stringify(swap), {
+    expirationTtl: WATCH_TTL_SECONDS,
+    metadata: { deadline: Date.parse(swap.deadline), createdAt: now.getTime() },
+  });
+}
+
+export async function listExtraSwaps(kv: KV, address: string, since: string): Promise<ExtraSwap[]> {
+  const prefix = extraSwapPrefix(address);
+  const sinceMs = Date.parse(since);
+  const page = await kv.list({ prefix });
+  return page.keys.flatMap(k => {
+    const meta = extraSwapMetadataSchema.safeParse(k.metadata);
+    if (!meta.success || !Number.isFinite(meta.data.deadline)) return [];
+    if (Number.isFinite(sinceMs) && meta.data.createdAt < sinceMs) return [];
+    return [
+      {
+        swapDepositAddress: k.name.slice(prefix.length),
+        deadline: new Date(meta.data.deadline).toISOString(),
+        createdAt: new Date(meta.data.createdAt).toISOString(),
+      },
+    ];
+  });
 }
 
 export async function listWatchedAddresses(
