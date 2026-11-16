@@ -631,13 +631,9 @@ function Tracking(props: {
     snapshot !== null && !stale ? snapshot.progress.stage : null
   );
   const shortDeposit = reading?.swap === 'INCOMPLETE_DEPOSIT';
-  const tokenDecimals =
-    token !== undefined && token.assetId === receipt.origin.assetId ? token.decimals : null;
   const owed =
-    shortDeposit && reading.remaining !== null
-      ? sendAmountOf(receipt, tokenDecimals, reading.remaining)
-      : null;
-  const sendAmount = owed ?? sendAmountOf(receipt, tokenDecimals);
+    shortDeposit && reading.remaining !== null ? sendAmountOf(receipt, reading.remaining) : null;
+  const sendAmount = owed ?? sendAmountOf(receipt);
   const walletReady =
     evmOrigin &&
     target !== null &&

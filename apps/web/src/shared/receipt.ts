@@ -23,7 +23,7 @@ export interface Receipt {
   depositScriptPubKey: string;
   depositScript: string;
   reclaimScript: string;
-  origin: { chain: string; symbol: string; assetId: string; decimals?: number };
+  origin: { chain: string; symbol: string; assetId: string; decimals: number };
   refundTo: string;
   quoteResponse: OneClickQuoteResponse;
   priorOutpoints?: string[];
@@ -69,7 +69,7 @@ const receiptSchema: z.ZodType<Receipt> = z.looseObject({
     chain: z.string(),
     symbol: z.string(),
     assetId: z.string(),
-    decimals: z.number().int().min(0).max(MAX_TOKEN_DECIMALS).optional(),
+    decimals: z.number().int().min(0).max(MAX_TOKEN_DECIMALS),
   }),
   refundTo: text,
   quoteResponse: oneClickQuoteResponseSchema,
@@ -119,16 +119,11 @@ export function verifyReceipt(value: unknown): Receipt {
 
 export type SendAmount = { kind: 'verified'; text: string } | { kind: 'base-units'; units: string };
 
-export function sendAmountOf(
-  receipt: Receipt,
-  tokenDecimals: number | null,
-  owed?: bigint
-): SendAmount {
+export function sendAmountOf(receipt: Receipt, owed?: bigint): SendAmount {
   const amountIn = receipt.quoteResponse.quote.amountIn;
   const units = owed?.toString() ?? amountIn;
-  const decimals = receipt.origin.decimals ?? tokenDecimals;
-  if (decimals === null || !/^\d+$/.test(units)) return { kind: 'base-units', units };
-  return { kind: 'verified', text: formatBaseUnits(BigInt(units), decimals) };
+  if (!/^\d+$/.test(units)) return { kind: 'base-units', units };
+  return { kind: 'verified', text: formatBaseUnits(BigInt(units), receipt.origin.decimals) };
 }
 
 export function sendAmountText(amount: SendAmount, symbol: string): string {

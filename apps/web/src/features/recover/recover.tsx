@@ -259,7 +259,7 @@ export function Recover(props: {
             </option>
             {saved.map((r, i) => (
               <option key={receiptId(r)} value={i}>
-                {sendAmountText(sendAmountOf(r, null), r.origin.symbol)}, started{' '}
+                {sendAmountText(sendAmountOf(r), r.origin.symbol)}, started{' '}
                 {new Date(r.createdAt).toLocaleString()}
               </option>
             ))}
