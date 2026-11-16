@@ -115,6 +115,7 @@ function progressFor(
     | 'payoutTxids'
     | 'payouts'
     | 'belowMinimum'
+    | 'foreignTxids'
     | 'mints'
     | 'tipHeight'
     | 'spenders'
@@ -138,6 +139,7 @@ function progressFor(
     payouts,
     payoutTxids: o.payoutTxids,
     belowMinimum: o.belowMinimum,
+    foreignTxids: o.foreignTxids,
     swapless: o.swapless,
     swapStartedAt: o.swapStartedAt,
     swapDeadline: o.swapDeadline,
@@ -315,6 +317,7 @@ export async function observeDeposit(
     payoutTxids,
     payouts,
     belowMinimum,
+    foreignTxids: fetched.foreignTxids,
     mints,
     tipHeight,
     spenders,
@@ -324,7 +327,6 @@ export async function observeDeposit(
   return {
     ...observed,
     outputs,
-    foreignTxids: fetched.foreignTxids,
     truncated: fetched.truncated,
     perDepositMinimum,
     toRegister,

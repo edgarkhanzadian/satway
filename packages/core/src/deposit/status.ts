@@ -38,6 +38,7 @@ export interface Observations {
   payouts: readonly PayoutObservation[];
   payoutTxids?: readonly string[];
   belowMinimum?: readonly ObservedPayout[];
+  foreignTxids?: readonly string[];
   swapless?: boolean;
   swapStartedAt?: number | null;
   swapDeadline?: number | null;
@@ -68,6 +69,7 @@ export const BLOCK_TIME_SLACK_MS = 2 * 60 * 60 * 1000;
 function arrivedAfterStart(o: Observations, payout: ObservedPayout): boolean {
   const started = o.swapStartedAt;
   if (started === undefined || started === null || !payout.confirmed) return true;
+  if (deadlineLongPast(o)) return true;
   const time = payout.blockTime;
   if (time === undefined || time === null) return true;
   return time * 1000 >= started - BLOCK_TIME_SLACK_MS;
@@ -363,7 +365,9 @@ function namedPayoutMissing(o: Observations): Progress | null {
   if (o.payouts.some(p => named.includes(p.payout.txid))) return null;
   const small = (o.belowMinimum ?? []).find(p => named.includes(p.txid));
   if (small) return withOthers(belowMinimumProgress(o, small, false), o);
-  return deadlineLongPast(o) ? withOthers(PAYOUT_NOT_FOUND, o) : null;
+  if (!deadlineLongPast(o)) return null;
+  const foreign = (o.foreignTxids ?? []).some(t => named.includes(t));
+  return withOthers({ ...PAYOUT_NOT_FOUND, terminal: foreign }, o);
 }
 
 const STATUS_UNKNOWN_NOTE = 'The swap status could not be read, so this page keeps checking.';

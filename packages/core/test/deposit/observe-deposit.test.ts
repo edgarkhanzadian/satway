@@ -245,6 +245,7 @@ describe('observeDeposit: what the swap status tells the progress', () => {
   it('waits for 1Click to name the payout when the only payment predates the swap', async () => {
     const obs = await observeDeposit(config, ctx, success([], '2026-11-14T12:00:00.000Z'), {
       fetchFn: smallWorld(50_000, Date.parse('2026-11-13T12:00:00.000Z') / 1000),
+      now: new Date('2026-11-14T13:00:00.000Z'),
     });
     expect(obs.swapStartedAt).toBe(Date.parse('2026-11-14T12:00:00.000Z'));
     expect(obs.progress).toMatchObject({ condition: 'awaiting-payout-hash', terminal: false });

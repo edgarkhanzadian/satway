@@ -475,6 +475,17 @@ describe('deriveProgress: SUCCESS without a named payout', () => {
     expect(p.message).toMatch(/1Click has not named/);
   });
 
+  it('counts the earlier payment once the swap deadline is a day past, so the wait ends', () => {
+    const p = deriveProgress({
+      ...obs({ swap: 'SUCCESS', payouts: [earlier] }),
+      swapStartedAt: STARTED,
+      swapDeadline: STARTED + 2 * 3_600_000,
+      now: STARTED + 27 * 3_600_000,
+    });
+    expect(p).toMatchObject({ stage: 'done', terminal: true });
+    expect(p.condition).toBeUndefined();
+  });
+
   it('still ends a single swap whose payout arrived after it began, though 1Click names no hash', () => {
     const later = { ...before, txid: 'f6'.repeat(32), blockTime: STARTED / 1000 + 600 };
     const p = deriveProgress({
@@ -577,8 +588,15 @@ describe('deriveProgress: states that used to never end', () => {
       swapDeadline: DEADLINE,
       now: DEADLINE + 25 * 3_600_000,
     });
-    expect(late).toMatchObject({ condition: 'payout-not-found', terminal: true });
+    expect(late).toMatchObject({ condition: 'payout-not-found', terminal: false });
     expect(late.message).toMatch(/1Click reports a payout/);
+    const foreign = deriveProgress({
+      ...named,
+      foreignTxids: ['dd'.repeat(32)],
+      swapDeadline: DEADLINE,
+      now: DEADLINE + 25 * 3_600_000,
+    });
+    expect(foreign).toMatchObject({ condition: 'payout-not-found', terminal: true });
   });
 
   it('an unreadable swap status no longer blocks the end once the deadline is a day past', () => {
