@@ -14,6 +14,13 @@ const EVM_BURN_ADDRESSES: ReadonlySet<string> = new Set([
   `0x${'f'.repeat(40)}`,
 ]);
 
+const OP_STACK_CHAINS: ReadonlySet<string> = new Set(['op', 'base']);
+const OP_STACK_PREDEPLOYS = /^0x420{35}[0-7][0-9a-f]{2}$/;
+const WRAPPED_NATIVE: Readonly<Record<string, string>> = Object.freeze({
+  eth: '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2',
+  arb: '0x82af49447d8a07e3bd95bd0d56f35241523fbab1',
+});
+
 export interface DestinationToken {
   contractAddress?: string;
 }
@@ -27,7 +34,7 @@ export function evmChecksumAddress(address: string): string {
   return `0x${chars.join('')}`;
 }
 
-function checkEvm(address: string, token: DestinationToken): DestinationCheck {
+function checkEvm(blockchain: string, address: string, token: DestinationToken): DestinationCheck {
   if (!EVM_ADDRESS.test(address)) {
     return {
       ok: false,
@@ -43,6 +50,18 @@ function checkEvm(address: string, token: DestinationToken): DestinationCheck {
       ok: false,
       message:
         'This is a reserved system or burn address, not a wallet. Funds sent there are lost.',
+    };
+  }
+  if (OP_STACK_CHAINS.has(blockchain) && OP_STACK_PREDEPLOYS.test(lower)) {
+    return {
+      ok: false,
+      message: `This is a system contract on ${blockchain}, not a wallet. Funds sent there are lost.`,
+    };
+  }
+  if (Object.hasOwn(WRAPPED_NATIVE, blockchain) && WRAPPED_NATIVE[blockchain] === lower) {
+    return {
+      ok: false,
+      message: `This is the wrapped-coin contract on ${blockchain}, not a wallet. Funds sent there are lost.`,
     };
   }
   if (token.contractAddress !== undefined && token.contractAddress.toLowerCase() === lower) {
@@ -80,5 +99,5 @@ export function checkDestinationAddress(
       message: `Withdrawals to ${blockchain} are not supported, because addresses on it cannot be checked here.`,
     };
   }
-  return checkEvm(address, token);
+  return checkEvm(blockchain, address, token);
 }

@@ -92,6 +92,57 @@ describe('checkDestinationAddress', () => {
     expect(checkDestinationAddress('base', usdc, {})).toEqual({ ok: true, address: usdc });
   });
 
+  it.each([
+    ['op', '0x4200000000000000000000000000000000000000'],
+    ['base', '0x4200000000000000000000000000000000000006'],
+    ['base', '0x4200000000000000000000000000000000000016'],
+    ['op', '0x42000000000000000000000000000000000007fF'],
+  ])('refuses the OP Stack predeploy on %s at %s', (chain, address) => {
+    const check = checkDestinationAddress(chain, address.toLowerCase(), {});
+    expect(check.ok ? '' : check.message).toBe(
+      `This is a system contract on ${chain}, not a wallet. Funds sent there are lost.`
+    );
+  });
+
+  it('does not treat the OP Stack predeploy range as special on other chains, or past its end', () => {
+    expect(
+      checkDestinationAddress('eth', '0x4200000000000000000000000000000000000016', {}).ok
+    ).toBe(true);
+    expect(
+      checkDestinationAddress('base', '0x4200000000000000000000000000000000000800', {}).ok
+    ).toBe(true);
+    expect(
+      checkDestinationAddress('base', '0x4200000000000000000000000000000000010000', {}).ok
+    ).toBe(true);
+  });
+
+  it.each([
+    ['arb', '0x0000000000000000000000000000000000000064'],
+    ['arb', '0x0000000000000000000000000000000000000073'],
+    ['arb', '0x00000000000000000000000000000000000000C8'],
+    ['arb', '0x00000000000000000000000000000000000000fF'],
+  ])('refuses the Arbitrum precompile on %s at %s', (chain, address) => {
+    const check = checkDestinationAddress(chain, address.toLowerCase(), {});
+    expect(check.ok).toBe(false);
+  });
+
+  it.each([
+    ['eth', '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'],
+    ['arb', '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1'],
+  ])('refuses the wrapped native coin contract on %s', (chain, address) => {
+    for (const input of [address, address.toLowerCase()]) {
+      const check = checkDestinationAddress(chain, input, {});
+      expect(check.ok ? '' : check.message).toBe(
+        `This is the wrapped-coin contract on ${chain}, not a wallet. Funds sent there are lost.`
+      );
+    }
+  });
+
+  it('accepts the WETH address of one chain on a chain where it is not WETH', () => {
+    const weth = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2';
+    expect(checkDestinationAddress('base', weth, {})).toEqual({ ok: true, address: weth });
+  });
+
   it('refuses withdrawals to Solana, whatever the address', () => {
     for (const address of [SOLANA_WALLET, FIRST]) {
       const check = checkDestinationAddress('sol', address, {});
