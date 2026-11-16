@@ -1,10 +1,12 @@
 import type { Locator, Page } from '@playwright/test';
 
 import { PROGRESS, type SatwayApp } from '../src/app/satway-app.js';
+import { WITHDRAW_PROGRESS } from '../src/app/withdraw-app.js';
 import { expect, test } from '../src/fixtures.js';
 import { expectNoHorizontalScroll } from '../src/quality/page-checks.js';
 import { RECLAIM_COPY, reclaimControls } from '../src/scenario/reclaim.js';
 import { openReceiptInYourDeposits, toReclaimable } from '../src/scenario/states.js';
+import { startWithdrawal } from '../src/scenario/withdrawal.js';
 
 const MIN_TAP = 44;
 
@@ -133,6 +135,27 @@ for (const size of SIZES) {
       await tap(controls.confirm, 'Sign and send');
       await expect(app.progress(/^Reclaim sent for /)).toBeVisible();
       await step(app, 'reclaim sent');
+    });
+
+    test('your withdrawals: 44px tap targets and no horizontal scroll', async ({
+      app,
+      world,
+      wallets,
+    }) => {
+      const { withdraw } = await startWithdrawal(app, world, wallets);
+      await withdraw.waitFor(WITHDRAW_PROGRESS.awaitingTx);
+      await tap(app.page.getByRole('button', { name: 'Hide' }), 'Hide');
+      const entry = withdraw.savedWithdrawal('50,000 sats to USDC on base');
+      await expect(entry).toHaveCount(1);
+      await step(app, 'your withdrawals');
+      await expectTapTarget(entry.getByRole('button', { name: 'Remove' }), 'Remove');
+      await expectTapTarget(
+        app.page.getByLabel('Withdrawal receipt (JSON)'),
+        'Withdrawal receipt file'
+      );
+      await tap(entry.getByRole('button', { name: 'Follow' }), 'Follow');
+      await expect(app.page.getByRole('heading', { name: 'Withdrawal in progress' })).toBeVisible();
+      await step(app, 'withdrawal followed');
     });
   });
 }
