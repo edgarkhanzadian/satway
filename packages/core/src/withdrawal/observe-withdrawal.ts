@@ -146,8 +146,10 @@ export async function observeWithdrawal(
   if (stacks?.kind === 'tx-dropped' && stacks.lookupError) {
     errors.push(`Replacement lookup: ${stacks.lookupError}`);
   }
-  const softMismatches =
-    stacks?.kind === 'mismatch' && stacks.soft ? (options.priorSoftMismatches ?? 0) + 1 : 0;
+  const priorSoftMismatches = options.priorSoftMismatches ?? 0;
+  let softMismatches = 0;
+  if (stacks === null) softMismatches = priorSoftMismatches;
+  else if (stacks.kind === 'mismatch' && stacks.soft) softMismatches = priorSoftMismatches + 1;
 
   let payout: PayoutVerification | null = null;
   if (stacks?.kind === 'accepted') {

@@ -375,6 +375,24 @@ describe('observeWithdrawal on other real outcomes', () => {
     expect(healed.progress.stage).not.toBe('mismatch');
   });
 
+  it('keeps the soft-mismatch streak through a failed Stacks read', async () => {
+    const routes = routesFor(W);
+    const api = fakeWithdrawalApis({
+      ...routes,
+      overrides: {
+        [`${C.stxApiUrl}/extended/v1/tx/0x${W.requestTxid.replace(/^0x/, '')}?event_limit=50`]:
+          new Response('down', { status: 503 }),
+      },
+    });
+    const result = await observeWithdrawal(C, watchedFor(W), null, {
+      fetchFn: api.fetchFn,
+      now: BEFORE_DEADLINE,
+      priorSoftMismatches: 2,
+    });
+    expect(result.stacks).toBeNull();
+    expect(result.facts.softMismatches).toBe(2);
+  });
+
   it('waits for a transaction the Stacks API does not know yet', async () => {
     const result = await observe(watchedFor(W), {}, null);
     expect(result.progress.stage).toBe('awaiting-stacks-tx');
