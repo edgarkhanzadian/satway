@@ -9,7 +9,11 @@ import {
   startDeposit,
   toPayoutConfirmed,
 } from '../src/scenario/journeys.js';
-import { RECLAIM_COPY, expectReclaimPsbt, reclaimFromRecover } from '../src/scenario/reclaim.js';
+import {
+  RECLAIM_COPY,
+  expectReclaimPsbt,
+  reclaimFromYourDeposits,
+} from '../src/scenario/reclaim.js';
 import { outpointKey } from '../src/world/bitcoin.js';
 import { json } from '../src/world/http.js';
 import type { World } from '../src/world/world.js';
@@ -33,7 +37,7 @@ async function reopenWithoutReceipts(app: SatwayApp): Promise<void> {
   await app.page.evaluate(() => localStorage.clear());
   await app.open();
   await app.connectStacksWallet();
-  await app.openRecover();
+  await app.openYourDeposits();
   await expect(app.savedReceipts).toHaveCount(0);
 }
 
@@ -95,7 +99,7 @@ test.describe('R9. one Bitcoin deposit address per deposit', () => {
     );
 
     const to = wallets.stacks.account.paymentAddress;
-    await reclaimFromRecover(app, to);
+    await reclaimFromYourDeposits(app, to);
     await expect(
       app
         .progress(/^Reclaim sent for /)

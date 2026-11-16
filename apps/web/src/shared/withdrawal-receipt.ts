@@ -88,7 +88,7 @@ function parseReceipt(value: unknown): WithdrawalReceiptFile {
   if (typeof value !== 'object' || value === null) throw new Error('Not a receipt file');
   if (!hasKind(value, WITHDRAWAL_RECEIPT_KIND)) {
     throw new Error(
-      'This is not a withdrawal receipt. Deposit receipts are loaded in the section above.'
+      'This is not a withdrawal receipt. Deposit receipts are loaded on the Deposit tab.'
     );
   }
   const result = receiptSchema.safeParse(value);

@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react';
 
-import type { SourceWallet } from '@satway/chains';
+import { styled } from 'satway-styles/jsx';
+import { actions, button, notice, sheet } from 'satway-styles/recipes';
+
+import { SUPPORTED_ORIGIN_CHAINS, type SourceWallet } from '@satway/chains';
 import { type OneClickToken, MAINNET_CONFIG as config, errorMessage } from '@satway/core';
 
 import {
   type ActiveDeposit,
   type Backend,
+  type Receipt,
   type WalletAccount,
   receiptId,
 } from '../../shared/index.js';
@@ -14,6 +18,41 @@ import { DepositForm } from './deposit-form.js';
 import { depositOrigins } from './flow.js';
 import { Tracking } from './tracking.js';
 import { useDepositForm } from './use-deposit-form.js';
+import { YourDeposits, entryLabelOf } from './your-deposits.js';
+
+function BeforeYouStart() {
+  return (
+    <section className={sheet()}>
+      <styled.h2 textStyle="heading" marginBottom="space.06">
+        Before you start
+      </styled.h2>
+      <p>
+        Send USDC, ETH and other assets from {SUPPORTED_ORIGIN_CHAINS.size} EVM chains and receive
+        sBTC on Stacks. Connect your Stacks wallet above to begin.
+      </p>
+      <styled.ul
+        marginTop="space.08"
+        marginInline="space.00"
+        marginBottom="space.00"
+        paddingLeft="space.09"
+        color="muted"
+        fontSize="sm"
+        listStyleType="disc"
+        css={{ '& > li + li': { marginTop: 'space.02' } }}
+      >
+        <li>This site never holds your funds or keys.</li>
+        <li>
+          The swap is carried out by NEAR Intents; your BTC then goes through the sBTC peg, run by
+          the sBTC signers.
+        </li>
+        <li>
+          If a deposit is not minted, you can take the BTC back yourself after a timelock of about a
+          week.
+        </li>
+      </styled.ul>
+    </section>
+  );
+}
 
 export function Deposit(props: {
   backend: Backend;
@@ -22,13 +61,19 @@ export function Deposit(props: {
   active: ActiveDeposit | null;
   onActive(active: ActiveDeposit | null): void;
   onRoute(route: RouteUpdate | null): void;
+  signReclaim(psbtHex: string, account: WalletAccount): Promise<Uint8Array>;
 }) {
   const { backend, account, source, active, onActive, onRoute } = props;
   const [tokens, setTokens] = useState<OneClickToken[]>([]);
   const [tokenError, setTokenError] = useState<string | null>(null);
   const [tokenAttempt, setTokenAttempt] = useState(0);
+  const [hidden, setHidden] = useState(false);
+  const [listRoute, setListRoute] = useState<RouteUpdate | null>(null);
+
+  const wanted = account !== null || active !== null;
 
   useEffect(() => {
+    if (!wanted) return;
     async function loadTokens() {
       try {
         const all = await backend.tokens();
@@ -39,45 +84,79 @@ export function Deposit(props: {
       }
     }
     void loadTokens();
-  }, [backend, tokenAttempt]);
+  }, [backend, tokenAttempt, wanted]);
 
-  const form = useDepositForm({ backend, account, source, tokens, onActive });
+  function follow(next: ActiveDeposit) {
+    setHidden(false);
+    onActive(next);
+  }
+
+  const form = useDepositForm({ backend, account, source, tokens, onActive: follow });
   const token = form.token;
+  const tracked = active !== null && !hidden ? active : null;
+  const origin = account !== null && token ? `${token.symbol} on ${token.blockchain}` : null;
 
   useEffect(() => {
-    if (active) return;
-    onRoute({ origin: token ? `${token.symbol} on ${token.blockchain}` : null, deposit: null });
-  }, [onRoute, token, active]);
+    if (tracked) return;
+    onRoute(listRoute ?? { origin, deposit: null });
+  }, [onRoute, origin, tracked, listRoute]);
   useEffect(() => () => onRoute(null), [onRoute]);
 
-  if (active) {
+  if (tracked) {
     return (
       <Tracking
-        key={receiptId(active.receipt)}
+        key={receiptId(tracked.receipt)}
         backend={backend}
-        receipt={active.receipt}
-        receiptUnsaved={active.receiptUnsaved}
-        firstRegistration={active.firstRegistration}
+        receipt={tracked.receipt}
+        receiptUnsaved={tracked.receiptUnsaved}
+        firstRegistration={tracked.firstRegistration}
         source={source}
-        token={tokens.find(t => t.assetId === active.receipt.origin.assetId)}
+        token={tokens.find(t => t.assetId === tracked.receipt.origin.assetId)}
         onRoute={onRoute}
+        onHide={() => setHidden(true)}
         onDone={() => onActive(null)}
       />
     );
   }
 
-  if (!account) return null;
-
   return (
-    <DepositForm
-      account={account}
-      tokens={tokens}
-      tokenError={tokenError}
-      onRetryTokens={() => {
-        setTokenError(null);
-        setTokenAttempt(attempt => attempt + 1);
-      }}
-      form={form}
-    />
+    <>
+      {active && (
+        <styled.div marginBottom="space.10">
+          <p className={notice()}>
+            The deposit of {entryLabelOf(active.receipt)} is hidden. This page checks on it again
+            when you show it.
+          </p>
+          <div className={actions()}>
+            <button className={button({ variant: 'primary' })} onClick={() => setHidden(false)}>
+              Show progress
+            </button>
+          </div>
+        </styled.div>
+      )}
+      {account ? (
+        <DepositForm
+          account={account}
+          tokens={tokens}
+          tokenError={tokenError}
+          onRetryTokens={() => {
+            setTokenError(null);
+            setTokenAttempt(attempt => attempt + 1);
+          }}
+          form={form}
+        />
+      ) : (
+        <BeforeYouStart />
+      )}
+      <styled.div marginTop="space.10">
+        <YourDeposits
+          backend={backend}
+          account={account}
+          signReclaim={props.signReclaim}
+          onFollow={(receipt: Receipt) => follow({ receipt, receiptUnsaved: false })}
+          onRoute={setListRoute}
+        />
+      </styled.div>
+    </>
   );
 }

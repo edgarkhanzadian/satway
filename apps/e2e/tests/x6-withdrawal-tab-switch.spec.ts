@@ -14,7 +14,6 @@ const ONLY_COPY =
 async function switchTabsAndBack(app: SatwayApp): Promise<void> {
   await app.page.getByRole('button', { name: 'Deposit', exact: true }).click();
   await expect(app.page.getByRole('heading', { name: WAITING })).toHaveCount(0);
-  await app.page.getByRole('button', { name: 'Recover', exact: true }).click();
   await app.page.getByRole('button', { name: 'Withdraw', exact: true }).click();
 }
 

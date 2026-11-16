@@ -20,7 +20,7 @@ Withdrawal destinations also need an address check for the chain, in
 | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `packages/core`   | Pure logic: deposit address, signer key verification, quote building and checking, payout detection, status, reclaim. No UI, no keys.                |
 | `packages/chains` | The other chains: chain metadata and address checks, EVM transfer building, sending and send records. No UI and no browser globals.                  |
-| `apps/web`        | Browser app (Vite + React): deposit flow, status tracking, recovery page.                                                                            |
+| `apps/web`        | Browser app (Vite + React): deposit flow, status tracking, your deposits and recovery.                                                               |
 | `apps/api`        | Cloudflare Worker: keeps the 1Click API key off the client, and notifies the sBTC signers of payouts if the user closed the tab.                     |
 | `apps/e2e`        | Playwright end-to-end tests: the production web build and the real Worker code against a simulated world. See [End-to-end tests](#end-to-end-tests). |
 | `scripts`         | Mainnet proof scripts and the bundle safety check.                                                                                                   |
@@ -46,7 +46,8 @@ packages/chains/src/
   index.ts     the package entry
 apps/web/src/
   app/         main.tsx, app.tsx, app.css: composes the page
-  features/    deposit, recover, chain-wallets (From panel), stacks-wallet (To panel)
+  features/    deposit (form, tracking, your deposits, reclaim, wallet search), withdraw,
+               chain-wallets (From panel), stacks-wallet (To panel)
   ui/          presentational components and shared panel styles
   shared/      backend client, receipts, progress checks, storage
 apps/api/src/
@@ -110,7 +111,7 @@ The rules, in plain words:
   when its swap has succeeded and the payout 1Click names (or, if it names
   none, every output at the address) is minted; a refunded or failed swap shows
   that outcome, and while the swap still waits for funds an early payment at
-  the address is listed as such without replacing the payment instructions. Without a receipt, the Recover tab finds a wallet's registered
+  the address is listed as such without replacing the payment instructions. Without a receipt, the wallet search under "Your deposits" on the Deposit tab finds a wallet's registered
   deposits through Emily; when Emily knows none or cannot be reached (a payout
   that was never registered is known only to Bitcoin), it checks the wallet's
   addresses for index 0, 1, 2… until 256 in a row are unused, and "Keep
@@ -310,7 +311,8 @@ window all behave as they would after that much real time.
 Add `tests/<name>.spec.ts` and import `test` and `expect` from `../src/fixtures.js`. The
 fixtures give `app` (page object: `open`, `connectStacksWallet`, `connectEvmWallet`,
 `fillDeposit`, `getQuote`, `continue`, `sendFromWallet`, `clickSend`,
-`waitForProgress`, `tick`, `openRecover`, `pickSavedReceipt`, `uploadReceipt`, `followDeposit`,
+`waitForProgress`, `tick`, `openTab`, `openYourDeposits`, `pickSavedReceipt`, `followSaved`,
+`uploadReceipt`, `followDeposit`,
 `newTab`, `expectComplete`), `world`, `api` (the Worker: `requests`, `kv`, `watch()`,
 `runScheduled()`), `wallets` and `harness`. Assert both what the page says and what the world
 saw; `src/scenario/checks.ts` has receipt, watch and Emily registration checks,
@@ -327,9 +329,9 @@ allowed per test with `harness.allowConsoleErrors(pattern)`.
   rejections, two tabs, tampered quotes, unverifiable
   signer keys, network and account guards, tokens the wallet must not send, dust and outsiders
   on the deposit address.
-- `r1-…` to `r8-…`: failure and recovery: refunded and failed swaps, short deposits, Emily
+- `r1-…` to `r10-…`: failure and recovery: refunded and failed swaps, short deposits, Emily
   registration failures, reclaims and their targeting, receipt files, receipt storage, the
-  Worker watch lifecycle.
+  Worker watch lifecycle, per-deposit addresses, and the "Your deposits" list on the Deposit tab.
 - `harness-…`: self-checks for the guards and for every simulated behaviour the scenarios rely
   on (spend validation, world clock and KV expiry, EVM pending/reverted/lost replies and events,
   faults, held requests).

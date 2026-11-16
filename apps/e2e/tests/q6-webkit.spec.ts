@@ -5,8 +5,8 @@ import { PROGRESS } from '../src/app/satway-app.js';
 import { expect, test } from '../src/fixtures.js';
 import { expectReceiptMatchesWorld } from '../src/scenario/checks.js';
 import { startAwaitingFunds } from '../src/scenario/journeys.js';
-import { reclaimFromRecover } from '../src/scenario/reclaim.js';
-import { openReceiptInRecover, toReclaimable } from '../src/scenario/states.js';
+import { reclaimFromYourDeposits } from '../src/scenario/reclaim.js';
+import { openReceiptInYourDeposits, toReclaimable } from '../src/scenario/states.js';
 import { TOKENS } from '../src/world/oneclick.js';
 
 const REVOKE_AFTER_MS = 60_000;
@@ -41,8 +41,8 @@ test.describe('Q6. WebKit', () => {
 
   test('a reclaim after the timelock @webkit', async ({ app, world, wallets }) => {
     const { started, payout } = await toReclaimable(app, world);
-    await openReceiptInRecover(app, started);
-    await reclaimFromRecover(app, wallets.stacks.account.paymentAddress);
+    await openReceiptInYourDeposits(app, started);
+    await reclaimFromYourDeposits(app, wallets.stacks.account.paymentAddress);
     await expect(app.progress(/^Reclaim sent for /)).toBeVisible();
     expect(world.bitcoin.rejected).toEqual([]);
     expect(world.bitcoin.isSpent(payout.outpoint)).toBe(true);

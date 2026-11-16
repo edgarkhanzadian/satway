@@ -173,31 +173,65 @@ export class SatwayApp {
     await expect(this.sendButton).toHaveCount(0);
   }
 
-  async openRecover(): Promise<void> {
-    await this.page.getByRole('button', { name: 'Recover' }).click();
-    await expect(
-      this.page.getByRole('heading', { name: 'Check or recover a deposit' })
-    ).toBeVisible();
+  async openTab(name: 'Deposit' | 'Withdraw'): Promise<void> {
+    await this.page.getByRole('button', { name, exact: true }).click();
+  }
+
+  get trackingHeading(): Locator {
+    return this.page.getByRole('heading', { name: /^Deposit (in progress|complete)$/ });
+  }
+
+  async openYourDeposits(): Promise<void> {
+    await this.openTab('Deposit');
+    await expect(this.trackingHeading.or(this.yourDepositsHeading).first()).toBeVisible();
+    if (await this.trackingHeading.isVisible()) {
+      const hide = this.page.getByRole('button', { name: 'Hide', exact: true });
+      if (await hide.isVisible()) await hide.click();
+      else await this.page.getByRole('button', { name: 'Start another', exact: true }).click();
+    }
+    await expect(this.yourDepositsHeading).toBeVisible();
+  }
+
+  get yourDepositsHeading(): Locator {
+    return this.page.getByRole('heading', { name: 'Your deposits', exact: true });
   }
 
   get savedReceipts(): Locator {
-    return this.page.getByLabel('Or pick one remembered by this browser');
+    return this.page.getByRole('list', { name: 'Your deposits' });
+  }
+
+  get savedEntries(): Locator {
+    return this.savedReceipts.getByRole('listitem');
+  }
+
+  savedEntry(startsWith: string): Locator {
+    return this.savedEntries.filter({
+      has: this.page.locator(':scope > p:first-child', { hasText: startsWith }),
+    });
   }
 
   async savedReceiptLabels(): Promise<string[]> {
-    const labels = await this.savedReceipts.locator('option:not([disabled])').allInnerTexts();
+    const labels = await this.savedEntries.locator(':scope > p:first-child').allInnerTexts();
     return labels.map(l => l.trim());
   }
 
   async pickSavedReceipt(startsWith: string): Promise<void> {
-    const options = this.savedReceipts.locator('option:not([disabled])');
-    const labels = await options.allInnerTexts();
-    const index = labels.findIndex(l => l.trim().startsWith(startsWith));
+    const labels = await this.savedReceiptLabels();
+    const index = labels.findIndex(l => l.startsWith(startsWith));
     if (index < 0)
       throw new Error(`No saved receipt starts with "${startsWith}": ${labels.join(' | ')}`);
-    const value = await options.nth(index).getAttribute('value');
-    if (value === null) throw new Error('The saved receipt option has no value');
-    await this.savedReceipts.selectOption(value);
+    await this.savedEntries
+      .nth(index)
+      .getByRole('button', { name: 'Show details', exact: true })
+      .click();
+  }
+
+  async followSaved(startsWith: string): Promise<void> {
+    const labels = await this.savedReceiptLabels();
+    const index = labels.findIndex(l => l.startsWith(startsWith));
+    if (index < 0)
+      throw new Error(`No saved receipt starts with "${startsWith}": ${labels.join(' | ')}`);
+    await this.savedEntries.nth(index).getByRole('button', { name: 'Follow', exact: true }).click();
   }
 
   async uploadReceipt(path: string): Promise<void> {
@@ -239,7 +273,7 @@ export class SatwayApp {
   }
 
   async resumeSaved(startsWith: string): Promise<void> {
-    await this.openRecover();
+    await this.openYourDeposits();
     await this.pickSavedReceipt(startsWith);
     await this.followDeposit();
     await expect(this.page.getByRole('heading', { name: 'Deposit in progress' })).toBeVisible();

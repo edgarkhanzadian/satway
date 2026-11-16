@@ -20,7 +20,7 @@ import {
   startAwaitingFunds,
 } from '../src/scenario/journeys.js';
 import { reclaimControls } from '../src/scenario/reclaim.js';
-import { openReceiptInRecover, toReclaimable } from '../src/scenario/states.js';
+import { openReceiptInYourDeposits, toReclaimable } from '../src/scenario/states.js';
 import { json } from '../src/world/http.js';
 
 const WCAG_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa', 'best-practice'];
@@ -144,12 +144,12 @@ test.describe('Q1. accessibility of every main state, light and dark', () => {
     await audit(app, 'refunded', { tracking: true });
   });
 
-  test('reclaimable, and Recover with the output picker', async ({ app, world }) => {
+  test('reclaimable, and Your deposits with the output picker', async ({ app, world }) => {
     const { started } = await toReclaimable(app, world);
     await audit(app, 'reclaimable', { tracking: true });
-    await openReceiptInRecover(app, started);
+    await openReceiptInYourDeposits(app, started);
     await expect(reclaimControls(app).output).toBeVisible();
-    await audit(app, 'recover with the output picker', { tracking: true });
+    await audit(app, 'your deposits with the output picker', { tracking: true });
   });
 
   test('registration notices: refused (alert) and unreachable (status)', async ({
@@ -197,7 +197,7 @@ test.describe('Q1. accessibility of every main state, light and dark', () => {
     await expect(app.page.getByRole('alert')).toContainText('Could not load the asset list');
     await audit(app, 'asset list error', { tracking: false });
     harness.backendUp();
-    await app.page.getByRole('button', { name: 'Recover' }).click();
+    await app.openTab('Withdraw');
     await app.page.getByRole('button', { name: 'Deposit' }).click();
     await app.connectEvmWallet();
     await app.fillDeposit({ amount: '100' });

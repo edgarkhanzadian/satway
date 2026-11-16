@@ -83,7 +83,7 @@ test.describe('M1. the swap status is unknown, so the wallet button is not offer
 
     await app.page.reload();
     await app.open();
-    await app.openRecover();
+    await app.openYourDeposits();
     await app.pickSavedReceipt(savedLabel(started));
     await expect(app.progress(PROGRESS.swapping)).toBeVisible();
     world.addFault({

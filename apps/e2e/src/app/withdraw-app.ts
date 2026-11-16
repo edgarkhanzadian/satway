@@ -204,7 +204,7 @@ export class WithdrawPage {
   }
 
   async openFollow(): Promise<void> {
-    await this.app.openRecover();
+    await this.app.openTab('Withdraw');
     await expect(this.page.getByRole('heading', { name: 'Follow a withdrawal' })).toBeVisible();
   }
 

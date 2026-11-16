@@ -64,7 +64,7 @@ test.describe('S3. browser storage is unavailable or full', () => {
     await expect(app.to.getByRole('button', { name: 'Connect Stacks wallet' })).toHaveCount(0);
     await expect(app.page.getByText('The operation is insecure.')).toHaveCount(0);
     expect(harness.pageErrors).toEqual([]);
-    await app.openRecover();
+    await app.openYourDeposits();
     await expect(app.page.getByLabel('Receipt file')).toBeEnabled();
   });
 

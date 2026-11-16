@@ -35,7 +35,7 @@ test.describe('X4. resuming a withdrawal, and slow or lost answers', () => {
     ).toBeVisible();
   });
 
-  test('the downloaded receipt, in a browser that lost its storage, is followed from Recover', async ({
+  test('the downloaded receipt, in a browser that lost its storage, is followed from the Withdraw tab', async ({
     app,
     world,
     wallets,
@@ -54,7 +54,7 @@ test.describe('X4. resuming a withdrawal, and slow or lost answers', () => {
     await expect(app.page.getByRole('heading', { name: 'Withdrawal complete' })).toBeVisible();
   });
 
-  test('the remembered withdrawal is listed on Recover, and a deposit receipt is pointed elsewhere', async ({
+  test('the remembered withdrawal is listed on the Withdraw tab, and the deposit loader points there', async ({
     app,
     world,
     wallets,
@@ -70,10 +70,13 @@ test.describe('X4. resuming a withdrawal, and slow or lost answers', () => {
         'This was a single check and is not refreshed here. Select Follow this withdrawal to keep checking.'
       )
     ).toBeVisible();
+    await app.openYourDeposits();
     await app.uploadReceipt(started.receiptPath);
     await expect(app.page.getByRole('alert')).toHaveText(
-      'This is a withdrawal receipt. Load it under “Follow a withdrawal” below.'
+      'This is a withdrawal receipt. Load it on the Withdraw tab, under “Your withdrawals”.'
     );
+    await withdraw.openFollow();
+    await withdraw.pickSaved('50,000 sats to USDC on base');
     await withdraw.follow();
     await expect(app.progress(WITHDRAW_PROGRESS.awaitingSigners)).toBeVisible();
   });

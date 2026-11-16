@@ -35,6 +35,7 @@ export function Tracking(props: {
   source: SourceWallet | null;
   token: OneClickToken | undefined;
   onRoute(route: RouteUpdate | null): void;
+  onHide(): void;
   onDone(): void;
 }) {
   const { receipt, source, token, onRoute } = props;
@@ -136,7 +137,7 @@ export function Tracking(props: {
         <button className={button()} onClick={() => downloadReceipt(receipt)}>
           Download receipt again
         </button>
-        <button className={button()} onClick={props.onDone}>
+        <button className={button()} onClick={view.terminal ? props.onDone : props.onHide}>
           {view.terminal ? 'Start another' : 'Hide'}
         </button>
       </div>

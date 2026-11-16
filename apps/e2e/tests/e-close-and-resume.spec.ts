@@ -51,7 +51,7 @@ test.describe('E. close the tab mid-swap and resume in a new one', () => {
     const later = await app.newTab();
     await later.open();
     await later.connectStacksWallet();
-    await later.openRecover();
+    await later.openYourDeposits();
     expect(await later.savedReceiptLabels()).toHaveLength(1);
     await later.pickSavedReceipt(`${receipt.quoteResponse.quote.amountInFormatted} USDC`);
     await resumeToDone(later, world, receipt);
@@ -70,7 +70,7 @@ test.describe('E. close the tab mid-swap and resume in a new one', () => {
     const later = await app.newTab();
     await later.open();
     await expect(later.to.getByRole('button', { name: 'Connect Stacks wallet' })).toBeVisible();
-    await later.openRecover();
+    await later.openYourDeposits();
     await later.pickSavedReceipt(`${receipt.quoteResponse.quote.amountInFormatted} USDC`);
     await resumeToDone(later, world, receipt);
     await expect(later.page.getByRole('heading', { name: 'Before you start' })).toHaveCount(0);
@@ -95,7 +95,7 @@ test.describe('E. close the tab mid-swap and resume in a new one', () => {
     harness.backendUp();
     const later = await app.newTab();
     await later.open();
-    await later.openRecover();
+    await later.openYourDeposits();
     await later.pickSavedReceipt(`${receipt.quoteResponse.quote.amountInFormatted} USDC`);
     await later.followDeposit();
     await expect(later.progress(REGISTRATION_COPY.closable)).toBeVisible();
@@ -115,7 +115,7 @@ test.describe('E. close the tab mid-swap and resume in a new one', () => {
 
     const later = await app.newTab();
     await later.open();
-    await later.openRecover();
+    await later.openYourDeposits();
     await later.pickSavedReceipt(`${receipt.quoteResponse.quote.amountInFormatted} USDC`);
     await later.followDeposit();
     await expect(later.progress(REGISTRATION_COPY.closable)).toBeVisible();
@@ -136,10 +136,10 @@ test.describe('E. close the tab mid-swap and resume in a new one', () => {
     await later.page.evaluate(() => localStorage.clear());
     await later.page.reload();
     await later.connectStacksWallet();
-    await later.openRecover();
+    await later.openYourDeposits();
     await expect(later.savedReceipts).toHaveCount(0);
     await later.uploadReceipt(receiptPath);
-    await expect(later.page.getByText(receipt.stacksAddress, { exact: true })).toBeVisible();
+    await expect(later.definition('sBTC recipient')).toHaveText(receipt.stacksAddress);
     await resumeToDone(later, world, receipt);
     expect(wallets.evm.behaviour.calls('eth_sendTransaction')).toHaveLength(1);
   });

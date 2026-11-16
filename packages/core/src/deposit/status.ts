@@ -99,7 +99,7 @@ function payoutProgress(ctx: PayoutContext, o: PayoutObservation): Progress {
         stage: 'reclaimable',
         terminal: true,
         message:
-          'The sBTC signers rejected this deposit. You can reclaim your BTC now from the recovery page.',
+          'The sBTC signers rejected this deposit. You can reclaim your BTC now under “Your deposits” on the Deposit tab.',
       };
     }
     return {
@@ -128,7 +128,7 @@ function payoutProgress(ctx: PayoutContext, o: PayoutObservation): Progress {
         stage: 'reclaimable',
         terminal: false,
         message:
-          'The timelock has passed. The sBTC signers’ API could not be reached, so whether they have registered or minted this deposit is not known. You can reclaim your BTC now from the recovery page; until you do, the signers may still mint it.',
+          'The timelock has passed. The sBTC signers’ API could not be reached, so whether they have registered or minted this deposit is not known. You can reclaim your BTC now under “Your deposits” on the Deposit tab; until you do, the signers may still mint it.',
       };
     }
     if (o.mint === null) {
@@ -137,7 +137,7 @@ function payoutProgress(ctx: PayoutContext, o: PayoutObservation): Progress {
         stage: 'reclaimable',
         terminal: true,
         message:
-          'This deposit was never processed. You can reclaim your BTC now from the recovery page.',
+          'This deposit was never processed. You can reclaim your BTC now under “Your deposits” on the Deposit tab.',
       };
     }
     return {
@@ -145,7 +145,7 @@ function payoutProgress(ctx: PayoutContext, o: PayoutObservation): Progress {
       stage: 'reclaimable',
       terminal: false,
       message:
-        'The timelock has passed and the sBTC signers have not minted this deposit. You can reclaim your BTC now from the recovery page; until you do, the signers may still mint it.',
+        'The timelock has passed and the sBTC signers have not minted this deposit. You can reclaim your BTC now under “Your deposits” on the Deposit tab; until you do, the signers may still mint it.',
     };
   }
   if (o.mint === null) {

@@ -69,7 +69,7 @@ export function StacksWalletPanel(props: {
         Allow site data for this page, or open it outside private browsing, then reload. A deposit
         cannot be started without the wallet: it supplies the Stacks address that receives your sBTC
         and the Bitcoin key that lets you take your BTC back, and there is no manual way to enter
-        them here. Checking a deposit from its receipt file still works on the Recover tab.
+        them here. Checking a deposit from its receipt file still works on the Deposit tab.
       </p>
     </>
   );

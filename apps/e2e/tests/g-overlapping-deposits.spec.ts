@@ -72,7 +72,7 @@ test('G. two overlapping deposits from one wallet get their own addresses and ne
   await app.expectComplete();
   world.clearFaults();
 
-  await app.openRecover();
+  await app.openYourDeposits();
   await app.pickSavedReceipt(savedLabel(first));
   await expect(app.definition('Bitcoin payout')).toContainText(firstPayout.outpoint.txid);
   await expect(app.page.getByText(secondPayout.outpoint.txid)).toHaveCount(0);

@@ -67,9 +67,9 @@ test.describe('Q2. keyboard only', () => {
     expect(stops.map(s => s.name)).toEqual([
       'Deposit',
       'Withdraw',
-      'Recover',
       `${EVM_WALLET_NAME}For Ethereum, Base, Arbitrum and other EVM chains`,
       'Connect Stacks wallet',
+      'Receipt file',
     ]);
   });
 
@@ -154,16 +154,13 @@ test.describe('Q2. keyboard only', () => {
     await app.page.reload();
     await app.open();
     await connectStacksByKeyboard(app);
+    await expect(app.page.getByRole('heading', { name: 'Your deposits' })).toBeVisible();
+    await expect(app.page.getByRole('button', { name: 'Reclaim', exact: true })).toBeVisible();
     await startFocusAtTop(app.page);
-    await tabTo(app, /^Recover$/);
+    await tabTo(app, /^Reclaim$/);
     await press(app, 'Enter');
-    await expect(
-      app.page.getByRole('heading', { name: 'Check or recover a deposit' })
-    ).toBeVisible();
-    await tabTo(app, /^Or pick one remembered by this browser/);
-    await app.page.keyboard.type('1');
     await expect(app.progress(RECLAIM_COPY.signersMayMint)).toBeVisible();
-    await tabTo(app, /^Output to reclaim/);
+    await expect(app.page.getByLabel('Output to reclaim')).toBeFocused();
     await tabTo(app, /^Send the reclaimed BTC to/, { max: 2 });
     await app.page.keyboard.type(wallets.stacks.account.paymentAddress);
     await tabTo(app, /^Reclaim BTC$/, { max: 2 });

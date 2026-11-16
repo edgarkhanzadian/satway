@@ -11,7 +11,7 @@ import {
   foundText,
   mergeFound,
   scanFailedText,
-} from '../../../src/features/recover/find-deposits.js';
+} from '../../../src/features/deposit/find-deposits.js';
 
 const ACCOUNT = {
   stacksAddress: 'SP1Q6W6VADA7V12SEVH6VNDNN4N7RX1PQ949EQPQ',

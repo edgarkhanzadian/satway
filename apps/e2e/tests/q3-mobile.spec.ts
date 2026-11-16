@@ -4,7 +4,7 @@ import { PROGRESS, type SatwayApp } from '../src/app/satway-app.js';
 import { expect, test } from '../src/fixtures.js';
 import { expectNoHorizontalScroll } from '../src/quality/page-checks.js';
 import { RECLAIM_COPY, reclaimControls } from '../src/scenario/reclaim.js';
-import { openReceiptInRecover, toReclaimable } from '../src/scenario/states.js';
+import { openReceiptInYourDeposits, toReclaimable } from '../src/scenario/states.js';
 
 const MIN_TAP = 44;
 
@@ -113,13 +113,16 @@ for (const size of SIZES) {
         app.page.getByRole('button', { name: 'Start another' }),
         'Start another'
       );
-      await expectTapTarget(app.page.getByRole('button', { name: 'Recover' }), 'Recover tab');
+      await expectTapTarget(
+        app.page.getByRole('button', { name: 'Withdraw', exact: true }),
+        'Withdraw tab'
+      );
     });
 
     test('the reclaim flow', async ({ app, world, wallets }) => {
       const { started } = await toReclaimable(app, world);
       await step(app, 'reclaimable');
-      await openReceiptInRecover(app, started);
+      await openReceiptInYourDeposits(app, started);
       await expect(app.progress(RECLAIM_COPY.signersMayMint)).toBeVisible();
       await step(app, 'recover');
       const controls = reclaimControls(app);

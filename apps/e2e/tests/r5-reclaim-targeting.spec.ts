@@ -5,7 +5,7 @@ import {
   RECLAIM_COPY,
   psbtRequests,
   reclaimControls,
-  reclaimFromRecover,
+  reclaimFromYourDeposits,
 } from '../src/scenario/reclaim.js';
 import { type Outpoint, outpointKey } from '../src/world/bitcoin.js';
 
@@ -28,7 +28,7 @@ test.describe('R5. which output a reclaim targets', () => {
     await app.waitForProgress(PROGRESS.minting);
     world.mine(949);
 
-    await app.openRecover();
+    await app.openYourDeposits();
     await app.uploadReceipt(started.receiptPath);
     const c = reclaimControls(app);
     await expect(c.output).toHaveValue(outpointKey(payout.outpoint));
@@ -38,7 +38,7 @@ test.describe('R5. which output a reclaim targets', () => {
       label(546, outpoint(dust)),
     ]);
     const to = wallets.stacks.account.paymentAddress;
-    await reclaimFromRecover(app, to);
+    await reclaimFromYourDeposits(app, to);
     await expect(app.progress(/^Reclaim sent for /)).toContainText(outpointKey(payout.outpoint));
 
     await expect(c.output).toHaveValue('');
@@ -49,13 +49,13 @@ test.describe('R5. which output a reclaim targets', () => {
     await expect(c.button).toBeDisabled();
     await expect(app.page.getByText(RECLAIM_COPY.nothingLeft)).toHaveCount(0);
 
-    await reclaimFromRecover(app, to, { choose: outpoint(dust) });
+    await reclaimFromYourDeposits(app, to, { choose: outpoint(dust) });
     await expect(app.sendError).toHaveText(
       'This output holds 546 sats, which cannot cover the reclaim fee of about 504 sats at 4 sat/vB and still leave a spendable amount. It is not worth reclaiming at this fee rate.'
     );
     expect(wallets.stacks.behaviour.calls('signPsbt')).toHaveLength(1);
 
-    await reclaimFromRecover(app, to, { choose: outpoint(outsider) });
+    await reclaimFromYourDeposits(app, to, { choose: outpoint(outsider) });
     await expect(app.progress(/^Reclaim sent for /)).toContainText(outpointKey(outpoint(outsider)));
     const requests = psbtRequests(wallets.stacks);
     expect(requests.map(r => r.inputs.map(i => `${i.txid}:${i.vout}`))).toEqual([

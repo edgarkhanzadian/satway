@@ -141,7 +141,7 @@ test.describe('A. USDC on Base from the injected EVM wallet', () => {
     const later = await app.newTab();
     await later.open();
     await later.connectStacksWallet();
-    await later.openRecover();
+    await later.openYourDeposits();
     await later.pickSavedReceipt(`${receipt.quoteResponse.quote.amountInFormatted} USDC`);
     await expect(later.progress(PROGRESS.minting)).toBeVisible();
     await later.followDeposit();

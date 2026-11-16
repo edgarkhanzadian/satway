@@ -37,7 +37,7 @@ async function freshStorage(app: SatwayApp): Promise<void> {
   await app.page.evaluate(() => localStorage.clear());
   await app.open();
   await app.connectStacksWallet();
-  await app.openRecover();
+  await app.openYourDeposits();
   await expect(app.savedReceipts).toHaveCount(0);
 }
 
@@ -65,7 +65,8 @@ test.describe('R6. recovering a deposit from a receipt file', () => {
     world,
   }) => {
     const started = await startDeposit(app);
-    await app.openRecover();
+    await app.openYourDeposits();
+    await app.harnessIdle();
     const otherAddress = p2trOf(bitcoinKey(world.rng)).address;
     const cases: { file: string; message: string }[] = [
       {
@@ -149,7 +150,7 @@ test.describe('R6. recovering a deposit from a receipt file', () => {
     const b = await app.continue();
     await app.waitForProgress(PROGRESS.awaitingFunds);
 
-    await app.openRecover();
+    await app.openYourDeposits();
     const slow = world.hold({ service: 'oneclick', path: /^\/v0\/status$/ });
     await app.pickSavedReceipt(savedLabel(a));
     await expect(app.progress('Checking…')).toBeVisible();

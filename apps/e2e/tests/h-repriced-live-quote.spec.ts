@@ -65,7 +65,7 @@ test.describe('H. the live quote at Continue is worse than the preview', () => {
     );
     expect(api.depositPosts()).toHaveLength(1);
 
-    await app.openRecover();
+    await app.openYourDeposits();
     await app.pickSavedReceipt('100.0 USDC');
     await expect(app.definition('Quoted to receive')).toHaveText(
       `about ${sats(expected)} as sBTC, at least ${sats(minimum)} before the signers’ Bitcoin fee`

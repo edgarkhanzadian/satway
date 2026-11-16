@@ -18,7 +18,7 @@ import {
 import { closingNote } from './background-registration.js';
 import type { TrackingState } from './tracking-state.js';
 
-export const RECLAIM_NOW = 'now, from the Recover tab';
+export const RECLAIM_NOW = 'now, under “Your deposits” on the Deposit tab';
 
 export interface TrackingContext {
   now: Date;

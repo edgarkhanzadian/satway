@@ -23,12 +23,17 @@ export async function toReclaimable(
   const payout = await toPayoutConfirmed(app, world);
   world.mine(RECLAIM_LOCK_BLOCKS - 1);
   await app.waitForProgress(RECLAIM_COPY.signersMayMint);
-  await expect(app.definition('Reclaim available')).toHaveText('now, from the Recover tab');
+  await expect(app.definition('Reclaim available')).toHaveText(
+    'now, under “Your deposits” on the Deposit tab'
+  );
   return { started, payout };
 }
 
-export async function openReceiptInRecover(app: SatwayApp, started: StartedDeposit): Promise<void> {
-  await app.openRecover();
+export async function openReceiptInYourDeposits(
+  app: SatwayApp,
+  started: StartedDeposit
+): Promise<void> {
+  await app.openYourDeposits();
   await app.uploadReceipt(started.receiptPath);
   await expect(
     app.page.getByText(started.receipt.reclaimKeyAddress, { exact: true })

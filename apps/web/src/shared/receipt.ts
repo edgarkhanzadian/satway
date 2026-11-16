@@ -99,7 +99,9 @@ function parseReceipt(value: unknown): Receipt {
 export function verifyReceipt(value: unknown): Receipt {
   if (typeof value !== 'object' || value === null) throw new Error('Not a receipt file');
   if (looksLikeWithdrawalReceipt(value)) {
-    throw new Error('This is a withdrawal receipt. Load it under “Follow a withdrawal” below.');
+    throw new Error(
+      'This is a withdrawal receipt. Load it on the Withdraw tab, under “Your withdrawals”.'
+    );
   }
   const r = parseReceipt(value);
   const rebuilt = buildIndexedDepositAddress(

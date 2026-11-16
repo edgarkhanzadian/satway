@@ -139,7 +139,7 @@ test.describe('S5. interruptions', () => {
   });
 
   for (const point of POINTS) {
-    test(`a reload ${point.name}: Recover -> Follow reaches Done with one send and one Emily registration`, async ({
+    test(`a reload ${point.name}: Your deposits -> Follow reaches Done with one send and one Emily registration`, async ({
       app,
       world,
       wallets,
@@ -152,7 +152,7 @@ test.describe('S5. interruptions', () => {
     });
   }
 
-  test('browser back and forward reload the page: the deposit is recovered from Recover with no second send', async ({
+  test('browser back and forward reload the page: the deposit is recovered from Your deposits with no second send', async ({
     app,
     world,
     wallets,
@@ -173,21 +173,21 @@ test.describe('S5. interruptions', () => {
     expect(sends(wallets)).toBe(1);
   });
 
-  test('switching to Recover and back mid-flow keeps the deposit in view; it stays in Recover and nothing is duplicated', async ({
+  test('switching to Withdraw and back mid-flow keeps the deposit in view; it stays in Your deposits and nothing is duplicated', async ({
     app,
     world,
     wallets,
   }) => {
     const started = await startAwaitingFunds(app);
     await app.sendFromWallet();
-    await app.openRecover();
+    await app.openTab('Withdraw');
     await app.page.getByRole('button', { name: 'Deposit' }).click();
     await expect(app.page.getByRole('heading', { name: 'Deposit in progress' })).toBeVisible();
     await expect(
       app.page.getByRole('heading', { name: 'Deposit to sBTC from another chain' })
     ).toHaveCount(0);
     await expectNoSendOffered(app);
-    await app.openRecover();
+    await app.openYourDeposits();
     expect(await app.savedReceiptLabels()).toEqual([expect.stringContaining(savedLabel(started))]);
     await app.pickSavedReceipt(savedLabel(started));
     await app.followDeposit();
@@ -198,12 +198,12 @@ test.describe('S5. interruptions', () => {
     expectRegisteredWithEmily(world, started.receipt, payout.outpoint, 'page');
   });
 
-  test('switching to the Recover tab and back during a deposit keeps showing the deposit in progress, with the send still offered once', async ({
+  test('switching to the Withdraw tab and back during a deposit keeps showing the deposit in progress, with the send still offered once', async ({
     app,
     wallets,
   }) => {
     await startAwaitingFunds(app);
-    await app.openRecover();
+    await app.openTab('Withdraw');
     await app.page.getByRole('button', { name: 'Deposit' }).click();
     await expect(app.page.getByRole('heading', { name: 'Deposit in progress' })).toBeVisible({
       timeout: 2_000,

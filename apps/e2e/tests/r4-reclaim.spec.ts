@@ -12,7 +12,7 @@ import {
   expectNoReclaimOffered,
   expectReclaimPsbt,
   reclaimControls,
-  reclaimFromRecover,
+  reclaimFromYourDeposits,
   reviewReclaim,
 } from '../src/scenario/reclaim.js';
 import { USER_REJECTED, XVERSE_USER_REJECTION } from '../src/wallets/behaviour.js';
@@ -44,15 +44,17 @@ async function toReclaimable(
   );
   world.mine(1);
   await app.waitForProgress(RECLAIM_COPY.signersMayMint);
-  await expect(app.definition('Reclaim available')).toHaveText('now, from the Recover tab');
+  await expect(app.definition('Reclaim available')).toHaveText(
+    'now, under “Your deposits” on the Deposit tab'
+  );
   await expect(app.stop('Bitcoin deposit')).toHaveAttribute('data-status', 'failed');
   await expect(app.stop('Bitcoin deposit')).toContainText('Stopped here');
   expect(world.emily.get(payout.outpoint.txid, 0)?.status).toBe('pending');
   return { started, payout };
 }
 
-async function openInRecover(app: SatwayApp, started: StartedDeposit): Promise<void> {
-  await app.openRecover();
+async function openInYourDeposits(app: SatwayApp, started: StartedDeposit): Promise<void> {
+  await app.openYourDeposits();
   await app.uploadReceipt(started.receiptPath);
   await expect(
     app.page.getByText(started.receipt.reclaimKeyAddress, { exact: true })
@@ -70,7 +72,7 @@ test.describe('R4. the mint never happens, so the user reclaims after the timelo
     await expect(app.definition('Reclaim available')).toHaveText(
       'in about 949 Bitcoin blocks, if the deposit is never minted'
     );
-    await app.openRecover();
+    await app.openYourDeposits();
     await app.pickSavedReceipt(savedLabel(started));
     await expect(app.progress(PROGRESS.minting)).toBeVisible();
     await expectNoReclaimOffered(app);
@@ -82,15 +84,17 @@ test.describe('R4. the mint never happens, so the user reclaims after the timelo
     await expect(app.definition('Reclaim available')).toHaveText(
       'in about 2 Bitcoin blocks, if the deposit is never minted'
     );
-    await openInRecover(app, started);
+    await openInYourDeposits(app, started);
     await expectNoReclaimOffered(app);
     expect(world.bitcoin.broadcasts).toEqual([]);
     await app.followDeposit();
     world.mine(2);
     await app.waitForProgress(RECLAIM_COPY.signersMayMint);
-    await expect(app.definition('Reclaim available')).toHaveText('now, from the Recover tab');
+    await expect(app.definition('Reclaim available')).toHaveText(
+      'now, under “Your deposits” on the Deposit tab'
+    );
 
-    await openInRecover(app, started);
+    await openInYourDeposits(app, started);
     await expect(app.progress(RECLAIM_COPY.signersMayMint)).toBeVisible();
     const controls = reclaimControls(app);
     await expect(controls.output).toHaveValue(outpointKey(payout.outpoint));
@@ -98,7 +102,7 @@ test.describe('R4. the mint never happens, so the user reclaims after the timelo
       `${payout.amountSats.toLocaleString('en-US')} sats, ${outpointKey(payout.outpoint)}: reclaimable now`
     );
     const to = wallets.stacks.account.paymentAddress;
-    await reclaimFromRecover(app, to);
+    await reclaimFromYourDeposits(app, to);
     await expect(
       app
         .progress(/^Reclaim sent for /)
@@ -139,8 +143,8 @@ test.describe('R4. the mint never happens, so the user reclaims after the timelo
     wallets,
   }) => {
     const { started } = await toReclaimable(app, world);
-    await openInRecover(app, started);
-    await reclaimFromRecover(app, wallets.stacks.account.paymentAddress);
+    await openInYourDeposits(app, started);
+    await reclaimFromYourDeposits(app, wallets.stacks.account.paymentAddress);
     await expect(app.progress(/^Reclaim sent for /)).toBeVisible();
     world.mine(1);
     await app.uploadReceipt(started.receiptPath);
@@ -158,13 +162,13 @@ test.describe('R4. the mint never happens, so the user reclaims after the timelo
   }) => {
     harness.allowConsoleErrors(FAILED_TO_LOAD);
     const { started, payout } = await toReclaimable(app, world);
-    await openInRecover(app, started);
+    await openInYourDeposits(app, started);
     world.addFault({
       service: 'mempool',
       path: /^\/api\/v1\/fees\/recommended$/,
       outcome: json({ halfHourFee: 4 }, 503),
     });
-    await reclaimFromRecover(app, wallets.stacks.account.paymentAddress);
+    await reclaimFromYourDeposits(app, wallets.stacks.account.paymentAddress);
     await expect(app.sendError).toHaveText(
       /^Could not read the current Bitcoin fee rate \(.+\), so no reclaim was built and nothing was signed or sent\. Try again in a moment\.$/
     );
@@ -190,13 +194,13 @@ test.describe('R4. the mint never happens, so the user reclaims after the timelo
         wallets,
       }) => {
         const { started, payout } = await toReclaimable(app, world);
-        await openInRecover(app, started);
+        await openInYourDeposits(app, started);
         wallets.stacks.behaviour.reject('signPsbt', {
           code,
           message: 'User rejected the request.',
         });
         const to = wallets.stacks.account.paymentAddress;
-        await reclaimFromRecover(app, to);
+        await reclaimFromYourDeposits(app, to);
         await expect(app.sendError).toHaveText(
           'You declined the request in your wallet, so nothing was signed or broadcast.'
         );
@@ -219,11 +223,11 @@ test.describe('R4. the mint never happens, so the user reclaims after the timelo
     wallets,
   }) => {
     const { started, payout } = await toReclaimable(app, world);
-    await openInRecover(app, started);
+    await openInYourDeposits(app, started);
     await expect(reclaimControls(app).output).toHaveValue(outpointKey(payout.outpoint));
     world.signers.accept(payout.outpoint);
     world.signers.sweep(payout.outpoint);
-    await reclaimFromRecover(app, wallets.stacks.account.paymentAddress);
+    await reclaimFromYourDeposits(app, wallets.stacks.account.paymentAddress);
     await expect(app.sendError).toHaveText(RECLAIM_COPY.alreadySpent);
     expect(wallets.stacks.behaviour.calls('signPsbt')).toEqual([]);
     expect(world.bitcoin.broadcasts).toEqual([]);
@@ -241,7 +245,7 @@ test.describe('R4. the mint never happens, so the user reclaims after the timelo
     wallets,
   }) => {
     const { started, payout } = await toReclaimable(app, world);
-    await openInRecover(app, started);
+    await openInYourDeposits(app, started);
     const to = wallets.stacks.account.paymentAddress;
     const review = await reviewReclaim(app, to);
     expect(review).toEqual({
@@ -271,7 +275,7 @@ test.describe('R4. the mint never happens, so the user reclaims after the timelo
     wallets,
   }) => {
     const { started, payout } = await toReclaimable(app, world);
-    await openInRecover(app, started);
+    await openInYourDeposits(app, started);
     const to = started.receipt.depositAddress;
     const taprootFee = Math.ceil(138 * 4);
     const review = await reviewReclaim(app, to);
@@ -296,9 +300,9 @@ test.describe('R4. the mint never happens, so the user reclaims after the timelo
     wallets,
   }) => {
     const { started, payout } = await toReclaimable(app, world);
-    await openInRecover(app, started);
+    await openInYourDeposits(app, started);
     world.bitcoin.feeRates.halfHourFee = 501;
-    await reclaimFromRecover(app, wallets.stacks.account.paymentAddress);
+    await reclaimFromYourDeposits(app, wallets.stacks.account.paymentAddress);
     await expect(app.sendError).toHaveText(
       'The current Bitcoin fee rate is 501 sat/vB, above the 500 sat/vB this page pays for a reclaim, so no reclaim was built and nothing was signed or sent. Your BTC stays reclaimable: try again when fees are lower.'
     );
@@ -308,7 +312,7 @@ test.describe('R4. the mint never happens, so the user reclaims after the timelo
     expect(world.bitcoin.isSpent(payout.outpoint)).toBe(false);
 
     world.bitcoin.feeRates.halfHourFee = 500;
-    await reclaimFromRecover(app, wallets.stacks.account.paymentAddress);
+    await reclaimFromYourDeposits(app, wallets.stacks.account.paymentAddress);
     await expect(app.progress(/^Reclaim sent for /)).toBeVisible();
   });
 
@@ -320,13 +324,13 @@ test.describe('R4. the mint never happens, so the user reclaims after the timelo
   }) => {
     harness.allowConsoleErrors(NET_FAILED);
     const { started } = await toReclaimable(app, world);
-    await openInRecover(app, started);
+    await openInYourDeposits(app, started);
     world.addFault({
       service: 'mempool',
       path: /^\/api\/v1\/fees\/recommended$/,
       outcome: 'network-error',
     });
-    await reclaimFromRecover(app, wallets.stacks.account.paymentAddress);
+    await reclaimFromYourDeposits(app, wallets.stacks.account.paymentAddress);
     await expect(app.sendError).toHaveText(
       'Could not read the current Bitcoin fee rate (Failed to fetch), so no reclaim was built and nothing was signed or sent. Try again in a moment.'
     );

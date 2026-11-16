@@ -44,10 +44,11 @@ test.describe('S1. our backend (the Worker) is down', () => {
     await app.connectEvmWallet();
     await expect(app.page.getByRole('button', { name: 'Get quote' })).toBeDisabled();
 
-    await app.openRecover();
+    await app.openYourDeposits();
     await expect(app.page.getByLabel('Receipt file')).toBeEnabled();
 
     harness.backendUp();
+    await app.openTab('Withdraw');
     await app.page.getByRole('button', { name: 'Deposit' }).click();
     await expect(app.assetSelect).toHaveValue(TOKENS.usdcBase.assetId);
     await expect(app.page.getByRole('alert')).toHaveCount(0);

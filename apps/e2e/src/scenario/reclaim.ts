@@ -9,7 +9,7 @@ import { field, stringField } from '../world/http.js';
 
 export const RECLAIM_COPY = {
   signersMayMint:
-    'The timelock has passed and the sBTC signers have not minted this deposit. You can reclaim your BTC now from the recovery page; until you do, the signers may still mint it.',
+    'The timelock has passed and the sBTC signers have not minted this deposit. You can reclaim your BTC now under “Your deposits” on the Deposit tab; until you do, the signers may still mint it.',
   reclaimed:
     'The BTC from this payout has already been moved out of the deposit address, most likely by a reclaim. Nothing is left to reclaim from it.',
   nothingLeft: 'No unspent BTC is left at this deposit address. There is nothing left to reclaim.',
@@ -55,7 +55,7 @@ export async function expectNoReclaimOffered(app: SatwayApp): Promise<void> {
   await expect(c.button).toHaveCount(0);
 }
 
-export async function reclaimFromRecover(
+export async function reclaimFromYourDeposits(
   app: SatwayApp,
   to: string,
   options: { choose?: Outpoint } = {}

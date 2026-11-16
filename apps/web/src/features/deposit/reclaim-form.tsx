@@ -18,7 +18,6 @@ import {
   findReclaimOption,
   isOutputSpent,
   outpointOf,
-  planReclaim,
   toXOnly,
 } from '@satway/core';
 
@@ -28,6 +27,7 @@ import {
   type WalletAccount,
   latestRequests,
 } from '../../shared/index.js';
+import { reclaimOffered, reclaimPlanOf } from './reclaim-plan.js';
 
 const fields = field();
 
@@ -65,20 +65,12 @@ function optionLabel(o: ReclaimOption): string {
   return `${amount}: reclaimable in about ${o.blocksUntilReclaim} blocks`;
 }
 
-export function reclaimPlanOf(snapshot: Snapshot, reclaimLockBlocks: number): ReclaimPlan {
-  return planReclaim({
-    outputs: snapshot.outputs,
-    selected: snapshot.payouts.find(o => !o.spent) ?? null,
-    tipHeight: snapshot.tipHeight,
-    reclaimLockBlocks,
-  });
-}
-
 export function ReclaimForm(props: {
   deposit: ReclaimParams;
   snapshot: Snapshot;
   stage: Stage | null;
   account: WalletAccount | null;
+  focus?: boolean;
   signReclaim(psbtHex: string, account: WalletAccount): Promise<Uint8Array>;
   onSent(): Promise<void>;
 }) {
@@ -91,6 +83,11 @@ export function ReclaimForm(props: {
   const [review, setReview] = useState<ReclaimReview | null>(null);
   const [requests] = useState(latestRequests);
   const reviewRef = useRef<HTMLDivElement>(null);
+  const outputRef = useRef<HTMLSelectElement>(null);
+  const focusFirst = props.focus === true;
+  useEffect(() => {
+    if (focusFirst) outputRef.current?.focus();
+  }, [focusFirst]);
   useEffect(() => {
     if (review !== null) reviewRef.current?.focus();
   }, [review]);
@@ -167,7 +164,7 @@ export function ReclaimForm(props: {
     }
   }
 
-  const reclaimable = props.stage === 'reclaimable' || plan.options.some(o => o.ready);
+  const reclaimable = reclaimOffered(plan, props.stage);
   const nothingLeft = plan.nothingLeft && snapshot.outputs.length > 0;
 
   return (
@@ -194,6 +191,7 @@ export function ReclaimForm(props: {
           <label className={fields.label}>
             Output to reclaim
             <select
+              ref={outputRef}
               className={fields.control}
               value={choice ? outpointOf(choice.output) : ''}
               onChange={e => {

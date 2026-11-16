@@ -79,6 +79,6 @@ test('D. manual send: the amount to send comes from the verified base units, not
   await expect(app.page.getByText('40.0 USDC on base', { exact: true })).toBeVisible();
   await expect(app.page.getByText(/400\.0/)).toHaveCount(0);
 
-  await app.openRecover();
+  await app.openYourDeposits();
   expect(await app.savedReceiptLabels()).toEqual([expect.stringMatching(/^40\.0 USDC, started /)]);
 });

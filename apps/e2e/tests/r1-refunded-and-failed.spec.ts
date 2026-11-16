@@ -62,7 +62,7 @@ test.describe('R1. the swap stops at 1Click', () => {
       expect(world.requestsTo('mempool', { caller: 'page' })).toHaveLength(mempoolReads);
       await expect(app.progress(stop.message)).toBeVisible();
 
-      await app.openRecover();
+      await app.openYourDeposits();
       await app.pickSavedReceipt(`${receipt.quoteResponse.quote.amountInFormatted} USDC`);
       await expect(app.progress(stop.message)).toBeVisible();
       await expect(app.page.getByRole('button', { name: 'Reclaim BTC' })).toHaveCount(0);

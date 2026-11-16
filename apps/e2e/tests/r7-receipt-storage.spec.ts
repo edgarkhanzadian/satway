@@ -39,7 +39,7 @@ test.describe('R7. receipts this browser remembers', () => {
       JSON.parse(JSON.stringify(second.receipt)),
       JSON.parse(JSON.stringify(first.receipt)),
     ]);
-    await app.openRecover();
+    await app.openYourDeposits();
     expect(await app.savedReceiptLabels()).toEqual([
       expect.stringMatching(new RegExp(`^${savedLabel(second).replace('.', '\\.')}, started `)),
       expect.stringMatching(new RegExp(`^${savedLabel(first).replace('.', '\\.')}, started `)),
@@ -80,7 +80,7 @@ test.describe('R7. receipts this browser remembers', () => {
       JSON.parse(JSON.stringify(started.receipt)),
       future,
     ]);
-    await app.openRecover();
+    await app.openYourDeposits();
     expect(await app.savedReceiptLabels()).toHaveLength(2);
   });
 

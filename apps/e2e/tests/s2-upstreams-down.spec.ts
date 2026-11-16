@@ -11,9 +11,9 @@ import {
 import {
   expectNoReclaimOffered,
   reclaimControls,
-  reclaimFromRecover,
+  reclaimFromYourDeposits,
 } from '../src/scenario/reclaim.js';
-import { openReceiptInRecover, toMinting, toReclaimable } from '../src/scenario/states.js';
+import { openReceiptInYourDeposits, toMinting, toReclaimable } from '../src/scenario/states.js';
 import { outpointKey } from '../src/world/bitcoin.js';
 import { json } from '../src/world/http.js';
 import type { FaultOutcome, Service, World } from '../src/world/world.js';
@@ -54,7 +54,7 @@ async function expectNotTerminal(app: SatwayApp): Promise<void> {
 
 async function expectStillUsable(app: SatwayApp): Promise<void> {
   await expect(app.page.getByRole('button', { name: 'Download receipt again' })).toBeEnabled();
-  await expect(app.page.getByRole('button', { name: 'Recover' })).toBeEnabled();
+  await expect(app.page.getByRole('button', { name: 'Deposit', exact: true })).toBeEnabled();
 }
 
 function hold(world: World, service: Service, path: RegExp) {
@@ -118,14 +118,14 @@ test.describe('S2. an upstream is down while a deposit is tracked', () => {
       await app.expectComplete();
     });
 
-    test(`Emily deposit lookups fail at the timelock (${failure.name}): Recover still shows the output and the reclaim, and never says it was never processed`, async ({
+    test(`Emily deposit lookups fail at the timelock (${failure.name}): Your deposits still shows the output and the reclaim, and never says it was never processed`, async ({
       app,
       world,
       wallets,
     }) => {
       const { started, payout } = await toReclaimable(app, world);
       world.addFault({ service: 'emily', path: EMILY_DEPOSIT, outcome: failure.outcome });
-      await openReceiptInRecover(app, started);
+      await openReceiptInYourDeposits(app, started);
       await expect(app.page.getByRole('alert')).toHaveCount(0);
       await expect(app.progress(MINT_UNKNOWN_NOTICE)).toBeVisible();
       await expect(app.progress(/could not be reached/).first()).toBeVisible();
@@ -133,7 +133,7 @@ test.describe('S2. an upstream is down while a deposit is tracked', () => {
       await expect(app.definition('Bitcoin payout')).toContainText(payout.outpoint.txid);
       const controls = reclaimControls(app);
       await expect(controls.output).toHaveValue(outpointKey(payout.outpoint));
-      await reclaimFromRecover(app, wallets.stacks.account.paymentAddress);
+      await reclaimFromYourDeposits(app, wallets.stacks.account.paymentAddress);
       await expect(app.progress(/^Reclaim sent for /)).toBeVisible();
       expect(world.bitcoin.isSpent(payout.outpoint)).toBe(true);
       await expectNoPayload(app);
@@ -149,11 +149,11 @@ test.describe('S2. an upstream is down while a deposit is tracked', () => {
         path: /^\/api\/blocks\/tip\/height$/,
         outcome: failure.outcome,
       });
-      await openReceiptInRecover(app, started);
+      await openReceiptInYourDeposits(app, started);
       await expectNoReclaimOffered(app);
       await expectNoPayload(app);
       world.clearFaults();
-      await openReceiptInRecover(app, started);
+      await openReceiptInYourDeposits(app, started);
       await expect(reclaimControls(app).button).toBeVisible();
     });
 
