@@ -5,18 +5,15 @@ import { actions, button, details, field, notice, sheet } from 'satway-styles/re
 import { type OneClickToken, MAINNET_CONFIG as config } from '@satway/core';
 
 import type { WalletAccount } from '../../shared/index.js';
+import { sats } from './sats.js';
 import type { DepositForm as Form } from './use-deposit-form.js';
 
 const fields = field();
 
 const afterActions = cx(notice(), css({ marginTop: 'space.08' }));
 
-export const NEW_ADDRESS_NOTE =
+const NEW_ADDRESS_NOTE =
   'A new Bitcoin deposit address for this deposit only, built from your keys when you continue.';
-
-export function sats(n: number): string {
-  return `${n.toLocaleString('en-US')} sats`;
-}
 
 export function DepositForm(props: {
   account: WalletAccount;

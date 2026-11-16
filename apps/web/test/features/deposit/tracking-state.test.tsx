@@ -20,12 +20,16 @@ import {
   CLOSE_PAGE_NOTE,
   registeredSwapsInMemory,
 } from '../../../src/features/deposit/background-registration.js';
-import { createTrackingRunner } from '../../../src/features/deposit/tracking-effects.js';
+import {
+  NO_WALLET_TO_CHECK,
+  createTrackingRunner,
+} from '../../../src/features/deposit/tracking-effects.js';
 import {
   POLL_INTERVAL_MS,
   QUOTE_EXPIRED_NOT_SENT,
   type TrackingEffect,
   type TrackingState,
+  WALLET_REJECTED,
   durableTrackingEffect,
   initialTracking,
   pendingTracking,
@@ -521,7 +525,7 @@ describe('tracking: sending from the wallet', () => {
     await settle();
     expect(h.store.get().send).toMatchObject({
       record: null,
-      error: 'The request was rejected in your wallet, so nothing was sent.',
+      error: WALLET_REJECTED,
     });
   });
 
@@ -558,7 +562,7 @@ describe('tracking: sending from the wallet', () => {
     const attempt = attemptingRecord({ target: TARGET, account: WALLET.address, now: new Date(0) });
     const h = await awaitingPayment({ record: sentRecord(attempt, TX, 'wallet'), wallet: null });
     expect(h.store.get().send.checkNote).toBe(
-      'Could not check the transaction: connect the wallet you sent from to check it. Retrying.'
+      `Could not check the transaction: ${NO_WALLET_TO_CHECK}. Retrying.`
     );
     expect(h.store.get().send.record).toMatchObject({ state: 'sent' });
   });

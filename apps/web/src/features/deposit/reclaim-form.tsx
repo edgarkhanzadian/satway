@@ -28,6 +28,7 @@ import {
   latestRequests,
 } from '../../shared/index.js';
 import { reclaimOffered, reclaimPlanOf } from './reclaim-plan.js';
+import { sats } from './sats.js';
 
 const fields = field();
 
@@ -47,10 +48,6 @@ interface ReclaimReview {
   to: string;
   psbtHex: string;
   fee: ReclaimFeeQuote;
-}
-
-function sats(n: number): string {
-  return `${n.toLocaleString('en-US')} sats`;
 }
 
 function chooseOption(plan: ReclaimPlan, chosen: string | null): ReclaimOption | null {
