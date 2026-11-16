@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react';
 import { styled } from 'satway-styles/jsx';
 import { button, sheet } from 'satway-styles/recipes';
 
-import type { SourceWallet } from '@satway/chains';
+import { SUPPORTED_ORIGIN_CHAINS, type SourceWallet } from '@satway/chains';
 
 import { SourceWalletPanel } from '../features/chain-wallets/index.js';
 import { Deposit } from '../features/deposit/index.js';
@@ -180,8 +180,8 @@ export function App() {
                   Before you start
                 </styled.h2>
                 <p>
-                  Send USDC, ETH, SOL and other assets from 30-plus chains and receive sBTC on
-                  Stacks. Connect your Stacks wallet above to begin.
+                  Send USDC, ETH and other assets from {SUPPORTED_ORIGIN_CHAINS.size} EVM chains and
+                  receive sBTC on Stacks. Connect your Stacks wallet above to begin.
                 </p>
                 <styled.ul
                   marginTop="space.08"

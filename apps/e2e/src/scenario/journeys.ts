@@ -26,7 +26,6 @@ export const SEND_COPY = {
   checkWallet:
     'Check your wallet’s activity before doing anything else. Do not send again, from this wallet or any other, unless you are sure nothing left your wallet.',
   recordedNoTx: 'A payment has been recorded for this swap. Do not send again.',
-  resend: 'Send the same signed transaction again',
   sendManually: 'Send the funds from your wallet yourself instead.',
 } as const;
 

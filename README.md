@@ -326,7 +326,7 @@ Emily and 1Click, with the production build and the real Worker
 mempool.space tip and fees parse, that the token list loads through the Worker, and that dry
 quotes for EVM assets pass the app's own verification. The fake wallets
 only hand out placeholder addresses. Safety rails in `src/canary/canary-fixtures.ts`: a click
-on Continue, Send, Reclaim or a resend button is swallowed and fails the test; a non-dry
+on Continue, Send, Reclaim or “I checked my wallet” is swallowed and fails the test; a non-dry
 quote or any other `POST` to the backend is aborted before it reaches the Worker; any
 `POST` to Emily or `POST /tx` is aborted; wallet
 calls other than address requests are refused; every such attempt fails the test. The canary

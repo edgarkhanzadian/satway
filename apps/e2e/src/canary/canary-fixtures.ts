@@ -22,8 +22,7 @@ const ADDRESS_ONLY = {
   stacks: ['getAddresses', 'stx_getAddresses'],
 } as const;
 
-const NO_SIGNING_BUTTONS =
-  /^(Continue|Send from .*|Reclaim BTC|I checked my wallet.*|Send the same signed transaction again)$/;
+const NO_SIGNING_BUTTONS = /^(Continue|Send from .*|Reclaim BTC|I checked my wallet.*)$/;
 
 export interface CanaryLog {
   violations: string[];

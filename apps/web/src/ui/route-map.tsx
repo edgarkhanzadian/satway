@@ -40,7 +40,7 @@ export function RouteMap(props: { state: RouteState; tracking: boolean; origin: 
       {state.stops.map((status, i) => {
         const name = STOPS[i];
         const shown = state.current === i || status === 'failed';
-        const note = i === 0 ? (props.origin ?? 'USDC, ETH, SOL and more') : NOTES[i];
+        const note = i === 0 ? (props.origin ?? 'USDC, ETH and more on EVM chains') : NOTES[i];
         const text = stopText(props.tracking, status, i);
         const leg = LEGS[i];
         const legStatus = state.legs[i];

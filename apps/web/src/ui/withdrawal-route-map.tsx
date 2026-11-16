@@ -45,7 +45,7 @@ export function WithdrawalRouteMap(props: {
       {state.stops.map((status, i) => {
         const name = WITHDRAWAL_STOPS[i];
         const shown = state.current === i || status === 'failed';
-        const note = i === 3 ? (props.destination ?? 'USDC, ETH, SOL and more') : NOTES[i];
+        const note = i === 3 ? (props.destination ?? 'USDC, ETH and more on EVM chains') : NOTES[i];
         const text = stopText(props.tracking, status, i);
         const leg = LEGS[i];
         const legStatus = state.legs[i];
