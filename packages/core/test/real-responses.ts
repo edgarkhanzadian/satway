@@ -357,3 +357,118 @@ export const REAL_LIVE_STATUS: unknown = {
     },
   },
 };
+
+export const REAL_EMILY_RECLAIM_KEY_DEPOSITS: unknown = {
+  nextToken: null,
+  deposits: [
+    {
+      version: 'v1',
+      bitcoinTxid: '5ab7ae554358d3ffdab7cc48db49ff144c5ae4fdd617b4140eac1b1936109bf5',
+      bitcoinTxOutputIndex: 0,
+      recipient: '0516037370db53547d845976e26dd5b5a92a7c7436ba',
+      maxFee: 80000,
+      amount: 20000774,
+      lastUpdateHeight: 9483406,
+      lastUpdateBlockHash: '214fc144363b8e4545ea67ba1dcb5fa8cf17773d21092142c4d75c528ccac387',
+      status: 'confirmed',
+      reclaimScript:
+        '02b603b2752051b397d3ad5ab4f803565c0243d3c1fa9d5a8124b33547bb993ee1ebeb729ff2ac',
+      depositScript:
+        '1e00000000000138800516037370db53547d845976e26dd5b5a92a7c7436ba7520d99ad0f0111a7e9aaa2ed22940efec98db0ece9b9475e61e1eec65a6e7f3af69ac',
+    },
+    {
+      version: 'v1',
+      bitcoinTxid: '6c29eb2adb97a6c8c1e002bfd9ab05246d13b2d738c215af251840a0518ff08e',
+      bitcoinTxOutputIndex: 0,
+      recipient: '0516037370db53547d845976e26dd5b5a92a7c7436ba',
+      maxFee: 80000,
+      amount: 98999847,
+      lastUpdateHeight: 9483160,
+      lastUpdateBlockHash: 'cfab0bf5b7244775ec4eb9cca7dadf4850d6abc710fac2f676311e47165a21e6',
+      status: 'confirmed',
+      reclaimScript:
+        '02b603b2752051b397d3ad5ab4f803565c0243d3c1fa9d5a8124b33547bb993ee1ebeb729ff2ac',
+      depositScript:
+        '1e00000000000138800516037370db53547d845976e26dd5b5a92a7c7436ba7520d99ad0f0111a7e9aaa2ed22940efec98db0ece9b9475e61e1eec65a6e7f3af69ac',
+    },
+    {
+      version: 'v1',
+      bitcoinTxid: 'ac83e594011d20b8600b35ddd8f72aaa9375fe55f4b4785b407f877613c10933',
+      bitcoinTxOutputIndex: 0,
+      recipient: '0516037370db53547d845976e26dd5b5a92a7c7436ba',
+      maxFee: 80000,
+      amount: 996020,
+      lastUpdateHeight: 9482846,
+      lastUpdateBlockHash: 'e7fa74a5b6326cfb93c7237387863fef06f78b3114462c6a92dcfab80a7c08c6',
+      status: 'confirmed',
+      reclaimScript:
+        '02b603b2752051b397d3ad5ab4f803565c0243d3c1fa9d5a8124b33547bb993ee1ebeb729ff2ac',
+      depositScript:
+        '1e00000000000138800516037370db53547d845976e26dd5b5a92a7c7436ba7520d99ad0f0111a7e9aaa2ed22940efec98db0ece9b9475e61e1eec65a6e7f3af69ac',
+    },
+  ],
+};
+
+export const REAL_EMILY_RECLAIM_KEY_FIRST_PAGE: unknown = {
+  nextToken:
+    'eyJCaXRjb2luVHhpZCI6IjVhYjdhZTU1NDM1OGQzZmZkYWI3Y2M0OGRiNDlmZjE0NGM1YWU0ZmRkNjE3YjQxNDBlYWMxYjE5MzYxMDliZjUiLCJCaXRjb2luVHhPdXRwdXRJbmRleCI6MCwiUmVjbGFpbVB1YmtleXNIYXNoIjoiMWNjZTI4OWI3NzFjN2NiNmU4OGExMjM3ZWFiMWRiNGRkMTkxZjY3OWNjMWVkYzNkZmI2NmY0YTBiZTJiNzlhMyIsIkxhc3RVcGRhdGVIZWlnaHQiOjk0ODM0MDZ9',
+  deposits: [
+    {
+      version: 'v1',
+      bitcoinTxid: '5ab7ae554358d3ffdab7cc48db49ff144c5ae4fdd617b4140eac1b1936109bf5',
+      bitcoinTxOutputIndex: 0,
+      recipient: '0516037370db53547d845976e26dd5b5a92a7c7436ba',
+      maxFee: 80000,
+      amount: 20000774,
+      lastUpdateHeight: 9483406,
+      lastUpdateBlockHash: '214fc144363b8e4545ea67ba1dcb5fa8cf17773d21092142c4d75c528ccac387',
+      status: 'confirmed',
+      reclaimScript:
+        '02b603b2752051b397d3ad5ab4f803565c0243d3c1fa9d5a8124b33547bb993ee1ebeb729ff2ac',
+      depositScript:
+        '1e00000000000138800516037370db53547d845976e26dd5b5a92a7c7436ba7520d99ad0f0111a7e9aaa2ed22940efec98db0ece9b9475e61e1eec65a6e7f3af69ac',
+    },
+  ],
+};
+
+export const REAL_EMILY_RECLAIM_KEY_UNKNOWN: unknown = { nextToken: null, deposits: [] };
+
+export const REAL_EMILY_RECLAIM_KEY_BAD_KEY: unknown = {
+  message: 'HTTP request failed with status code 400 Bad Request: invalid pubkey',
+};
+
+export const REAL_USED_ADDRESS_STATS: unknown = {
+  address: 'bc1pytlwt3qfg4rdrk3yxtmdhcjvy0l63yp7qh3jra5xwq8yt6w4fvhqyjl7dx',
+  chain_stats: {
+    funded_txo_count: 3,
+    funded_txo_sum: 119996641,
+    spent_txo_count: 3,
+    spent_txo_sum: 119996641,
+    tx_count: 6,
+  },
+  mempool_stats: {
+    funded_txo_count: 0,
+    funded_txo_sum: 0,
+    spent_txo_count: 0,
+    spent_txo_sum: 0,
+    tx_count: 0,
+  },
+};
+
+export const REAL_UNUSED_ADDRESS_STATS: unknown = {
+  address: 'bc1p8vqs7u8lnh8slfzyejq5ml4smmdjj64mjcz9yswhakthg7fcgs3qja4a4x',
+  chain_stats: {
+    funded_txo_count: 0,
+    funded_txo_sum: 0,
+    spent_txo_count: 0,
+    spent_txo_sum: 0,
+    tx_count: 0,
+  },
+  mempool_stats: {
+    funded_txo_count: 0,
+    funded_txo_sum: 0,
+    spent_txo_count: 0,
+    spent_txo_sum: 0,
+    tx_count: 0,
+  },
+};

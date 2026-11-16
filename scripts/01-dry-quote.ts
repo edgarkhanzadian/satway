@@ -64,7 +64,7 @@ async function main() {
     stacksAddress,
     reclaimPublicKey,
     signersPublicKey: signers.signersPublicKey,
-    maxSignerFeeSats: config.maxSignerFeeSats,
+    maxSignerFeeSats: config.baseSignerFeeSats,
     reclaimLockBlocks: config.reclaimLockBlocks,
   });
   console.log(`   recipient    ${stacksAddress}`);
@@ -101,7 +101,7 @@ async function main() {
       const check = checkDepositAmount(
         Number(quote.minAmountOut),
         limits,
-        config.maxSignerFeeSats,
+        config.baseSignerFeeSats,
         largestPayoutSats(quote)
       );
       const costPct = (1 - Number(quote.amountOutUsd) / Number(quote.amountInUsd)) * 100;

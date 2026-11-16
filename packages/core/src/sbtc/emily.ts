@@ -9,6 +9,7 @@ import {
   requestJson,
   z,
 } from '../shared/index.js';
+import { toXOnly } from './deposit-address.js';
 import { verifyDepositTransaction } from './verify-deposit-transaction.js';
 
 export interface SbtcLimits {
@@ -121,4 +122,68 @@ export async function fetchDeposit(
     if (err instanceof HttpError && err.status === 404) return null;
     throw err;
   }
+}
+
+export interface EmilyReclaimKeyDeposit {
+  bitcoinTxid: string;
+  bitcoinTxOutputIndex: number;
+  maxFee: number;
+  amount: number;
+  status: EmilyDepositStatus;
+  depositScript: string;
+  reclaimScript: string;
+}
+
+export interface EmilyReclaimKeyDeposits {
+  deposits: EmilyReclaimKeyDeposit[];
+  truncated: boolean;
+}
+
+const emilyReclaimKeyPageSchema = z.looseObject({
+  nextToken: nullOrAbsent(z.string()),
+  deposits: z.array(
+    z.looseObject({
+      bitcoinTxid: z.string(),
+      bitcoinTxOutputIndex: z.number(),
+      maxFee: z.number(),
+      amount: z.number(),
+      status: z.enum(['pending', 'reprocessing', 'accepted', 'confirmed', 'failed', 'rbf']),
+      depositScript: z.string(),
+      reclaimScript: z.string(),
+    })
+  ),
+});
+
+export const MAX_RECLAIM_KEY_PAGES = 10;
+
+export async function fetchDepositsByReclaimKey(
+  sbtcApiUrl: string,
+  reclaimPublicKey: string,
+  options: { fetchFn?: FetchLike; maxPages?: number; signal?: AbortSignal } = {}
+): Promise<EmilyReclaimKeyDeposits> {
+  const fetchFn = options.fetchFn ?? defaultFetch;
+  const base = `${sbtcApiUrl}/deposit/reclaim-pubkeys/${toXOnly(reclaimPublicKey)}`;
+  const maxPages = Math.max(1, options.maxPages ?? MAX_RECLAIM_KEY_PAGES);
+  const deposits: EmilyReclaimKeyDeposit[] = [];
+  let token: string | undefined;
+  for (let page = 0; page < maxPages; page++) {
+    const url = token === undefined ? base : `${base}?${new URLSearchParams({ nextToken: token })}`;
+    const body = await requestJson(fetchFn, url, emilyReclaimKeyPageSchema, {
+      signal: options.signal,
+    });
+    deposits.push(
+      ...body.deposits.map(d => ({
+        bitcoinTxid: d.bitcoinTxid.toLowerCase(),
+        bitcoinTxOutputIndex: d.bitcoinTxOutputIndex,
+        maxFee: d.maxFee,
+        amount: d.amount,
+        status: d.status,
+        depositScript: d.depositScript.toLowerCase(),
+        reclaimScript: d.reclaimScript.toLowerCase(),
+      }))
+    );
+    token = body.nextToken || undefined;
+    if (token === undefined) return { deposits, truncated: false };
+  }
+  return { deposits, truncated: true };
 }

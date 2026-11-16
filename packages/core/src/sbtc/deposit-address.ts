@@ -1,7 +1,10 @@
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
-import { Address, validateStacksAddress } from '@stacks/transactions';
+import { Address, ClarityType, validateStacksAddress } from '@stacks/transactions';
 import { MAINNET, UNSPENDABLE_PUB, buildSbtcDepositAddress } from 'sbtc';
+
+import { DEPOSIT_INDEX_LIMIT, type NetworkConfig } from '../shared/index.js';
+import { parseClarityHex } from './clarity-values.js';
 
 export interface DepositAddressInput {
   stacksAddress: string;
@@ -76,6 +79,104 @@ export function buildDepositAddress(input: DepositAddressInput): DepositAddress 
     depositScript: built.depositScript,
     reclaimScript: built.reclaimScript,
   };
+}
+
+export type DepositIndexConfig = Pick<NetworkConfig, 'baseSignerFeeSats' | 'reclaimLockBlocks'>;
+
+export interface IndexedDepositAddressInput {
+  stacksAddress: string;
+  reclaimPublicKey: string;
+  signersPublicKey: string;
+  depositIndex: number;
+}
+
+export interface IndexedDepositAddress extends DepositAddress {
+  depositIndex: number;
+  maxSignerFeeSats: number;
+}
+
+export function isDepositIndex(n: number): boolean {
+  return Number.isSafeInteger(n) && n >= 0 && n < DEPOSIT_INDEX_LIMIT;
+}
+
+export function signerFeeCapFor(depositIndex: number, baseSignerFeeSats: number): number {
+  if (!isDepositIndex(depositIndex)) {
+    throw new Error(
+      `The deposit index must be a whole number from 0 to ${DEPOSIT_INDEX_LIMIT - 1}`
+    );
+  }
+  return baseSignerFeeSats + depositIndex;
+}
+
+export function depositIndexOfFeeCap(
+  maxSignerFeeSats: number,
+  baseSignerFeeSats: number
+): number | null {
+  const n = maxSignerFeeSats - baseSignerFeeSats;
+  return isDepositIndex(n) ? n : null;
+}
+
+export function buildIndexedDepositAddress(
+  input: IndexedDepositAddressInput,
+  config: DepositIndexConfig
+): IndexedDepositAddress {
+  const maxSignerFeeSats = signerFeeCapFor(input.depositIndex, config.baseSignerFeeSats);
+  const built = buildDepositAddress({
+    stacksAddress: input.stacksAddress,
+    reclaimPublicKey: input.reclaimPublicKey,
+    signersPublicKey: input.signersPublicKey,
+    maxSignerFeeSats,
+    reclaimLockBlocks: config.reclaimLockBlocks,
+  });
+  return { ...built, depositIndex: input.depositIndex, maxSignerFeeSats };
+}
+
+export interface DepositScriptParameters {
+  stacksAddress: string;
+  reclaimPublicKey: string;
+  signersPublicKey: string;
+  maxSignerFeeSats: number;
+  reclaimLockBlocks: number;
+}
+
+const STANDARD_DEPOSIT_SCRIPT = /^1e([0-9a-f]{16})(05[0-9a-f]{42})7520([0-9a-f]{64})ac$/;
+const RECLAIM_SCRIPT_TAIL = /b27520([0-9a-f]{64})ac$/;
+
+function lockOfReclaimScript(reclaimScript: string): number | null {
+  const [lock] = btc.Script.decode(hex.decode(reclaimScript));
+  if (typeof lock === 'number') return lock;
+  if (lock instanceof Uint8Array) return Number(btc.ScriptNum().decode(lock));
+  return null;
+}
+
+export function depositParametersOf(
+  depositScript: string,
+  reclaimScript: string
+): DepositScriptParameters | null {
+  const deposit = STANDARD_DEPOSIT_SCRIPT.exec(depositScript.toLowerCase());
+  const reclaim = RECLAIM_SCRIPT_TAIL.exec(reclaimScript.toLowerCase());
+  const [, feeHex, principalHex, signersPublicKey] = deposit ?? [];
+  const reclaimPublicKey = reclaim?.[1];
+  if (!feeHex || !principalHex || !signersPublicKey || !reclaimPublicKey) return null;
+  try {
+    const principal = parseClarityHex(principalHex, 'The deposit recipient');
+    const lock = lockOfReclaimScript(reclaimScript.toLowerCase());
+    if (principal.type !== ClarityType.PrincipalStandard || lock === null) return null;
+    const parameters: DepositScriptParameters = {
+      stacksAddress: principal.value,
+      reclaimPublicKey,
+      signersPublicKey,
+      maxSignerFeeSats: Number(BigInt(`0x${feeHex}`)),
+      reclaimLockBlocks: lock,
+    };
+    const rebuilt = buildDepositAddress(parameters);
+    return rebuilt.depositScript === depositScript.toLowerCase() &&
+      rebuilt.reclaimScript === reclaimScript.toLowerCase()
+      ? parameters
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 export function scriptPubKeyOf(address: string): string {

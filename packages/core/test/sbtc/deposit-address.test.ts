@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  DEPOSIT_INDEX_LIMIT,
+  MAINNET_CONFIG,
   assertMainnetStandardAddress,
   buildDepositAddress,
+  buildIndexedDepositAddress,
   depositAddressFromScripts,
+  depositIndexOfFeeCap,
+  depositParametersOf,
   isMainnetTaproot,
   scriptPubKeyOf,
+  signerFeeCapFor,
   toXOnly,
 } from '../../src/index.js';
 import { REAL_DEPOSIT as D } from '../fixtures.js';
@@ -82,6 +88,92 @@ describe('buildDepositAddress', () => {
     for (const reclaimLockBlocks of [0, -1, 65_536, 1.5]) {
       expect(() => buildDepositAddress({ ...input, reclaimLockBlocks })).toThrow();
     }
+  });
+});
+
+const owner = {
+  stacksAddress: D.stacksAddress,
+  reclaimPublicKey: D.reclaimPublicKey,
+  signersPublicKey: D.signersPublicKey,
+};
+
+describe('buildIndexedDepositAddress', () => {
+  it('index 0 is the real deposit with the base fee cap', () => {
+    const built = buildIndexedDepositAddress({ ...owner, depositIndex: 0 }, MAINNET_CONFIG);
+    expect(built.address).toBe(D.address);
+    expect(built.maxSignerFeeSats).toBe(80_000);
+    expect(built.depositIndex).toBe(0);
+  });
+
+  it('gives every index its own address, with the index added to the fee cap', () => {
+    const indices = [0, 1, 2, 255, 256, 4_096, DEPOSIT_INDEX_LIMIT - 1];
+    const built = indices.map(depositIndex =>
+      buildIndexedDepositAddress({ ...owner, depositIndex }, MAINNET_CONFIG)
+    );
+    expect(new Set(built.map(b => b.address)).size).toBe(indices.length);
+    built.forEach((b, i) => {
+      const n = indices[i] ?? -1;
+      expect(b.maxSignerFeeSats).toBe(80_000 + n);
+      const feeHex = /^1e([0-9a-f]{16})/.exec(b.depositScript)?.[1] ?? '';
+      expect(Number(BigInt(`0x${feeHex}`))).toBe(80_000 + n);
+      expect(b.reclaimScript).toBe(D.reclaimScript);
+    });
+  });
+
+  it('index 1 matches the address derived independently from its scripts', () => {
+    const built = buildIndexedDepositAddress({ ...owner, depositIndex: 1 }, MAINNET_CONFIG);
+    expect(built.address).toBe('bc1p8vqs7u8lnh8slfzyejq5ml4smmdjj64mjcz9yswhakthg7fcgs3qja4a4x');
+    expect(depositAddressFromScripts(built.depositScript, built.reclaimScript).address).toBe(
+      built.address
+    );
+  });
+
+  it.each([-1, 1.5, DEPOSIT_INDEX_LIMIT, Number.NaN])('rejects index %s', depositIndex => {
+    expect(() => buildIndexedDepositAddress({ ...owner, depositIndex }, MAINNET_CONFIG)).toThrow(
+      /deposit index/
+    );
+  });
+
+  it('maps fee caps back to indices only inside the range', () => {
+    expect(signerFeeCapFor(7, 80_000)).toBe(80_007);
+    expect(depositIndexOfFeeCap(80_007, 80_000)).toBe(7);
+    expect(depositIndexOfFeeCap(80_000, 80_000)).toBe(0);
+    expect(depositIndexOfFeeCap(79_999, 80_000)).toBeNull();
+    expect(depositIndexOfFeeCap(80_000 + DEPOSIT_INDEX_LIMIT, 80_000)).toBeNull();
+    expect(depositIndexOfFeeCap(80_000 + DEPOSIT_INDEX_LIMIT - 1, 80_000)).toBe(
+      DEPOSIT_INDEX_LIMIT - 1
+    );
+  });
+});
+
+describe('depositParametersOf', () => {
+  it('reads the real deposit scripts back into their parameters', () => {
+    expect(depositParametersOf(D.depositScript, D.reclaimScript)).toEqual({
+      stacksAddress: D.stacksAddress,
+      reclaimPublicKey: D.reclaimPublicKey,
+      signersPublicKey: D.signersPublicKey,
+      maxSignerFeeSats: 80_000,
+      reclaimLockBlocks: 950,
+    });
+  });
+
+  it('reads a per-deposit fee cap and a small lock', () => {
+    const built = buildDepositAddress({ ...input, maxSignerFeeSats: 80_123, reclaimLockBlocks: 6 });
+    expect(depositParametersOf(built.depositScript, built.reclaimScript)).toMatchObject({
+      maxSignerFeeSats: 80_123,
+      reclaimLockBlocks: 6,
+    });
+  });
+
+  it('refuses scripts that are not the standard shape', () => {
+    expect(depositParametersOf(D.depositScript, '03ffff00b26a')).toBeNull();
+    expect(
+      depositParametersOf(D.depositScript.replace('7520', '7620'), D.reclaimScript)
+    ).toBeNull();
+    expect(depositParametersOf('zz', D.reclaimScript)).toBeNull();
+    const contract =
+      '2400000000000138800616000000000000000000000000000000000000000005706f782d357520d99ad0f0111a7e9aaa2ed22940efec98db0ece9b9475e61e1eec65a6e7f3af69ac';
+    expect(depositParametersOf(contract, D.reclaimScript)).toBeNull();
   });
 });
 

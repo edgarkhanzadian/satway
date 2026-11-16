@@ -283,6 +283,25 @@ export async function snapshotOutpoints(
   return { outpoints: res.outputs.map(outpointOf).sort(), truncated: res.truncated };
 }
 
+const addressStatsSchema = z.looseObject({
+  chain_stats: z.looseObject({ tx_count: z.number() }),
+  mempool_stats: z.looseObject({ tx_count: z.number() }),
+});
+
+export async function fetchAddressTxCount(
+  btcApiUrl: string,
+  address: string,
+  options: { fetchFn?: FetchLike; signal?: AbortSignal } = {}
+): Promise<number> {
+  const stats = await requestJson(
+    options.fetchFn ?? defaultFetch,
+    `${btcApiUrl}/address/${address}`,
+    addressStatsSchema,
+    { signal: options.signal }
+  );
+  return stats.chain_stats.tx_count + stats.mempool_stats.tx_count;
+}
+
 export async function fetchTipHeight(
   btcApiUrl: string,
   fetchFn: FetchLike = defaultFetch

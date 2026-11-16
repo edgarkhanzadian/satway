@@ -123,7 +123,7 @@ describe('POST /deposits: script shape is checked before anything else', () => {
       stacksAddress: ZERO_STACKS,
       reclaimPublicKey: OTHER_KEY,
       signersPublicKey: D.signerKey,
-      maxSignerFeeSats: config.maxSignerFeeSats,
+      maxSignerFeeSats: config.baseSignerFeeSats,
       reclaimLockBlocks: config.reclaimLockBlocks,
     });
     expect(checkScriptShape(built.depositScript, built.reclaimScript, config)).toEqual({
@@ -140,7 +140,7 @@ describe('POST /deposits: script shape is checked before anything else', () => {
         stacksAddress: ZERO_STACKS,
         reclaimPublicKey: OTHER_KEY,
         signersPublicKey: D.signerKey,
-        maxSignerFeeSats: config.maxSignerFeeSats,
+        maxSignerFeeSats: config.baseSignerFeeSats,
         reclaimLockBlocks: blocks,
       });
       expect(built.reclaimScript.startsWith(`${lockPushHex(blocks)}b27520`)).toBe(true);
@@ -529,7 +529,7 @@ function otherDeposit(i: number) {
     stacksAddress: ZERO_STACKS,
     reclaimPublicKey: reclaimKey,
     signersPublicKey: D.signerKey,
-    maxSignerFeeSats: config.maxSignerFeeSats,
+    maxSignerFeeSats: config.baseSignerFeeSats,
     reclaimLockBlocks: config.reclaimLockBlocks,
   });
 }

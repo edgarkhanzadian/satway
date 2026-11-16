@@ -3,12 +3,15 @@ import * as btc from '@scure/btc-signer';
 import { describe, expect, it } from 'vitest';
 
 import {
+  MAINNET_CONFIG,
   type ReclaimFeeQuote,
   buildDepositAddress,
+  buildIndexedDepositAddress,
   buildReclaimPsbt,
   finalizeSignedReclaim,
   reclaimAmountProblem,
   reclaimFeeQuote,
+  reclaimLeafControlBlock,
   reclaimTxVsize,
   signReclaimPsbt,
 } from '../../src/index.js';
@@ -199,6 +202,34 @@ describe('signReclaimPsbt', () => {
     const fromWallet = finalizeSignedReclaim(tx.toPSBT());
     expect(fromWallet.txid).toBe(signReclaimPsbt(psbtHex, priv).txid);
     expect(() => finalizeSignedReclaim(hex.decode(psbtHex))).toThrow();
+  });
+
+  it('reclaims a per-deposit address (index 4321) at no more than the estimated size', () => {
+    const indexed = buildIndexedDepositAddress(
+      {
+        stacksAddress: D.stacksAddress,
+        reclaimPublicKey,
+        signersPublicKey: D.signersPublicKey,
+        depositIndex: 4_321,
+      },
+      MAINNET_CONFIG
+    );
+    expect(indexed.maxSignerFeeSats).toBe(84_321);
+    const built = buildReclaimPsbt({ ...mine, maxSignerFeeSats: indexed.maxSignerFeeSats });
+    expect(built.depositAddress).toBe(indexed.address);
+    const unsigned = btc.Transaction.fromPSBT(hex.decode(built.psbtHex), {
+      allowUnknownOutputs: true,
+    });
+    expect(hex.encode(defined(unsigned.getInput(0).witnessUtxo).script)).toBe(indexed.scriptPubKey);
+    const { txHex } = signReclaimPsbt(built.psbtHex, priv);
+    const tx = btc.Transaction.fromRaw(hex.decode(txHex), { allowUnknownOutputs: true });
+    const witness = defined(tx.getInput(0).finalScriptWitness);
+    expect(hex.encode(defined(witness[1]))).toBe(indexed.reclaimScript);
+    expect(hex.encode(defined(witness[2]))).toBe(
+      reclaimLeafControlBlock(indexed.depositScript, indexed.reclaimScript)
+    );
+    expect(tx.vsize).toBeLessThanOrEqual(reclaimTxVsize(DEST, D.reclaimLockBlocks));
+    expect(built.fee.feeSats / tx.vsize).toBeGreaterThanOrEqual(input.feeRate);
   });
 
   it('cannot be signed by a different key', () => {

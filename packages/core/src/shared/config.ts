@@ -7,7 +7,7 @@ export interface NetworkConfig {
   readonly sbtcApiUrl: string;
   readonly oneClickBaseUrl: string;
   readonly btcAssetId: string;
-  readonly maxSignerFeeSats: number;
+  readonly baseSignerFeeSats: number;
   readonly reclaimLockBlocks: number;
   readonly appFeeBps: number;
   readonly appFeeRecipient: string | null;
@@ -24,13 +24,17 @@ export const MAINNET_CONFIG: NetworkConfig = Object.freeze({
   sbtcApiUrl: 'https://sbtc-emily.com',
   oneClickBaseUrl: 'https://1click.chaindefuser.com',
   btcAssetId: 'nep141:btc.omft.near',
-  maxSignerFeeSats: 80_000,
+  baseSignerFeeSats: 80_000,
   reclaimLockBlocks: 950,
   appFeeBps: 0,
   appFeeRecipient: null,
   slippageBps: 100,
   quoteDeadlineMinutes: 120,
 });
+
+export const DEPOSIT_INDEX_LIMIT = 65_536;
+
+export const DEPOSIT_INDEX_WINDOW = 256;
 
 export const P2TR_DUST_SATS = 330;
 

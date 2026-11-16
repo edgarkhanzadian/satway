@@ -113,7 +113,7 @@ export async function prepareDeposit(
     stacksAddress: input.stacksAddress,
     reclaimPublicKey: input.reclaimPublicKey,
     signersPublicKey: signers.signersPublicKey,
-    maxSignerFeeSats: config.maxSignerFeeSats,
+    maxSignerFeeSats: config.baseSignerFeeSats,
     reclaimLockBlocks: config.reclaimLockBlocks,
   });
 
@@ -135,7 +135,7 @@ export async function prepareDeposit(
   const check = checkDepositAmount(
     minimumSats,
     limits,
-    config.maxSignerFeeSats,
+    config.baseSignerFeeSats,
     largestPayoutSats(response.quote)
   );
   if (!check.ok) {
@@ -144,7 +144,7 @@ export async function prepareDeposit(
   const warnings: string[] = [];
   if (check.feeCapCoversWholeAmount) {
     warnings.push(
-      `This deposit is smaller than the ${config.maxSignerFeeSats}-sat cap on the signers’ fee. That is normally fine, but in a Bitcoin fee spike a small deposit could be mostly consumed by fees.`
+      `This deposit is smaller than the ${config.baseSignerFeeSats}-sat cap on the signers’ fee. That is normally fine, but in a Bitcoin fee spike a small deposit could be mostly consumed by fees.`
     );
   }
 
@@ -155,7 +155,7 @@ export async function prepareDeposit(
     reclaimPublicKey: input.reclaimPublicKey,
     reclaimKeyAddress: input.reclaimKeyAddress,
     signersPublicKey: signers.signersPublicKey,
-    maxSignerFeeSats: config.maxSignerFeeSats,
+    maxSignerFeeSats: config.baseSignerFeeSats,
     reclaimLockBlocks: config.reclaimLockBlocks,
     depositAddress: deposit.address,
     depositScriptPubKey: deposit.scriptPubKey,

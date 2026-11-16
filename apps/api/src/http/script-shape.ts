@@ -2,7 +2,7 @@ import type { NetworkConfig } from '@satway/core';
 
 import { BadRequest } from './errors.js';
 
-export type ScriptConfig = Pick<NetworkConfig, 'maxSignerFeeSats' | 'reclaimLockBlocks'>;
+export type ScriptConfig = Pick<NetworkConfig, 'baseSignerFeeSats' | 'reclaimLockBlocks'>;
 
 const DEPOSIT_SCRIPT = /^1e([0-9a-f]{16})05(?:16|14)[0-9a-f]{40}7520([0-9a-f]{64})ac$/;
 const RECLAIM_TAIL = /^b27520([0-9a-f]{64})ac$/;
@@ -40,7 +40,7 @@ export function checkScriptShape(
   if (feeHex === undefined || signerKey === undefined) {
     throw new BadRequest('"depositScript" is not an sBTC deposit script this app creates');
   }
-  if (BigInt(`0x${feeHex}`) !== BigInt(config.maxSignerFeeSats)) {
+  if (BigInt(`0x${feeHex}`) !== BigInt(config.baseSignerFeeSats)) {
     throw new BadRequest('"depositScript" does not use the fee cap this app sets');
   }
   const lock = lockPushHex(config.reclaimLockBlocks);

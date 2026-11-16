@@ -48,7 +48,7 @@ async function quote(args: string[]) {
     stacksAddress,
     reclaimPublicKey,
     signersPublicKey: signers.signersPublicKey,
-    maxSignerFeeSats: config.maxSignerFeeSats,
+    maxSignerFeeSats: config.baseSignerFeeSats,
     reclaimLockBlocks: config.reclaimLockBlocks,
   });
 
@@ -70,7 +70,7 @@ async function quote(args: string[]) {
   const response = await client.quote(request);
   const q = response.quote;
 
-  const check = checkDepositAmount(Number(q.minAmountOut), limits, config.maxSignerFeeSats);
+  const check = checkDepositAmount(Number(q.minAmountOut), limits, config.baseSignerFeeSats);
   if (!check.ok) {
     console.error(
       `Refusing: the swap could deliver as little as ${q.minAmountOut} sats, which sBTC would not accept (${check.problems.join(', ')}).`
@@ -84,7 +84,7 @@ async function quote(args: string[]) {
     stacksAddress,
     reclaimPublicKey,
     signersPublicKey: signers.signersPublicKey,
-    maxSignerFeeSats: config.maxSignerFeeSats,
+    maxSignerFeeSats: config.baseSignerFeeSats,
     reclaimLockBlocks: config.reclaimLockBlocks,
     deposit,
     origin: { chain, symbol, assetId: token.assetId },
@@ -109,7 +109,7 @@ async function quote(args: string[]) {
   );
   if (check.feeCapCoversWholeAmount) {
     console.log(
-      `  note                  payout is below the ${config.maxSignerFeeSats}-sat signer fee cap; fine normally, risky in a fee spike`
+      `  note                  payout is below the ${config.baseSignerFeeSats}-sat signer fee cap; fine normally, risky in a fee spike`
     );
   }
   console.log('\nTo run the proof, send from your own wallet:');
