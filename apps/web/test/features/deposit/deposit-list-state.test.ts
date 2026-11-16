@@ -3,11 +3,14 @@ import { describe, expect, it } from 'vitest';
 import { type PayoutObservation, deriveProgress } from '@satway/core';
 
 import {
+  AUTO_CHECKED,
   CHECK_CONCURRENCY,
   type ListEffect,
   type ListState,
   NOT_A_RECEIPT,
   entryViews,
+  expiredSummary,
+  expiredUnpaid,
   initialList,
   isFinalSnapshot,
   listMachine,
@@ -27,6 +30,7 @@ function receiptAt(n: number): Receipt {
   return { ...RECEIPT, createdAt: `2026-11-1${n}T12:00:00.000Z` };
 }
 
+const NOW = Date.parse('2026-11-14T13:00:00.000Z');
 const ENTRIES = [receiptAt(1), receiptAt(2), receiptAt(3), receiptAt(4)];
 const IDS = ENTRIES.map(receiptId);
 const [ID0 = '', ID1 = '', ID2 = '', ID3 = ''] = IDS;
@@ -62,7 +66,7 @@ function requestFor(state: ListState, id: string): number {
 
 describe('Your deposits: checking remembered entries', () => {
   it(`checks at most ${CHECK_CONCURRENCY} entries at a time, and the next one as each settles`, () => {
-    const shown = reduceList(initialList(ENTRIES, {}), { type: 'shown' });
+    const shown = reduceList(initialList(ENTRIES, {}, NOW), { type: 'shown' });
     expect(checks(shown.effects)).toEqual(IDS.slice(0, CHECK_CONCURRENCY));
     const first = reduceList(shown.state, {
       type: 'entry-checked',
@@ -82,17 +86,97 @@ describe('Your deposits: checking remembered entries', () => {
       id: ID1,
       message: 'HTTP 503',
     });
-    expect(checks(failed.effects)).toEqual([ID3]);
+    expect(checks(failed.effects)).toEqual([]);
     expect(entryViews(failed.state).map(v => v.summary)).toEqual([
       'Swapping to BTC',
       'Could not check it right now: HTTP 503',
       'Checking…',
-      'Checking…',
+      'Not checked yet.',
     ]);
   });
 
+  it(`auto-checks only the newest ${AUTO_CHECKED} unfinished entries; the rest offer Check`, () => {
+    const remembered = {
+      [ID3]: { stage: 'minting' as const, terminal: false, final: false, reclaimable: false },
+    };
+    const state = initialList(ENTRIES, remembered, NOW);
+    expect(Object.values(state.statuses).filter(s => s.kind === 'queued')).toHaveLength(
+      AUTO_CHECKED
+    );
+    const last = entryViews(state)[3];
+    expect(last).toMatchObject({
+      summary: 'Last seen: Waiting for the signers to mint sBTC',
+      check: true,
+      checkLabel: 'Check',
+    });
+    const asked = reduceList(reduceList(state, { type: 'shown' }).state, {
+      type: 'check-requested',
+      id: ID3,
+    });
+    expect(asked.state.statuses[ID3]).toEqual({ kind: 'queued' });
+  });
+
+  it('never auto-checks a deposit whose quote expired longer ago than the reclaim window', () => {
+    const deadline = Date.parse(RECEIPT.quoteResponse.quoteRequest.deadline);
+    const later = deadline + RECEIPT.reclaimLockBlocks * 10 * 60_000 + 1;
+    const paid = {
+      [ID1]: { stage: 'minting' as const, terminal: false, final: false, reclaimable: false },
+    };
+    const shown = reduceList(initialList(ENTRIES.slice(0, 2), paid, later), { type: 'shown' });
+    expect(checks(shown.effects)).toEqual([ID1]);
+    expect(entryViews(shown.state)[0]).toMatchObject({
+      summary: expiredSummary(ENTRIES[0] ?? RECEIPT),
+      check: true,
+      checkLabel: 'Check',
+    });
+    expect(expiredUnpaid(RECEIPT, null, later - 2)).toBe(false);
+    const asked = reduceList(shown.state, { type: 'check-requested', id: ID0 });
+    expect(checks(asked.effects)).toEqual([ID0]);
+  });
+
+  it('closes an opened receipt when the list is hidden behind the tracking', () => {
+    const opened = reduceList(initialList(ENTRIES, {}, NOW), {
+      type: 'details-opened',
+      id: ID0,
+      reclaim: false,
+    });
+    const closed = reduceList(opened.state, { type: 'closed' });
+    expect(closed.state.opened).toEqual({ kind: 'none' });
+    expect(pendingList(closed.state)).toEqual([]);
+    expect(reduceList(closed.state, { type: 'closed' }).state).toBe(closed.state);
+  });
+
+  it('a reload after Hide or Start another adds new entries and checks them, not the others again', () => {
+    const shown = reduceList(initialList(ENTRIES.slice(1, 3), {}, NOW), { type: 'shown' });
+    const settled = [ID1, ID2].reduce(
+      (state, id) =>
+        reduceList(state, {
+          type: 'entry-checked',
+          request: requestFor(state, id),
+          id,
+          snapshot: snapshot('PROCESSING'),
+        }).state,
+      shown.state
+    );
+    const reloaded = reduceList(settled, {
+      type: 'reloaded',
+      entries: ENTRIES.slice(0, 3),
+      remembered: {},
+      now: NOW,
+    });
+    expect(checks(reloaded.effects)).toEqual([ID0]);
+    expect(reloaded.state.statuses[ID1]).toEqual(settled.statuses[ID1]);
+    const same = reduceList(reloaded.state, {
+      type: 'reloaded',
+      entries: ENTRIES.slice(0, 3),
+      remembered: {},
+      now: NOW,
+    });
+    expect(checks(same.effects)).toEqual([]);
+  });
+
   it('starts once, even when shown twice', () => {
-    const shown = reduceList(initialList(ENTRIES, {}), { type: 'shown' });
+    const shown = reduceList(initialList(ENTRIES, {}, NOW), { type: 'shown' });
     const again = reduceList(shown.state, { type: 'shown' });
     expect(again.state).toBe(shown.state);
     expect(again.effects).toEqual([]);
@@ -103,7 +187,7 @@ describe('Your deposits: checking remembered entries', () => {
       [ID0]: { stage: 'done' as const, terminal: true, final: true, reclaimable: false },
       [ID1]: { stage: 'minting' as const, terminal: false, final: false, reclaimable: false },
     };
-    const shown = reduceList(initialList(ENTRIES.slice(0, 2), remembered), { type: 'shown' });
+    const shown = reduceList(initialList(ENTRIES.slice(0, 2), remembered, NOW), { type: 'shown' });
     expect(checks(shown.effects)).toEqual([ID1]);
     const [done] = entryViews(shown.state);
     expect(done).toMatchObject({ summary: 'sBTC minted', follow: false, reclaim: false });
@@ -113,7 +197,7 @@ describe('Your deposits: checking remembered entries', () => {
     const remembered = {
       [ID0]: { stage: 'reclaimable' as const, terminal: true, final: true, reclaimable: true },
     };
-    const [view] = entryViews(initialList(ENTRIES.slice(0, 1), remembered));
+    const [view] = entryViews(initialList(ENTRIES.slice(0, 1), remembered, NOW));
     expect(view).toMatchObject({ summary: 'Reclaimable now', reclaim: true, follow: false });
   });
 
@@ -122,7 +206,7 @@ describe('Your deposits: checking remembered entries', () => {
       [ID0]: { stage: 'mint-failed' as const, terminal: true, final: false, reclaimable: false },
       [ID1]: { stage: 'reclaimable' as const, terminal: true, final: false, reclaimable: true },
     };
-    const shown = reduceList(initialList(ENTRIES.slice(0, 2), remembered), { type: 'shown' });
+    const shown = reduceList(initialList(ENTRIES.slice(0, 2), remembered, NOW), { type: 'shown' });
     expect(checks(shown.effects)).toEqual([ID0, ID1]);
   });
 
@@ -169,7 +253,7 @@ describe('Your deposits: checking remembered entries', () => {
     const remembered = {
       [ID0]: { stage: 'done' as const, terminal: true, final: true, reclaimable: false },
     };
-    const state = initialList(ENTRIES.slice(0, 1), remembered);
+    const state = initialList(ENTRIES.slice(0, 1), remembered, NOW);
     expect(entryViews(state)[0]?.check).toBe(true);
     const again = reduceList(state, { type: 'check-requested', id: ID0 });
     expect(checks(again.effects)).toEqual([ID0]);
@@ -178,7 +262,7 @@ describe('Your deposits: checking remembered entries', () => {
   });
 
   it('ignores a reply for a check it no longer waits on', () => {
-    const shown = reduceList(initialList(ENTRIES, {}), { type: 'shown' });
+    const shown = reduceList(initialList(ENTRIES, {}, NOW), { type: 'shown' });
     const stale = reduceList(shown.state, {
       type: 'entry-checked',
       request: 999,
@@ -189,7 +273,7 @@ describe('Your deposits: checking remembered entries', () => {
   });
 
   it('aborts every check in flight when the page leaves', async () => {
-    const store = createFlowStore(listMachine, initialList(ENTRIES, {}), () => undefined);
+    const store = createFlowStore(listMachine, initialList(ENTRIES, {}, NOW), () => undefined);
     store.dispatch({ type: 'shown' });
     const signals = pendingList(store.get()).map(request => store.signal(request));
     expect(signals).toHaveLength(CHECK_CONCURRENCY);
@@ -211,7 +295,7 @@ describe('Your deposits: checking remembered entries', () => {
 
 describe('Your deposits: opening a receipt', () => {
   it('opens a remembered entry, checks it and remembers what it found', () => {
-    const opened = reduceList(initialList(ENTRIES, {}), {
+    const opened = reduceList(initialList(ENTRIES, {}, NOW), {
       type: 'details-opened',
       id: ID3,
       reclaim: true,
@@ -234,7 +318,10 @@ describe('Your deposits: opening a receipt', () => {
   });
 
   it('refuses a file that is not JSON, and a receipt that does not add up', () => {
-    const chosen = reduceList(initialList([], {}), { type: 'file-chosen', file: new Blob([]) });
+    const chosen = reduceList(initialList([], {}, NOW), {
+      type: 'file-chosen',
+      file: new Blob([]),
+    });
     const read = chosen.effects[0];
     if (read?.type !== 'read-file') throw new Error('expected a file read');
     expect(
@@ -254,7 +341,10 @@ describe('Your deposits: opening a receipt', () => {
   });
 
   it('points a withdrawal receipt to the Withdraw tab', () => {
-    const chosen = reduceList(initialList([], {}), { type: 'file-chosen', file: new Blob([]) });
+    const chosen = reduceList(initialList([], {}, NOW), {
+      type: 'file-chosen',
+      file: new Blob([]),
+    });
     const read = chosen.effects[0];
     if (read?.type !== 'read-file') throw new Error('expected a file read');
     const withdrawal = JSON.stringify({ kind: 'satway-withdrawal', version: 1 });
@@ -265,7 +355,7 @@ describe('Your deposits: opening a receipt', () => {
   });
 
   it('a check that fails closes the receipt and says why', () => {
-    const opened = reduceList(initialList(ENTRIES, {}), {
+    const opened = reduceList(initialList(ENTRIES, {}, NOW), {
       type: 'details-opened',
       id: ID0,
       reclaim: false,

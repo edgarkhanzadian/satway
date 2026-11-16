@@ -16,7 +16,11 @@ import { reclaimOffered, reclaimPlanOf } from './reclaim-plan.js';
 export const CHECK_CONCURRENCY = 2;
 export const NOT_A_RECEIPT = 'That file is not a deposit receipt.';
 
+export const AUTO_CHECKED = 3;
+const BLOCK_MS = 10 * 60_000;
+
 export type EntryStatus =
+  | { kind: 'idle'; known: KnownStage | null; expired: boolean }
   | { kind: 'queued' }
   | { kind: 'checking'; request: number }
   | { kind: 'known'; known: KnownStage }
@@ -51,6 +55,13 @@ export interface ListState {
 
 export type ListEvent =
   | { type: 'shown' }
+  | { type: 'closed' }
+  | {
+      type: 'reloaded';
+      entries: readonly Receipt[];
+      remembered: Readonly<Record<string, KnownStage>>;
+      now: number;
+    }
   | { type: 'check-requested'; id: string }
   | { type: 'entry-checked'; request: number; id: string; snapshot: Snapshot }
   | { type: 'entry-check-failed'; request: number; id: string; message: string }
@@ -70,16 +81,48 @@ export type ListEffect =
 
 type Step = Transition<ListState, ListEffect>;
 
-export function initialList(
+export function expiredUnpaid(receipt: Receipt, known: KnownStage | null, now: number): boolean {
+  if (known !== null && known.stage !== 'awaiting-funds') return false;
+  const deadline = Date.parse(receipt.quoteResponse.quoteRequest.deadline);
+  if (Number.isNaN(deadline)) return false;
+  return now > deadline + receipt.reclaimLockBlocks * BLOCK_MS;
+}
+
+function statusesFor(
   entries: readonly Receipt[],
-  remembered: Readonly<Record<string, KnownStage>>
-): ListState {
+  remembered: Readonly<Record<string, KnownStage>>,
+  now: number,
+  kept: Readonly<Record<string, EntryStatus>> = {}
+): Record<string, EntryStatus> {
   const statuses: Record<string, EntryStatus> = {};
+  let automatic = Object.values(kept).filter(
+    s => s.kind === 'queued' || s.kind === 'checking'
+  ).length;
   for (const receipt of entries) {
     const id = receiptId(receipt);
-    const known = remembered[id];
-    statuses[id] = known?.final === true ? { kind: 'known', known } : { kind: 'queued' };
+    const existing = kept[id];
+    if (existing) {
+      statuses[id] = existing;
+      continue;
+    }
+    const known = remembered[id] ?? null;
+    if (known?.final === true) statuses[id] = { kind: 'known', known };
+    else if (expiredUnpaid(receipt, known, now))
+      statuses[id] = { kind: 'idle', known, expired: true };
+    else if (automatic < AUTO_CHECKED) {
+      automatic += 1;
+      statuses[id] = { kind: 'queued' };
+    } else statuses[id] = { kind: 'idle', known, expired: false };
   }
+  return statuses;
+}
+
+export function initialList(
+  entries: readonly Receipt[],
+  remembered: Readonly<Record<string, KnownStage>>,
+  now: number
+): ListState {
+  const statuses = statusesFor(entries, remembered, now);
   return {
     last: 0,
     started: false,
@@ -273,9 +316,32 @@ export function reduceList(state: ListState, event: ListEvent): Step {
     case 'shown':
       if (state.started) return transition(state);
       return startQueued({ ...state, started: true });
+    case 'closed':
+      if (state.opened.kind === 'none' && state.file.kind === 'idle' && state.error === null) {
+        return transition(state);
+      }
+      return transition({
+        ...state,
+        opened: { kind: 'none' },
+        file: { kind: 'idle' },
+        error: null,
+      });
+    case 'reloaded': {
+      const kept: Record<string, EntryStatus> = {};
+      for (const receipt of event.entries) {
+        const id = receiptId(receipt);
+        const status = state.statuses[id];
+        if (status) kept[id] = status;
+      }
+      const statuses = statusesFor(event.entries, event.remembered, event.now, kept);
+      const next = { ...state, entries: event.entries, statuses };
+      return state.started ? startQueued(next) : transition(next);
+    }
     case 'check-requested': {
       const status = state.statuses[event.id];
-      if (status?.kind !== 'known' && status?.kind !== 'failed') return transition(state);
+      if (status?.kind !== 'known' && status?.kind !== 'failed' && status?.kind !== 'idle') {
+        return transition(state);
+      }
       return startQueued(withStatus(state, event.id, { kind: 'queued' }));
     }
     case 'entry-checked':
@@ -364,14 +430,25 @@ export interface EntryView {
   follow: boolean;
   reclaim: boolean;
   check: boolean;
+  checkLabel: 'Check' | 'Check again';
 }
 
-function summaryOf(status: EntryStatus | undefined): string {
+export function expiredSummary(receipt: Receipt): string {
+  const deadline = new Date(receipt.quoteResponse.quoteRequest.deadline).toLocaleString();
+  return `Its quote expired on ${deadline}, so it is not checked automatically. Select Check if you sent a payment.`;
+}
+
+function summaryOf(status: EntryStatus | undefined, receipt: Receipt): string {
   switch (status?.kind) {
     case undefined:
     case 'queued':
     case 'checking':
       return 'Checking…';
+    case 'idle':
+      if (status.expired) return expiredSummary(receipt);
+      return status.known === null
+        ? 'Not checked yet.'
+        : `Last seen: ${STAGE_LABELS[status.known.stage]}`;
     case 'known':
       return STAGE_LABELS[status.known.stage];
     case 'failed':
@@ -381,18 +458,24 @@ function summaryOf(status: EntryStatus | undefined): string {
   }
 }
 
+function knownOf(status: EntryStatus | undefined): KnownStage | null {
+  if (status?.kind === 'known' || status?.kind === 'idle') return status.known;
+  return null;
+}
+
 export function entryViews(state: ListState): EntryView[] {
   return state.entries.map(receipt => {
     const id = receiptId(receipt);
     const status = state.statuses[id];
-    const known = status?.kind === 'known' ? status.known : null;
+    const known = knownOf(status);
     return {
       id,
       receipt,
-      summary: summaryOf(status),
+      summary: summaryOf(status, receipt),
       follow: known?.terminal !== true,
       reclaim: known?.reclaimable === true,
-      check: status?.kind === 'known' || status?.kind === 'failed',
+      check: status?.kind === 'known' || status?.kind === 'failed' || status?.kind === 'idle',
+      checkLabel: status?.kind === 'idle' ? 'Check' : 'Check again',
     };
   });
 }

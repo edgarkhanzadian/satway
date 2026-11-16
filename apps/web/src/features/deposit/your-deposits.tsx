@@ -46,9 +46,14 @@ export function YourDeposits(props: {
   signReclaim(psbtHex: string, account: WalletAccount): Promise<Uint8Array>;
   onFollow(receipt: Receipt): void;
   onRoute(route: RouteUpdate | null): void;
+  visible: boolean;
 }) {
-  const { backend, account, onRoute } = props;
-  const flow = useFlow(listMachine, () => initialList(loadReceipts(), loadStages()), run);
+  const { backend, account, onRoute, visible } = props;
+  const flow = useFlow(
+    listMachine,
+    () => initialList(loadReceipts(), loadStages(), Date.now()),
+    run
+  );
   const { state, dispatch } = flow;
 
   async function check(effect: Extract<ListEffect, { type: 'check-entry' | 'check-receipt' }>) {
@@ -110,8 +115,18 @@ export function YourDeposits(props: {
   }
 
   useEffect(() => {
+    if (!visible) {
+      dispatch({ type: 'closed' });
+      return;
+    }
+    dispatch({
+      type: 'reloaded',
+      entries: loadReceipts(),
+      remembered: loadStages(),
+      now: Date.now(),
+    });
     dispatch({ type: 'shown' });
-  }, [dispatch]);
+  }, [dispatch, visible]);
 
   const views = entryViews(state);
   const routed = state.opened.kind === 'receipt' ? state.opened.receipt : null;
@@ -198,7 +213,7 @@ export function YourDeposits(props: {
                     className={button()}
                     onClick={() => dispatch({ type: 'check-requested', id: view.id })}
                   >
-                    Check again
+                    {view.checkLabel}
                   </button>
                 )}
               </div>

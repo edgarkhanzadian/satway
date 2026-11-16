@@ -61,9 +61,11 @@ describe('Deposit without a connected Stacks wallet', () => {
     expect(html).toContain('No receipt? Search with your wallet');
   });
 
-  it('shows the tracking, not the list, while a deposit is followed', () => {
+  it('shows the tracking and keeps the list hidden, still mounted, while a deposit is followed', () => {
     const html = render(true);
-    expect(html).not.toContain('Your deposits');
+    expect(html).toMatch(
+      /<div hidden="" class="[^"]*"><section class="satway-sheet"><h2[^>]*>Your deposits/
+    );
     expect(html).toContain('>Hide<');
   });
 });

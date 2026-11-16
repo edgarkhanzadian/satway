@@ -102,26 +102,36 @@ export function Deposit(props: {
   }, [onRoute, origin, tracked, listRoute]);
   useEffect(() => () => onRoute(null), [onRoute]);
 
-  if (tracked) {
-    return (
-      <Tracking
-        key={receiptId(tracked.receipt)}
+  const list = (
+    <styled.div marginTop="space.10" hidden={tracked !== null}>
+      <YourDeposits
         backend={backend}
-        receipt={tracked.receipt}
-        receiptUnsaved={tracked.receiptUnsaved}
-        firstRegistration={tracked.firstRegistration}
-        source={source}
-        token={tokens.find(t => t.assetId === tracked.receipt.origin.assetId)}
-        onRoute={onRoute}
-        onHide={() => setHidden(true)}
-        onDone={() => onActive(null)}
+        account={account}
+        signReclaim={props.signReclaim}
+        onFollow={(receipt: Receipt) => follow({ receipt, receiptUnsaved: false })}
+        onRoute={setListRoute}
+        visible={tracked === null}
       />
-    );
-  }
+    </styled.div>
+  );
 
   return (
     <>
-      {active && (
+      {tracked && (
+        <Tracking
+          key={receiptId(tracked.receipt)}
+          backend={backend}
+          receipt={tracked.receipt}
+          receiptUnsaved={tracked.receiptUnsaved}
+          firstRegistration={tracked.firstRegistration}
+          source={source}
+          token={tokens.find(t => t.assetId === tracked.receipt.origin.assetId)}
+          onRoute={onRoute}
+          onHide={() => setHidden(true)}
+          onDone={() => onActive(null)}
+        />
+      )}
+      {!tracked && active && (
         <styled.div marginBottom="space.10">
           <p className={notice()}>
             The deposit of {entryLabelOf(active.receipt)} is hidden. This page checks on it again
@@ -134,7 +144,7 @@ export function Deposit(props: {
           </div>
         </styled.div>
       )}
-      {account ? (
+      {!tracked && account && (
         <DepositForm
           account={account}
           tokens={tokens}
@@ -145,18 +155,9 @@ export function Deposit(props: {
           }}
           form={form}
         />
-      ) : (
-        <BeforeYouStart />
       )}
-      <styled.div marginTop="space.10">
-        <YourDeposits
-          backend={backend}
-          account={account}
-          signReclaim={props.signReclaim}
-          onFollow={(receipt: Receipt) => follow({ receipt, receiptUnsaved: false })}
-          onRoute={setListRoute}
-        />
-      </styled.div>
+      {!tracked && !account && <BeforeYouStart />}
+      {list}
     </>
   );
 }
