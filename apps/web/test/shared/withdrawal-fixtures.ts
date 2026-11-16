@@ -132,7 +132,19 @@ export const STACKS = {
     },
     payoutError: null,
   },
-  mismatch: { kind: 'mismatch', requestId: 5300, problems: ['sBTC registry: amount differs'] },
+  mismatch: {
+    kind: 'mismatch',
+    requestId: 5300,
+    problems: ['sBTC registry: amount differs'],
+    soft: false,
+  },
+  registryLag: {
+    kind: 'mismatch',
+    requestId: 5300,
+    problems: ['The sBTC registry has no withdrawal request 5300'],
+    soft: true,
+  },
+  dropped: { kind: 'tx-dropped', txStatus: 'dropped_replace_by_fee', lookupError: null },
 } satisfies Record<string, WithdrawalStatus>;
 
 export function payoutOf(over: Partial<PayoutVerification> = {}): PayoutVerification {
@@ -155,11 +167,13 @@ export function observationOf(input: {
   swap?: OneClickSwapStatus | null;
   mismatches?: string[];
   deadlinePassed?: boolean;
+  softMismatches?: number;
 }): WithdrawalObservation {
   const payout = input.payout ?? null;
   const swap = input.swap ?? null;
   const mismatches = input.mismatches ?? [];
   const facts: WithdrawalFacts = {
+    stacksTxid: STACKS_TXID,
     requestId: null,
     request: null,
     txFailure: null,
@@ -174,6 +188,7 @@ export function observationOf(input: {
     refund: null,
     deadlinePassed: input.deadlinePassed ?? false,
     mismatches,
+    softMismatches: input.softMismatches ?? 0,
     errors: [],
   };
   return {
@@ -188,6 +203,7 @@ export function observationOf(input: {
       mismatches,
       deadlinePassed: facts.deadlinePassed,
       rejectionBlocks: W.rejectionBlocks,
+      softMismatches: facts.softMismatches,
     }),
   };
 }

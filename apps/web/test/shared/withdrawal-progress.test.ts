@@ -133,6 +133,21 @@ describe('withdrawalMilestones', () => {
     ]);
   });
 
+  it('keeps the confirm step current while a dropped transaction may have been replaced', () => {
+    const o = observationOf({ stacks: STACKS.dropped });
+    expect(o.progress).toMatchObject({ stage: 'tx-replaced', terminal: false });
+    expect(statuses(o)).toEqual(['done', 'current', 'pending', 'pending', 'pending', 'pending']);
+  });
+
+  it('marks no step failed while a registry lag is being rechecked', () => {
+    const lag = observationOf({ stacks: STACKS.registryLag, softMismatches: 1 });
+    expect(lag.progress).toMatchObject({ stage: 'rechecking', terminal: false });
+    expect(statuses(lag)).toEqual(['done', 'done', 'current', 'pending', 'pending', 'pending']);
+    const settled = observationOf({ stacks: STACKS.registryLag, softMismatches: 3 });
+    expect(settled.progress.stage).toBe('mismatch');
+    expect(statuses(settled)).toEqual(['done', 'done', 'failed', 'pending', 'pending', 'pending']);
+  });
+
   it('never shows delivered unless the core says done, even when the swap reports success', () => {
     const o = observationOf({
       stacks: STACKS.accepted,
@@ -164,6 +179,8 @@ const STAGES: WithdrawalStage[] = [
   'swap-failed',
   'needs-support',
   'deadline-passed',
+  'tx-replaced',
+  'rechecking',
   'mismatch',
 ];
 
@@ -189,6 +206,15 @@ describe('withdrawalHeading and withdrawalAdvice', () => {
     expect(withdrawalAdvice('mismatch', r)).toContain(r.depositAddress);
     expect(withdrawalAdvice('done', r)).toContain('base');
     expect(withdrawalAdvice('rejected', r)).toMatch(/back in your Stacks wallet/);
+  });
+
+  it('does not invite a new withdrawal while the transaction may have been replaced', () => {
+    const r = receiptFixture();
+    const stages: WithdrawalStage[] = ['tx-replaced', 'rechecking'];
+    for (const stage of stages) {
+      expect(withdrawalAdvice(stage, r)).not.toMatch(/new withdrawal|did not leave/);
+      expect(withdrawalHeading(stage)).toBe('Withdrawal in progress');
+    }
   });
 });
 

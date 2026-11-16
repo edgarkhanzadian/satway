@@ -4,6 +4,7 @@ import {
   type OnChainWithdrawalRequest,
   type OneClickSwapStatus,
   type PayoutVerification,
+  SOFT_MISMATCH_CONFIRMATIONS,
   type WithdrawalObservations,
   type WithdrawalStage,
   type WithdrawalStatus,
@@ -226,10 +227,76 @@ describe('deriveWithdrawalProgress', () => {
           kind: 'mismatch',
           requestId: 5131,
           problems: ['sBTC registry: amount is 1 sats, expected 2'],
+          soft: false,
         },
       }),
       'mismatch',
       true,
+      true,
+    ],
+    [
+      'the registry has not shown the request yet, on a first sighting',
+      o({
+        stacks: {
+          kind: 'mismatch',
+          requestId: 5131,
+          problems: ['The sBTC registry has no withdrawal request 5131'],
+          soft: true,
+        },
+        softMismatches: 1,
+      }),
+      'rechecking',
+      false,
+      true,
+    ],
+    [
+      'the registry has not shown the request yet, even if the swap reports success',
+      o({
+        stacks: {
+          kind: 'mismatch',
+          requestId: 5131,
+          problems: ['The sBTC registry has no withdrawal request 5131'],
+          soft: true,
+        },
+        softMismatches: 2,
+        swap: 'SUCCESS',
+      }),
+      'rechecking',
+      false,
+      true,
+    ],
+    [
+      'the registry still has not shown the request after several polls',
+      o({
+        stacks: {
+          kind: 'mismatch',
+          requestId: 5131,
+          problems: ['The sBTC registry has no withdrawal request 5131'],
+          soft: true,
+        },
+        softMismatches: SOFT_MISMATCH_CONFIRMATIONS,
+      }),
+      'mismatch',
+      true,
+      true,
+    ],
+    [
+      'the Stacks transaction was replaced or dropped',
+      o({
+        stacks: { kind: 'tx-dropped', txStatus: 'dropped_replace_by_fee', lookupError: null },
+      }),
+      'tx-replaced',
+      false,
+      true,
+    ],
+    [
+      'the Stacks transaction was dropped, past the deadline',
+      o({
+        stacks: { kind: 'tx-dropped', txStatus: 'dropped_stale_garbage', lookupError: null },
+        deadlinePassed: true,
+      }),
+      'tx-replaced',
+      false,
       true,
     ],
     [
@@ -327,5 +394,13 @@ describe('deriveWithdrawalProgress', () => {
     expect(deriveWithdrawalProgress(o({ stacks: { kind: 'rejected', request } })).message).toMatch(
       /returned to your wallet as sBTC/
     );
+  });
+
+  it('does not say nothing moved, nor invite a new withdrawal, for a dropped transaction', () => {
+    const message = deriveWithdrawalProgress(
+      o({ stacks: { kind: 'tx-dropped', txStatus: 'dropped_replace_by_fee', lookupError: null } })
+    ).message;
+    expect(message).toMatch(/replaced or dropped/);
+    expect(message).not.toMatch(/nothing|no sBTC|new withdrawal|start/i);
   });
 });

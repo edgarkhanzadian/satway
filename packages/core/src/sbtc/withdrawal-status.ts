@@ -20,9 +20,11 @@ import {
 } from './clarity-values.js';
 import { fetchEmilyWithdrawal } from './emily-withdrawal.js';
 import {
+  type StacksContractCall,
   type StacksTransaction,
   callReadOnly,
   fetchStacksTransaction,
+  fetchTransactionsAtNonce,
   normalizeStacksTxid,
 } from './stacks-api.js';
 import { type WithdrawalRecipient, sameRecipient } from './withdrawal-recipient.js';
@@ -81,7 +83,6 @@ export type WithdrawalFailureCode =
   | 'insufficient-balance'
   | 'not-active-contract'
   | 'post-condition'
-  | 'dropped'
   | 'other';
 
 export interface WithdrawalTxFailure {
@@ -99,6 +100,7 @@ export interface WithdrawalTxCall {
 
 export type WithdrawalTxReading =
   | { kind: 'tx-pending' }
+  | { kind: 'tx-dropped'; txStatus: string }
   | { kind: 'tx-failed'; failure: WithdrawalTxFailure }
   | { kind: 'not-a-withdrawal'; message: string }
   | {
@@ -163,14 +165,6 @@ function errorCodeOf(tx: StacksTransaction): number | null {
 
 export function describeWithdrawalTxFailure(tx: StacksTransaction): WithdrawalTxFailure {
   const clarityError = tx.tx_result?.repr ?? tx.tx_result?.hex ?? null;
-  if (tx.tx_status.startsWith('dropped')) {
-    return {
-      code: 'dropped',
-      clarityError: null,
-      message:
-        'The Stacks transaction was dropped from the mempool and never confirmed. No sBTC moved.',
-    };
-  }
   if (tx.tx_status === 'abort_by_post_condition') {
     return {
       code: 'post-condition',
@@ -264,6 +258,8 @@ export function requestIdOfResult(resultHex: string): number {
   return safeUintOf(response.value, 'request id');
 }
 
+const ABORTED: ReadonlySet<string> = new Set(['abort_by_response', 'abort_by_post_condition']);
+
 export function readWithdrawalRequestTransaction(
   tx: StacksTransaction,
   config: Pick<
@@ -283,9 +279,11 @@ export function readWithdrawalRequestTransaction(
       message: `This Stacks transaction is not a call to ${contractIdOf(config, config.withdrawalContractName)}::${config.withdrawalFunctionName}.`,
     };
   }
-  if (tx.tx_status === 'pending') return { kind: 'tx-pending' };
-  if (tx.tx_status !== 'success')
+  if (tx.tx_status.startsWith('dropped')) return { kind: 'tx-dropped', txStatus: tx.tx_status };
+  if (ABORTED.has(tx.tx_status)) {
     return { kind: 'tx-failed', failure: describeWithdrawalTxFailure(tx) };
+  }
+  if (tx.tx_status !== 'success') return { kind: 'tx-pending' };
   if (!tx.tx_result) throw new WithdrawalDataError('A successful transaction has no result');
 
   const requestId = requestIdOfResult(tx.tx_result.hex);
@@ -485,9 +483,10 @@ export interface AcceptedPayout {
 export type WithdrawalStatus =
   | { kind: 'unknown-tx' }
   | { kind: 'tx-pending' }
+  | { kind: 'tx-dropped'; txStatus: string; lookupError: string | null }
   | { kind: 'tx-failed'; failure: WithdrawalTxFailure }
   | { kind: 'not-a-withdrawal'; message: string }
-  | { kind: 'mismatch'; requestId: number | null; problems: string[] }
+  | { kind: 'mismatch'; requestId: number | null; problems: string[]; soft: boolean }
   | { kind: 'requested'; request: OnChainWithdrawalRequest; stacksBlockHeight: number | null }
   | { kind: 'rejected'; request: OnChainWithdrawalRequest }
   | {
@@ -529,15 +528,53 @@ async function acceptedPayoutOf(
   };
 }
 
-export async function fetchWithdrawalStatus(
-  config: WithdrawalStatusConfig,
-  stacksTxid: string,
-  expected: ExpectedWithdrawal,
+function argsOf(call: StacksContractCall): string[] {
+  return (call.function_args ?? []).map(arg => arg.hex);
+}
+
+function sameContractCall(a: StacksTransaction, b: StacksTransaction): boolean {
+  const left = a.contract_call;
+  const right = b.contract_call;
+  if (!left || !right) return false;
+  return (
+    left.contract_id === right.contract_id &&
+    left.function_name === right.function_name &&
+    JSON.stringify(argsOf(left)) === JSON.stringify(argsOf(right))
+  );
+}
+
+export async function findReplacementTransaction(
+  config: Pick<WithdrawalStatusConfig, 'stxApiUrl'>,
+  dropped: StacksTransaction,
   fetchFn?: FetchLike
+): Promise<StacksTransaction | null> {
+  if (dropped.nonce === undefined) return null;
+  const droppedId = normalizeStacksTxid(dropped.tx_id);
+  const candidates = await fetchTransactionsAtNonce(
+    config.stxApiUrl,
+    dropped.sender_address,
+    dropped.nonce,
+    fetchFn
+  );
+  const match = candidates.find(
+    tx =>
+      normalizeStacksTxid(tx.tx_id) !== droppedId &&
+      !tx.tx_status.startsWith('dropped') &&
+      tx.tx_type === 'contract_call' &&
+      sameContractCall(dropped, tx)
+  );
+  if (!match) return null;
+  return (await fetchStacksTransaction(config.stxApiUrl, match.tx_id, fetchFn)) ?? match;
+}
+
+async function statusOfTransaction(
+  config: WithdrawalStatusConfig,
+  tx: StacksTransaction,
+  expected: ExpectedWithdrawal,
+  fetchFn: FetchLike | undefined
 ): Promise<WithdrawalStatus> {
-  const tx = await fetchStacksTransaction(config.stxApiUrl, stacksTxid, fetchFn);
-  if (!tx) return { kind: 'unknown-tx' };
   const reading = readWithdrawalRequestTransaction(tx, config);
+  if (reading.kind === 'tx-dropped') return { ...reading, lookupError: null };
   if (reading.kind !== 'tx-succeeded') return reading;
 
   const { requestId } = reading;
@@ -551,10 +588,11 @@ export async function fetchWithdrawalStatus(
       kind: 'mismatch',
       requestId,
       problems: [...problems, `The sBTC registry has no withdrawal request ${requestId}`],
+      soft: problems.length === 0,
     };
   }
   problems.push(...withdrawalDifferences(expected, request, 'sBTC registry'));
-  if (problems.length > 0) return { kind: 'mismatch', requestId, problems };
+  if (problems.length > 0) return { kind: 'mismatch', requestId, problems, soft: false };
 
   if (request.status === 'pending') {
     return { kind: 'requested', request, stacksBlockHeight: reading.blockHeight };
@@ -567,7 +605,7 @@ export async function fetchWithdrawalStatus(
     return { kind: 'accepted', request, sweep, payout, payoutError: null };
   } catch (err) {
     if (err instanceof WithdrawalDataError) {
-      return { kind: 'mismatch', requestId, problems: [err.message] };
+      return { kind: 'mismatch', requestId, problems: [err.message], soft: true };
     }
     return {
       kind: 'accepted',
@@ -577,4 +615,42 @@ export async function fetchWithdrawalStatus(
       payoutError: errorMessage(err) ?? String(err),
     };
   }
+}
+
+export interface FollowedWithdrawalStatus {
+  stacksTxid: string;
+  status: WithdrawalStatus;
+}
+
+export async function followWithdrawalStatus(
+  config: WithdrawalStatusConfig,
+  stacksTxid: string,
+  expected: ExpectedWithdrawal,
+  fetchFn?: FetchLike
+): Promise<FollowedWithdrawalStatus> {
+  const id = normalizeStacksTxid(stacksTxid);
+  const tx = await fetchStacksTransaction(config.stxApiUrl, id, fetchFn);
+  if (!tx) return { stacksTxid: id, status: { kind: 'unknown-tx' } };
+  const status = await statusOfTransaction(config, tx, expected, fetchFn);
+  if (status.kind !== 'tx-dropped') return { stacksTxid: id, status };
+  let replacement: StacksTransaction | null;
+  try {
+    replacement = await findReplacementTransaction(config, tx, fetchFn);
+  } catch (err) {
+    return { stacksTxid: id, status: { ...status, lookupError: errorMessage(err) ?? String(err) } };
+  }
+  if (!replacement) return { stacksTxid: id, status };
+  return {
+    stacksTxid: normalizeStacksTxid(replacement.tx_id),
+    status: await statusOfTransaction(config, replacement, expected, fetchFn),
+  };
+}
+
+export async function fetchWithdrawalStatus(
+  config: WithdrawalStatusConfig,
+  stacksTxid: string,
+  expected: ExpectedWithdrawal,
+  fetchFn?: FetchLike
+): Promise<WithdrawalStatus> {
+  return (await followWithdrawalStatus(config, stacksTxid, expected, fetchFn)).status;
 }

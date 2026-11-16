@@ -29,6 +29,7 @@ const afterActions = cx(notice(), css({ marginTop: 'space.08' }));
 const advice = css({ marginTop: 'space.06' });
 
 export const POLL_INTERVAL_MS = 20_000;
+export const SETTLED_POLL_INTERVAL_MS = 120_000;
 
 function destinationOf(receipt: WithdrawalReceiptFile): string {
   return `${receipt.destination.symbol} on ${receipt.destination.chain}`;
@@ -164,30 +165,50 @@ function Following(props: {
   stacksTxid: string;
   receiptUnsaved: boolean;
   onRoute(route: WithdrawalRouteUpdate | null): void;
+  onReceipt(receipt: WithdrawalReceiptFile): void;
   onDone(): void;
 }) {
   const { backend, receipt, stacksTxid, onRoute } = props;
   const [snapshot, setSnapshot] = useState<WithdrawalSnapshot | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const onReceiptRef = useRef(props.onReceipt);
+  onReceiptRef.current = props.onReceipt;
 
   useEffect(() => {
     let live = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let softMismatches = 0;
+    let delay = POLL_INTERVAL_MS;
     setSnapshot(null);
     setProblem(null);
     async function tick() {
       try {
-        const next = await checkWithdrawal(config, backend, receipt, stacksTxid);
+        const next = await checkWithdrawal(
+          config,
+          backend,
+          receipt,
+          stacksTxid,
+          undefined,
+          softMismatches
+        );
         if (!live) return;
+        softMismatches = next.observation.facts.softMismatches;
+        const followed = next.observation.facts.stacksTxid;
+        if (followed !== stacksTxid) {
+          onReceiptRef.current(withStacksTxid(receipt, followed));
+          return;
+        }
         setSnapshot(next);
         setProblem(null);
-        if (next.observation.progress.terminal) return;
+        const progress = next.observation.progress;
+        if (progress.stage === 'done') return;
+        delay = progress.terminal ? SETTLED_POLL_INTERVAL_MS : POLL_INTERVAL_MS;
       } catch (err) {
         if (!live) return;
         setProblem(`Could not refresh: ${errorMessage(err) ?? 'unknown error'}. Retrying.`);
       }
-      timer = setTimeout(() => void tick(), POLL_INTERVAL_MS);
+      timer = setTimeout(() => void tick(), delay);
     }
     void tick();
     return () => {

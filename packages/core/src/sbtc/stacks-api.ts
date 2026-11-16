@@ -30,6 +30,7 @@ export interface StacksTransaction {
   tx_status: string;
   tx_type: string;
   sender_address: string;
+  nonce?: number;
   block_height?: number;
   burn_block_height?: number;
   tx_result?: StacksTxResult;
@@ -43,6 +44,7 @@ export const stacksTransactionSchema: z.ZodType<StacksTransaction> = z.looseObje
   tx_status: z.string(),
   tx_type: z.string(),
   sender_address: z.string(),
+  nonce: z.number().int().nonnegative().optional(),
   block_height: z.number().int().optional(),
   burn_block_height: z.number().int().optional(),
   tx_result: z.looseObject({ hex: z.string(), repr: z.string().optional() }).optional(),
@@ -97,6 +99,33 @@ export async function fetchStacksTransaction(
     if (err instanceof HttpError && err.status === 404) return null;
     throw err;
   }
+}
+
+const transactionListSchema = z.looseObject({ results: z.array(stacksTransactionSchema) });
+
+export async function fetchTransactionsAtNonce(
+  stxApiUrl: string,
+  sender: string,
+  nonce: number,
+  fetchFn: FetchLike = defaultFetch
+): Promise<StacksTransaction[]> {
+  if (!Number.isSafeInteger(nonce) || nonce < 0) throw new Error('A nonce is a whole number');
+  const who = encodeURIComponent(sender);
+  const [confirmed, pending] = await Promise.all([
+    requestJson(
+      fetchFn,
+      `${stxApiUrl}/extended/v1/tx?from_address=${who}&nonce=${nonce}&limit=10`,
+      transactionListSchema
+    ),
+    requestJson(
+      fetchFn,
+      `${stxApiUrl}/extended/v1/tx/mempool?sender_address=${who}&limit=50`,
+      transactionListSchema
+    ),
+  ]);
+  return [...confirmed.results, ...pending.results].filter(
+    tx => tx.sender_address === sender && tx.nonce === nonce
+  );
 }
 
 const READ_ONLY_SENDER = 'SP000000000000000000002Q6VF78';

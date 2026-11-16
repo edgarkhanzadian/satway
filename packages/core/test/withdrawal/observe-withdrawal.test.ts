@@ -3,12 +3,14 @@ import { describe, expect, it } from 'vitest';
 import {
   MAINNET_WITHDRAWAL_FLOW_CONFIG as C,
   type OneClickQuoteResponse,
+  SOFT_MISMATCH_CONFIRMATIONS,
   type WatchedWithdrawal,
   decodeWithdrawalRecipient,
   observeWithdrawal,
   oneClickQuoteResponseSchema,
   parseOneClickStatus,
   parseWith,
+  stacksTransactionSchema,
 } from '../../src/index.js';
 import { type FakeApiRoutes, fakeWithdrawalApis, routesFor } from '../fake-withdrawal-apis.js';
 import { defined, jsonResponse } from '../fixtures.js';
@@ -271,6 +273,77 @@ describe('observeWithdrawal on other real outcomes', () => {
     const result = await observe(watched, { stacksTxs: { [f.txid]: f.requestTx } }, null);
     expect(result.progress).toMatchObject({ stage: 'request-failed', terminal: true });
     expect(result.facts.txFailure?.code).toBe('post-condition');
+  });
+
+  it('keeps checking a dropped transaction instead of calling it failed', async () => {
+    const f = defined(REAL_FAILED_REQUESTS[0]);
+    const watched = { ...watchedFor(W), stacksTxid: f.txid };
+    const dropped = {
+      ...parseWith(stacksTransactionSchema, f.requestTx, 'fixture'),
+      tx_status: 'dropped_replace_by_fee',
+    };
+    const result = await observe(watched, { stacksTxs: { [f.txid]: dropped } }, null);
+    expect(result.progress).toMatchObject({ stage: 'tx-replaced', terminal: false });
+    expect(result.facts.txFailure).toBeNull();
+    expect(result.facts.stacksTxid).toBe(f.txid);
+    expect(result.facts.errors.join(' ')).toMatch(/Replacement lookup: HTTP 404/);
+  });
+
+  it('follows a fee-bumped replacement and reports its transaction id', async () => {
+    const droppedTxid = 'ab'.repeat(32);
+    const routes = routesFor(W);
+    const dropped = {
+      ...parseWith(stacksTransactionSchema, W.requestTx, 'fixture'),
+      tx_id: `0x${droppedTxid}`,
+      tx_status: 'dropped_replace_by_fee',
+      tx_result: undefined,
+      events: [],
+    };
+    const nonce = defined(parseWith(stacksTransactionSchema, W.requestTx, 'fixture').nonce);
+    const result = await observe(
+      { ...watchedFor(W), stacksTxid: droppedTxid },
+      {
+        ...routes,
+        stacksTxs: { ...routes.stacksTxs, [droppedTxid]: dropped },
+        overrides: {
+          [`${C.stxApiUrl}/extended/v1/tx?from_address=${W.sender}&nonce=${nonce}&limit=10`]:
+            jsonResponse({ results: [W.requestTx] }),
+          [`${C.stxApiUrl}/extended/v1/tx/mempool?sender_address=${W.sender}&limit=50`]:
+            jsonResponse({ results: [] }),
+        },
+      },
+      null
+    );
+    expect(result.facts.stacksTxid).toBe(W.requestTxid);
+    expect(result.facts.requestId).toBe(W.id);
+    expect(result.stacks?.kind).toBe('accepted');
+  });
+
+  it('only calls a missing registry entry a mismatch after several polls in a row', async () => {
+    const routes = routesFor(W);
+    const missing = {
+      ...routes,
+      readOnly: { ...routes.readOnly, 'get-withdrawal-request': '0x09' },
+    };
+    const api = fakeWithdrawalApis(missing);
+    let prior = 0;
+    const stages: string[] = [];
+    for (let poll = 0; poll < SOFT_MISMATCH_CONFIRMATIONS; poll += 1) {
+      const result = await observeWithdrawal(C, watchedFor(W), null, {
+        fetchFn: api.fetchFn,
+        now: BEFORE_DEADLINE,
+        priorSoftMismatches: prior,
+      });
+      prior = result.facts.softMismatches;
+      stages.push(result.progress.stage);
+    }
+    expect(stages).toEqual([
+      ...Array.from({ length: SOFT_MISMATCH_CONFIRMATIONS - 1 }, () => 'rechecking'),
+      'mismatch',
+    ]);
+    const healed = await observe(watchedFor(W), routes, null);
+    expect(healed.facts.softMismatches).toBe(0);
+    expect(healed.progress.stage).not.toBe('mismatch');
   });
 
   it('waits for a transaction the Stacks API does not know yet', async () => {

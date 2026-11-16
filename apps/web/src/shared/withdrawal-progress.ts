@@ -59,13 +59,15 @@ function stacksStatuses(o: WithdrawalObservation): Pick<Statuses, 'confirmed' | 
     case undefined:
     case 'unknown-tx':
     case 'tx-pending':
+    case 'tx-dropped':
       return { confirmed: 'current', accepted: 'pending' };
     case 'tx-failed':
     case 'not-a-withdrawal':
       return { confirmed: 'failed', accepted: 'pending' };
     case 'mismatch':
-      return stacks.requestId === null
-        ? { confirmed: 'failed', accepted: 'pending' }
+      if (stacks.requestId === null) return { confirmed: 'failed', accepted: 'pending' };
+      return o.progress.stage === 'rechecking'
+        ? { confirmed: 'done', accepted: 'current' }
         : { confirmed: 'done', accepted: 'failed' };
     case 'requested':
       return { confirmed: 'done', accepted: 'current' };
@@ -130,7 +132,8 @@ export async function checkWithdrawal(
   backend: Pick<Backend, 'status'>,
   receipt: WithdrawalReceiptFile,
   stacksTxid: string,
-  fetchFn?: FetchLike
+  fetchFn?: FetchLike,
+  priorSoftMismatches = 0
 ): Promise<WithdrawalSnapshot> {
   let status: OneClickStatusResponse | null = null;
   let swapError: string | null = null;
@@ -143,7 +146,7 @@ export async function checkWithdrawal(
     config,
     watchedWithdrawalOf(receipt, stacksTxid),
     status,
-    { fetchFn }
+    { fetchFn, priorSoftMismatches }
   );
   return { observation, milestones: withdrawalMilestones(observation), swapError };
 }
@@ -170,6 +173,10 @@ export function withdrawalAdvice(
   switch (stage) {
     case 'awaiting-stacks-tx':
       return 'Nothing to do yet. If this takes more than an hour, look the transaction up in your wallet’s activity.';
+    case 'tx-replaced':
+      return 'Nothing to do yet. Keep the receipt file. If your wallet’s activity shows a newer withdrawal transaction, this page follows it once the Stacks API lists it.';
+    case 'rechecking':
+      return 'Nothing to do yet. Keep this page or the receipt file while it checks again.';
     case 'request-failed':
       return 'Your sBTC did not leave your wallet. You can start a new withdrawal.';
     case 'awaiting-signers':

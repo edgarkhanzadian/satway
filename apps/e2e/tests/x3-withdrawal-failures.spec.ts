@@ -9,9 +9,10 @@ import {
 } from '../src/scenario/withdrawal.js';
 
 const NOT_DONE = 'Withdrawal complete';
+const SETTLED_POLL_INTERVAL_MS = 120_000;
 
 test.describe('X3. a withdrawal that fails after it was signed', () => {
-  test('the Stacks transaction fails on chain: the sBTC never moved, and polling stops', async ({
+  test('the Stacks transaction fails on chain: the sBTC never moved, and polling slows down', async ({
     app,
     world,
     wallets,
@@ -35,10 +36,33 @@ test.describe('X3. a withdrawal that fails after it was signed', () => {
     await app.tick();
     await app.tick();
     expect(world.requestsTo('hiro', { caller: 'page' })).toHaveLength(reads);
+    await app.fastForward(SETTLED_POLL_INTERVAL_MS);
+    await expect
+      .poll(() => world.requestsTo('hiro', { caller: 'page' }).length)
+      .toBeGreaterThan(reads);
     await app.page.getByRole('button', { name: 'Start another' }).click();
     await expect(
       app.page.getByRole('heading', { name: 'Withdraw sBTC to another chain' })
     ).toBeVisible();
+  });
+
+  test('the Stacks transaction is dropped from the mempool: it keeps checking and does not call it final', async ({
+    app,
+    world,
+    wallets,
+  }) => {
+    const { withdraw } = await startWithdrawal(app, world, wallets);
+    await withdraw.waitFor(WITHDRAW_PROGRESS.awaitingTx);
+    world.withdrawals.confirmRequest('dropped');
+    await withdraw.waitFor(/^The withdrawal transaction was replaced or dropped/);
+    await expect(app.page.getByRole('heading', { name: 'Withdrawal in progress' })).toBeVisible();
+    await expect(app.page.getByText(/No sBTC moved|start a new withdrawal/)).toHaveCount(0);
+    await expect(app.page.getByRole('button', { name: 'Hide' })).toBeVisible();
+    const reads = world.requestsTo('hiro', { caller: 'page' }).length;
+    await app.tick();
+    await expect
+      .poll(() => world.requestsTo('hiro', { caller: 'page' }).length)
+      .toBeGreaterThan(reads);
   });
 
   test('the post-condition stops the transaction: it says no sBTC moved', async ({

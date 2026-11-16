@@ -3,6 +3,7 @@ import type { PayoutVerification, WithdrawalStatus } from '../sbtc/index.js';
 
 export type WithdrawalStage =
   | 'awaiting-stacks-tx'
+  | 'tx-replaced'
   | 'request-failed'
   | 'awaiting-signers'
   | 'rejected'
@@ -14,6 +15,7 @@ export type WithdrawalStage =
   | 'swap-failed'
   | 'needs-support'
   | 'deadline-passed'
+  | 'rechecking'
   | 'mismatch';
 
 export type SwapEchoState = 'matched' | 'missing' | 'mismatch';
@@ -26,6 +28,17 @@ export interface WithdrawalObservations {
   mismatches: readonly string[];
   deadlinePassed: boolean;
   rejectionBlocks: number;
+  softMismatches?: number;
+}
+
+export const SOFT_MISMATCH_CONFIRMATIONS = 3;
+
+function softMismatchPending(o: WithdrawalObservations): boolean {
+  return (
+    o.stacks?.kind === 'mismatch' &&
+    o.stacks.soft &&
+    (o.softMismatches ?? 1) < SOFT_MISMATCH_CONFIRMATIONS
+  );
 }
 
 export interface WithdrawalProgress {
@@ -55,7 +68,9 @@ const SWAP_SEEN: ReadonlySet<OneClickSwapStatus> = new Set([
 
 function mismatchOf(o: WithdrawalObservations): string | null {
   if (o.mismatches.length > 0) return o.mismatches.join(' ');
-  if (o.stacks?.kind === 'mismatch') return o.stacks.problems.join(' ');
+  if (o.stacks?.kind === 'mismatch' && !softMismatchPending(o)) {
+    return o.stacks.problems.join(' ');
+  }
   if (o.stacks?.kind === 'not-a-withdrawal') return o.stacks.message;
   if (o.payout && !o.payout.ok && !o.payout.problems.includes('tx-not-found')) {
     return 'The Bitcoin payout does not match the request.';
@@ -118,6 +133,14 @@ function lateWarning(): WithdrawalProgress {
 export function deriveWithdrawalProgress(o: WithdrawalObservations): WithdrawalProgress {
   const mismatch = mismatchOf(o);
   if (mismatch !== null) return progress('mismatch', `${mismatch}${MISMATCH_ADVICE}`, true, true);
+  if (softMismatchPending(o)) {
+    return progress(
+      'rechecking',
+      'The withdrawal data does not add up yet. This is often a short delay between Stacks API servers, so this page is checking again before drawing a conclusion.',
+      false,
+      true
+    );
+  }
 
   const fromSwap = o.swap === null ? null : swapProgress(o.swap);
   if (fromSwap) return fromSwap;
@@ -141,6 +164,13 @@ export function deriveWithdrawalProgress(o: WithdrawalObservations): WithdrawalP
           ? 'Waiting for the withdrawal transaction to reach the Stacks network.'
           : 'Waiting for the withdrawal transaction to confirm on Stacks.',
         false
+      );
+    case 'tx-dropped':
+      return progress(
+        'tx-replaced',
+        'The withdrawal transaction was replaced or dropped from the Stacks mempool before it confirmed. A replacement with a higher fee makes the same withdrawal, so this page keeps checking for it.',
+        false,
+        true
       );
     case 'tx-failed':
       return progress('request-failed', stacks.failure.message, true);

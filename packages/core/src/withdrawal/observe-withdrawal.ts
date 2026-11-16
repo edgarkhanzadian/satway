@@ -19,7 +19,7 @@ import {
   decodeWithdrawalRecipient,
   describePayoutProblem,
   fetchAndVerifyWithdrawalPayout,
-  fetchWithdrawalStatus,
+  followWithdrawalStatus,
   scriptPubKeyOfMainnetAddress,
 } from '../sbtc/index.js';
 import { type FetchLike, type WithdrawalFlowConfig, errorMessage } from '../shared/index.js';
@@ -41,6 +41,7 @@ export interface WatchedWithdrawal {
 }
 
 export interface WithdrawalFacts {
+  stacksTxid: string;
   requestId: number | null;
   request: OnChainWithdrawalRequest | null;
   txFailure: WithdrawalTxFailure | null;
@@ -55,6 +56,7 @@ export interface WithdrawalFacts {
   refund: SwapRefund | null;
   deadlinePassed: boolean;
   mismatches: string[];
+  softMismatches: number;
   errors: string[];
 }
 
@@ -106,7 +108,7 @@ export async function observeWithdrawal(
   config: WithdrawalFlowConfig,
   watched: WatchedWithdrawal,
   rawSwapStatus: unknown,
-  options: { fetchFn?: FetchLike; now?: Date } = {}
+  options: { fetchFn?: FetchLike; now?: Date; priorSoftMismatches?: number } = {}
 ): Promise<WithdrawalObservation> {
   const fetchFn = options.fetchFn;
   const now = options.now ?? new Date();
@@ -123,8 +125,9 @@ export async function observeWithdrawal(
   }
 
   let stacks: WithdrawalStatus | null = null;
+  let stacksTxid = watched.stacksTxid;
   try {
-    stacks = await fetchWithdrawalStatus(
+    const followed = await followWithdrawalStatus(
       config,
       watched.stacksTxid,
       {
@@ -135,9 +138,16 @@ export async function observeWithdrawal(
       },
       fetchFn
     );
+    stacks = followed.status;
+    stacksTxid = followed.stacksTxid;
   } catch (err) {
     errors.push(describe(err, 'Stacks'));
   }
+  if (stacks?.kind === 'tx-dropped' && stacks.lookupError) {
+    errors.push(`Replacement lookup: ${stacks.lookupError}`);
+  }
+  const softMismatches =
+    stacks?.kind === 'mismatch' && stacks.soft ? (options.priorSoftMismatches ?? 0) + 1 : 0;
 
   let payout: PayoutVerification | null = null;
   if (stacks?.kind === 'accepted') {
@@ -185,6 +195,7 @@ export async function observeWithdrawal(
   const accepted = stacks?.kind === 'accepted' ? stacks : null;
 
   const facts: WithdrawalFacts = {
+    stacksTxid,
     requestId: request?.requestId ?? (stacks?.kind === 'mismatch' ? stacks.requestId : null),
     request,
     txFailure: stacks?.kind === 'tx-failed' ? stacks.failure : null,
@@ -199,6 +210,7 @@ export async function observeWithdrawal(
     refund,
     deadlinePassed,
     mismatches,
+    softMismatches,
     errors,
   };
 
@@ -214,6 +226,7 @@ export async function observeWithdrawal(
       mismatches,
       deadlinePassed,
       rejectionBlocks: config.rejectionBlocks,
+      softMismatches,
     }),
   };
 }

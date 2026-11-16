@@ -13,6 +13,7 @@ import {
   fetchStacksTransaction,
   fetchWithdrawalStatus,
   findWithdrawalAcceptEvent,
+  followWithdrawalStatus,
   parseClarityHex,
   parseSweepDataValue,
   parseWith,
@@ -118,16 +119,34 @@ describe('reading real withdrawal request transactions', () => {
     expect(reading.kind === 'tx-succeeded' ? reading.event : 'wrong').toBeNull();
   });
 
-  it('reads pending and dropped transactions', () => {
+  it('reads pending and dropped transactions, neither of them final', () => {
     const tx = txOf(defined(DIRECT[0]).requestTx);
     expect(readWithdrawalRequestTransaction({ ...tx, tx_status: 'pending' }, C).kind).toBe(
       'tx-pending'
     );
-    const dropped = readWithdrawalRequestTransaction(
-      { ...tx, tx_status: 'dropped_replace_by_fee', tx_result: undefined },
-      C
-    );
-    expect(dropped.kind === 'tx-failed' ? dropped.failure.code : null).toBe('dropped');
+    for (const txStatus of [
+      'dropped_replace_by_fee',
+      'dropped_replace_across_fork',
+      'dropped_too_expensive',
+      'dropped_stale_garbage',
+      'dropped_problematic',
+    ]) {
+      expect(
+        readWithdrawalRequestTransaction({ ...tx, tx_status: txStatus, tx_result: undefined }, C)
+      ).toEqual({ kind: 'tx-dropped', txStatus });
+    }
+  });
+
+  it('treats only a confirmed abort as a failed request', () => {
+    const tx = txOf(defined(DIRECT[0]).requestTx);
+    for (const txStatus of ['abort_by_response', 'abort_by_post_condition']) {
+      expect(readWithdrawalRequestTransaction({ ...tx, tx_status: txStatus }, C).kind).toBe(
+        'tx-failed'
+      );
+    }
+    expect(
+      readWithdrawalRequestTransaction({ ...tx, tx_status: 'some_future_status' }, C).kind
+    ).toBe('tx-pending');
   });
 
   it('refuses a transaction to another contract or function', () => {
@@ -388,11 +407,12 @@ describe('fetchWithdrawalStatus on real data', () => {
     );
     if (status.kind !== 'mismatch') throw new Error(`unexpected ${status.kind}`);
     expect(status.requestId).toBe(w.id);
+    expect(status.soft).toBe(false);
     expect(status.problems.join(' ')).toMatch(msg);
     expect(status.problems.some(p => p.startsWith('sBTC registry'))).toBe(true);
   });
 
-  it('reports a mismatch when the registry has no such request', async () => {
+  it('reports a soft mismatch when the registry has no such request', async () => {
     const w = defined(ACCEPTED[0]);
     const routes = routesFor(w);
     const api = fakeWithdrawalApis({
@@ -400,9 +420,16 @@ describe('fetchWithdrawalStatus on real data', () => {
       readOnly: { ...routes.readOnly, 'get-withdrawal-request': '0x09' },
     });
     const status = await fetchWithdrawalStatus(C, w.requestTxid, expectedOf(w), api.fetchFn);
-    expect(status.kind === 'mismatch' ? status.problems.join(' ') : status.kind).toMatch(
-      /no withdrawal request/
+    if (status.kind !== 'mismatch') throw new Error(`unexpected ${status.kind}`);
+    expect(status.problems.join(' ')).toMatch(/no withdrawal request/);
+    expect(status.soft).toBe(true);
+    const tampered = await fetchWithdrawalStatus(
+      C,
+      w.requestTxid,
+      { ...expectedOf(w), amountSats: w.amountSats + 1 },
+      api.fetchFn
     );
+    expect(tampered.kind === 'mismatch' ? tampered.soft : tampered.kind).toBe(false);
   });
 
   it('keeps the acceptance but no payout when Emily is down', async () => {
@@ -454,6 +481,7 @@ describe('fetchWithdrawalStatus on real data', () => {
     expect(status.kind === 'mismatch' ? status.problems.join(' ') : status.kind).toMatch(
       /disagree about the sweep/
     );
+    expect(status.kind === 'mismatch' ? status.soft : null).toBe(true);
   });
 
   it('passes Stacks API failures to the caller and refuses bad txids', async () => {
@@ -469,5 +497,97 @@ describe('fetchWithdrawalStatus on real data', () => {
     await expect(fetchStacksTransaction(C.stxApiUrl, 'abc', api.fetchFn)).rejects.toThrow(
       /Not a Stacks transaction id/
     );
+  });
+});
+
+describe('following a dropped withdrawal transaction', () => {
+  const w = defined(DIRECT.find(d => d.outcome === 'accepted'));
+  const DROPPED_TXID = 'ab'.repeat(32);
+  const real = txOf(w.requestTx);
+  const nonce = defined(real.nonce);
+  const droppedTx = {
+    ...txOf(w.requestTx),
+    tx_id: `0x${DROPPED_TXID}`,
+    tx_status: 'dropped_replace_by_fee',
+    tx_result: undefined,
+    events: [],
+  };
+  const confirmedUrl = `${C.stxApiUrl}/extended/v1/tx?from_address=${w.sender}&nonce=${nonce}&limit=10`;
+  const mempoolUrl = `${C.stxApiUrl}/extended/v1/tx/mempool?sender_address=${w.sender}&limit=50`;
+
+  function apisWith(confirmed: unknown[], pending: unknown[]) {
+    const routes = routesFor(w);
+    return fakeWithdrawalApis({
+      ...routes,
+      stacksTxs: { ...routes.stacksTxs, [DROPPED_TXID]: droppedTx },
+      overrides: {
+        [confirmedUrl]: jsonResponse({ results: confirmed }),
+        [mempoolUrl]: jsonResponse({ results: pending }),
+      },
+    });
+  }
+
+  it('follows a confirmed replacement at the same nonce that makes the same call', async () => {
+    const api = apisWith([w.requestTx], []);
+    const followed = await followWithdrawalStatus(C, DROPPED_TXID, expectedOf(w), api.fetchFn);
+    expect(followed.stacksTxid).toBe(w.requestTxid);
+    expect(followed.status.kind).toBe('accepted');
+    expect(api.urls).toContain(confirmedUrl);
+    expect(api.urls).toContain(mempoolUrl);
+  });
+
+  it('follows a pending replacement in the mempool', async () => {
+    const pendingTxid = 'cd'.repeat(32);
+    const pending = {
+      ...txOf(w.requestTx),
+      tx_id: `0x${pendingTxid}`,
+      tx_status: 'pending',
+      tx_result: undefined,
+      events: [],
+    };
+    const api = apisWith([], [pending]);
+    const followed = await followWithdrawalStatus(C, DROPPED_TXID, expectedOf(w), api.fetchFn);
+    expect(followed).toEqual({ stacksTxid: pendingTxid, status: { kind: 'tx-pending' } });
+  });
+
+  it('does not follow a transaction at the same nonce that makes a different call', async () => {
+    const other = structuredClone(w.requestTx);
+    const call = defined(txOf(other).contract_call);
+    const args = defined(call.function_args).map((a, i) =>
+      i === 0 ? { ...a, hex: `0x${serializeCV(Cl.uint(w.amountSats + 1))}` } : a
+    );
+    const api = apisWith([{ ...txOf(other), contract_call: { ...call, function_args: args } }], []);
+    const followed = await followWithdrawalStatus(C, DROPPED_TXID, expectedOf(w), api.fetchFn);
+    expect(followed).toEqual({
+      stacksTxid: DROPPED_TXID,
+      status: { kind: 'tx-dropped', txStatus: 'dropped_replace_by_fee', lookupError: null },
+    });
+  });
+
+  it('keeps watching the dropped transaction when the replacement lookup fails', async () => {
+    const routes = routesFor(w);
+    const api = fakeWithdrawalApis({
+      ...routes,
+      stacksTxs: { ...routes.stacksTxs, [DROPPED_TXID]: droppedTx },
+    });
+    const followed = await followWithdrawalStatus(C, DROPPED_TXID, expectedOf(w), api.fetchFn);
+    expect(followed.stacksTxid).toBe(DROPPED_TXID);
+    if (followed.status.kind !== 'tx-dropped') throw new Error(followed.status.kind);
+    expect(followed.status.lookupError).toMatch(/HTTP 404/);
+  });
+
+  it('does not look anything up for a dropped transaction without a nonce', async () => {
+    const routes = routesFor(w);
+    const api = fakeWithdrawalApis({
+      ...routes,
+      stacksTxs: { ...routes.stacksTxs, [DROPPED_TXID]: { ...droppedTx, nonce: undefined } },
+    });
+    const followed = await followWithdrawalStatus(C, DROPPED_TXID, expectedOf(w), api.fetchFn);
+    expect(followed.status).toEqual({
+      kind: 'tx-dropped',
+      txStatus: 'dropped_replace_by_fee',
+      lookupError: null,
+    });
+    expect(api.urls).toHaveLength(1);
   });
 });
