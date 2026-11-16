@@ -1,7 +1,8 @@
 import {
+  MAINNET_CONFIG,
   type OneClickQuoteResponse,
   ResponseShapeError,
-  buildDepositAddress,
+  buildIndexedDepositAddress,
   formatBaseUnits,
   oneClickQuoteResponseSchema,
   z,
@@ -11,12 +12,14 @@ import type { BackgroundRegistration } from './backend.js';
 import { looksLikeWithdrawalReceipt } from './withdrawal-receipt.js';
 
 export interface Receipt {
-  version: 1;
+  version: 2;
+  scriptVersion: 'v1';
   createdAt: string;
   stacksAddress: string;
   reclaimPublicKey: string;
   reclaimKeyAddress: string;
   signersPublicKey: string;
+  depositIndex: number;
   maxSignerFeeSats: number;
   reclaimLockBlocks: number;
   depositAddress: string;
@@ -26,8 +29,6 @@ export interface Receipt {
   origin: { chain: string; symbol: string; assetId: string; decimals: number };
   refundTo: string;
   quoteResponse: OneClickQuoteResponse;
-  priorOutpoints?: string[];
-  priorTruncated?: boolean;
 }
 
 export interface ActiveDeposit {
@@ -53,12 +54,14 @@ const text = z.string().min(1);
 const MAX_TOKEN_DECIMALS = 36;
 
 const receiptSchema: z.ZodType<Receipt> = z.looseObject({
-  version: z.literal(1),
+  version: z.literal(2),
+  scriptVersion: z.literal('v1'),
   createdAt: z.string(),
   stacksAddress: text,
   reclaimPublicKey: text,
   reclaimKeyAddress: text,
   signersPublicKey: text,
+  depositIndex: z.number(),
   maxSignerFeeSats: z.number(),
   reclaimLockBlocks: z.number(),
   depositAddress: text,
@@ -73,8 +76,6 @@ const receiptSchema: z.ZodType<Receipt> = z.looseObject({
   }),
   refundTo: text,
   quoteResponse: oneClickQuoteResponseSchema,
-  priorOutpoints: z.array(z.string().regex(/^[0-9a-f]{64}:\d+$/)).optional(),
-  priorTruncated: z.boolean().optional(),
 });
 
 function parseReceipt(value: unknown): Receipt {
@@ -82,11 +83,16 @@ function parseReceipt(value: unknown): Receipt {
   if (result.success) return result.data;
   const issues = result.error.issues;
   const failed = new Set(issues.map(issue => issue.path[0]));
-  if (failed.has('version')) throw new Error('Unsupported receipt version');
+  if (failed.has('version') || failed.has('scriptVersion'))
+    throw new Error('Unsupported receipt version');
   const missing = REQUIRED_TEXT.find(key => failed.has(key));
   if (missing) throw new Error(`Receipt is missing "${missing}"`);
-  if (failed.has('maxSignerFeeSats') || failed.has('reclaimLockBlocks'))
-    throw new Error('Receipt is missing its fee cap or timelock');
+  if (
+    failed.has('depositIndex') ||
+    failed.has('maxSignerFeeSats') ||
+    failed.has('reclaimLockBlocks')
+  )
+    throw new Error('Receipt is missing its deposit index, fee cap or timelock');
   throw new ResponseShapeError('the receipt file', issues);
 }
 
@@ -96,14 +102,17 @@ export function verifyReceipt(value: unknown): Receipt {
     throw new Error('This is a withdrawal receipt. Load it under “Follow a withdrawal” below.');
   }
   const r = parseReceipt(value);
-  const rebuilt = buildDepositAddress({
-    stacksAddress: r.stacksAddress,
-    reclaimPublicKey: r.reclaimPublicKey,
-    signersPublicKey: r.signersPublicKey,
-    maxSignerFeeSats: r.maxSignerFeeSats,
-    reclaimLockBlocks: r.reclaimLockBlocks,
-  });
+  const rebuilt = buildIndexedDepositAddress(
+    {
+      stacksAddress: r.stacksAddress,
+      reclaimPublicKey: r.reclaimPublicKey,
+      signersPublicKey: r.signersPublicKey,
+      depositIndex: r.depositIndex,
+    },
+    { baseSignerFeeSats: MAINNET_CONFIG.baseSignerFeeSats, reclaimLockBlocks: r.reclaimLockBlocks }
+  );
   if (
+    rebuilt.maxSignerFeeSats !== r.maxSignerFeeSats ||
     rebuilt.address !== r.depositAddress ||
     rebuilt.scriptPubKey !== r.depositScriptPubKey ||
     rebuilt.depositScript !== r.depositScript ||

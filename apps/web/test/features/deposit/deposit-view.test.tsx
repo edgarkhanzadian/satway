@@ -6,12 +6,14 @@ import { Deposit } from '../../../src/features/deposit/deposit.js';
 import type { Backend, Receipt } from '../../../src/shared/index.js';
 
 const receipt: Receipt = {
-  version: 1,
+  version: 2,
+  scriptVersion: 'v1',
   createdAt: '2026-11-14T12:00:00.000Z',
   stacksAddress: 'SP1Q6W6VADA7V12SEVH6VNDNN4N7RX1PQ949EQPQ',
   reclaimPublicKey: '51b397d3ad5ab4f803565c0243d3c1fa9d5a8124b33547bb993ee1ebeb729ff2',
   reclaimKeyAddress: 'bc1q9hmqr6dldku4nqhlg4ulrr9pr8czcpf323csys',
   signersPublicKey: 'd99ad0f0111a7e9aaa2ed22940efec98db0ece9b9475e61e1eec65a6e7f3af69',
+  depositIndex: 0,
   maxSignerFeeSats: 80_000,
   reclaimLockBlocks: 950,
   depositAddress: 'bc1pytlwt3qfg4rdrk3yxtmdhcjvy0l63yp7qh3jra5xwq8yt6w4fvhqyjl7dx',

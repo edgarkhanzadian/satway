@@ -5,6 +5,7 @@ import {
   type OneClickQuoteResponse,
   type OneClickSwapStatus,
   type OneClickToken,
+  buildIndexedDepositAddress,
   MAINNET_CONFIG as config,
   largestPayoutSats,
   planReclaim,
@@ -13,7 +14,9 @@ import {
 import {
   depositOrigins,
   liveQuoteWorse,
+  localDepositIndices,
   prepareDeposit,
+  randomBelow,
   toBaseUnits,
 } from '../../../src/features/deposit/flow.js';
 import { pickAccount } from '../../../src/features/stacks-wallet/wallet.js';
@@ -141,6 +144,37 @@ function emilyDeposit(status: string) {
   };
 }
 
+function indexed(depositIndex: number) {
+  return buildIndexedDepositAddress(
+    {
+      stacksAddress: D.stacksAddress,
+      reclaimPublicKey: D.reclaimPublicKey,
+      signersPublicKey: D.signersPublicKey,
+      depositIndex,
+    },
+    config
+  );
+}
+
+function emilyIndexed(depositIndex: number) {
+  const built = indexed(depositIndex);
+  return {
+    version: 'v1',
+    bitcoinTxid: 'cd'.repeat(32),
+    bitcoinTxOutputIndex: depositIndex,
+    recipient: '0516037370db53547d845976e26dd5b5a92a7c7436ba',
+    maxFee: built.maxSignerFeeSats,
+    amount: 50_000,
+    lastUpdateHeight: 1,
+    lastUpdateBlockHash: 'ef'.repeat(32),
+    status: 'confirmed',
+    depositScript: built.depositScript,
+    reclaimScript: built.reclaimScript,
+  };
+}
+
+const AT_INDEX_0 = { randomInt: () => 0, localIndices: [] };
+
 function later<T>(make: () => T): Promise<T> {
   return new Promise(resolve => resolve(make()));
 }
@@ -170,6 +204,9 @@ interface World {
   hashes?: string[];
   payoutVout?: number | null;
   foreignTx?: string;
+  emilyIndices?: number[];
+  emilyDown?: boolean;
+  usedAddresses?: string[];
   outputs?: Out[];
   fillers?: number;
   mint?: string | null;
@@ -268,6 +305,15 @@ function world(w: World = {}) {
           reclaimScript: '03ffff00b26a',
         })),
       });
+    }
+    if (url.startsWith(`${config.sbtcApiUrl}/deposit/reclaim-pubkeys/`)) {
+      if (w.emilyDown) return jsonRes({ message: 'Bad gateway' }, 502);
+      return jsonRes({ nextToken: null, deposits: (w.emilyIndices ?? []).map(emilyIndexed) });
+    }
+    const stats = /^https:\/\/mempool\.space\/api\/address\/([a-z0-9]+)$/.exec(url);
+    if (stats?.[1]) {
+      const used = w.usedAddresses?.includes(stats[1]) ? 1 : 0;
+      return jsonRes({ chain_stats: { tx_count: used }, mempool_stats: { tx_count: 0 } });
     }
     if (url.endsWith('/blocks/tip/height')) return new Response(String(state.tip));
     const evidence = EVIDENCE.findIndex(e => url.endsWith(`/tx/${e.txid}/outspend/1`));
@@ -410,7 +456,12 @@ function world(w: World = {}) {
 
 async function receiptFor(w: ReturnType<typeof world>): Promise<Receipt> {
   const receipt = (
-    await prepareDeposit(config, w.backend, input, { dry: false, fetchFn: w.fetchFn, now: NOW })
+    await prepareDeposit(config, w.backend, input, {
+      dry: false,
+      fetchFn: w.fetchFn,
+      now: NOW,
+      ...AT_INDEX_0,
+    })
   ).receipt;
   w.arrive();
   return receipt;
@@ -452,6 +503,7 @@ describe('prepareDeposit', () => {
       dry: false,
       fetchFn: w.fetchFn,
       now: NOW,
+      ...AT_INDEX_0,
     });
     expect(prepared.receipt.depositAddress).toBe(D.address);
     expect(prepared.receipt.depositScript).toBe(D.depositScript);
@@ -553,6 +605,122 @@ describe('prepareDeposit', () => {
       )
     ).rejects.toThrow();
     expect(w.quotes).toHaveLength(0);
+  });
+});
+
+describe('prepareDeposit: one deposit address per deposit', () => {
+  function live(w: ReturnType<typeof world>, over: Record<string, unknown> = {}) {
+    return prepareDeposit(config, w.backend, input, {
+      dry: false,
+      fetchFn: w.fetchFn,
+      now: NOW,
+      ...over,
+    });
+  }
+
+  it('skips the indices Emily and this browser know, and the quote pays the chosen address', async () => {
+    const w = world({ emilyIndices: [0, 2] });
+    const prepared = await live(w, { randomInt: () => 1, localIndices: [1] });
+    const chosen = indexed(4);
+    expect(prepared.receipt).toMatchObject({
+      version: 2,
+      scriptVersion: 'v1',
+      depositIndex: 4,
+      maxSignerFeeSats: 80_004,
+      depositAddress: chosen.address,
+      depositScript: chosen.depositScript,
+    });
+    expect(w.quotes[0]?.recipient).toBe(chosen.address);
+    const lookup = w.urls.findIndex(u => u.includes('/deposit/reclaim-pubkeys/'));
+    const emptiness = w.urls.indexOf(`https://mempool.space/api/address/${chosen.address}`);
+    expect(lookup).toBeGreaterThanOrEqual(0);
+    expect(emptiness).toBeGreaterThan(lookup);
+    expect(verifyReceipt(JSON.parse(JSON.stringify(prepared.receipt)))).toEqual(prepared.receipt);
+  });
+
+  it('draws again when the drawn address already has transactions', async () => {
+    const w = world({ usedAddresses: [indexed(0).address] });
+    const prepared = await live(w, { randomInt: () => 0, localIndices: [] });
+    expect(prepared.receipt.depositIndex).toBe(1);
+  });
+
+  it('goes on without Emily, using what this browser knows and the emptiness check', async () => {
+    const w = world({ emilyDown: true });
+    const prepared = await live(w, { randomInt: () => 0, localIndices: [0] });
+    expect(prepared.receipt.depositIndex).toBe(1);
+    expect(w.quotes).toHaveLength(1);
+  });
+
+  it('two deposits started in one session never share an index', async () => {
+    const owner = {
+      stacksAddress: 'SP3FBR2AGK5H9QBDH3EEN6DF8EK8JY7RX8QJ5SVTE',
+      reclaimPublicKey: D.reclaimPublicKey,
+    };
+    const w = world();
+    const other = { ...input, ...owner };
+    const first = await prepareDeposit(config, w.backend, other, {
+      dry: false,
+      fetchFn: w.fetchFn,
+      randomInt: () => 0,
+    });
+    const second = await prepareDeposit(config, w.backend, other, {
+      dry: false,
+      fetchFn: w.fetchFn,
+      randomInt: () => 0,
+    });
+    expect(first.receipt.depositIndex).toBe(0);
+    expect(second.receipt.depositIndex).toBe(1);
+    expect(second.receipt.depositAddress).not.toBe(first.receipt.depositAddress);
+  });
+
+  it('counts receipts saved in this browser for the same wallet and signer key only', async () => {
+    const mine = await receiptFor(world());
+    const moved = { ...mine, depositIndex: 7 };
+    const otherSigner = { ...mine, signersPublicKey: 'bb'.repeat(32), depositIndex: 9 };
+    const owner = {
+      stacksAddress: D.stacksAddress,
+      reclaimPublicKey: `02${D.reclaimPublicKey}`,
+      signersPublicKey: D.signersPublicKey,
+    };
+    const local = localDepositIndices(owner, [mine, moved, otherSigner]);
+    expect(local).toEqual(expect.arrayContaining([0, 7]));
+    expect(local).not.toContain(9);
+  });
+
+  it('a preview quote uses index 0 and does not look anything up or reserve it', async () => {
+    const w = world({ emilyIndices: [0] });
+    const prepared = await prepareDeposit(config, w.backend, input, {
+      dry: true,
+      fetchFn: w.fetchFn,
+    });
+    expect(prepared.receipt.depositIndex).toBe(0);
+    expect(w.quotes[0]?.recipient).toBe(D.address);
+    expect(w.urls.some(u => u.includes('/reclaim-pubkeys/'))).toBe(false);
+    expect(w.urls.some(u => /\/address\/[a-z0-9]+$/.test(u))).toBe(false);
+  });
+
+  it('warns about the per-deposit fee cap of the chosen address', async () => {
+    const w = world({ minOut: '60000', amountOut: '60500' });
+    const prepared = await live(w, { randomInt: () => 0, localIndices: [0, 1, 2] });
+    expect(prepared.warnings.join(' ')).toContain('80003-sat cap');
+  });
+
+  it('refuses a receipt whose fee cap does not match its index', async () => {
+    const receipt = await receiptFor(world());
+    expect(() => verifyReceipt({ ...receipt, maxSignerFeeSats: 80_001 })).toThrow(
+      /does not add up/
+    );
+    expect(() => verifyReceipt({ ...receipt, depositIndex: 1 })).toThrow(/does not add up/);
+  });
+
+  it('draws uniformly below the bound from the browser’s random source', () => {
+    for (const max of [1, 2, 256]) {
+      for (let i = 0; i < 50; i++) {
+        const n = randomBelow(max);
+        expect(Number.isInteger(n) && n >= 0 && n < max).toBe(true);
+      }
+    }
+    expect(() => randomBelow(0)).toThrow();
   });
 });
 
@@ -1043,7 +1211,7 @@ describe('rememberReceipt', () => {
   it('keeps items it cannot read or verify, in place, and returns only verified ones', async () => {
     const old = await receiptAt('2026-11-10T00:00:00.000Z');
     const tampered = { ...old, createdAt: '2026-11-11T00:00:00.000Z', reclaimLockBlocks: 10 };
-    const future = { version: 2, note: 'written by a newer app' };
+    const future = { version: 3, note: 'written by a newer app' };
     const store = memory([[RECEIPTS_KEY, JSON.stringify([future, old, 'junk', tampered])]]);
     const next = await receiptAt('2026-11-15T00:00:00.000Z');
     expect(rememberReceipt(next)).toBe(true);
@@ -1254,12 +1422,13 @@ describe('verifyReceipt', () => {
     expect(() => verifyReceipt(forged)).toThrow(/different address/);
   });
 
-  it.each([null, 'x', {}, { version: 2 }])('rejects %j', value => {
+  it.each([null, 'x', {}, { version: 3 }, { version: 1 }])('rejects %j', value => {
     expect(() => verifyReceipt(value)).toThrow();
   });
 
   it.each([
-    ['a wrong version', { version: 2, stacksAddress: '' }, /^Unsupported receipt version$/],
+    ['a wrong version', { version: 1, stacksAddress: '' }, /^Unsupported receipt version$/],
+    ['another script version', { scriptVersion: 'v2' }, /^Unsupported receipt version$/],
     ['an empty stacks address', { stacksAddress: '' }, /^Receipt is missing "stacksAddress"$/],
     [
       'a missing deposit script',
@@ -1269,7 +1438,12 @@ describe('verifyReceipt', () => {
     [
       'a fee cap given as text',
       { maxSignerFeeSats: '80000' },
-      /^Receipt is missing its fee cap or timelock$/,
+      /^Receipt is missing its deposit index, fee cap or timelock$/,
+    ],
+    [
+      'no deposit index',
+      { depositIndex: undefined },
+      /^Receipt is missing its deposit index, fee cap or timelock$/,
     ],
     ['no quote', { quoteResponse: undefined }, /receipt file: quoteResponse/],
     ['no origin', { origin: undefined }, /receipt file: origin/],
@@ -1370,7 +1544,10 @@ describe('quote -> receipt -> verifyReceipt', () => {
       dry: false,
       fetchFn: w.fetchFn,
       now: NOW,
+      randomInt: () => 5,
+      localIndices: [],
     });
+    expect(prepared.receipt.depositIndex).toBe(5);
     expect(prepared.providerFeeBps).toBe(20);
     const file: unknown = JSON.parse(JSON.stringify(prepared.receipt));
     const verified = verifyReceipt(file);

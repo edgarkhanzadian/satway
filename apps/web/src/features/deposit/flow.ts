@@ -1,23 +1,24 @@
 import { isSupportedOriginChain } from '@satway/chains';
 import {
+  type DepositIndexOwner,
   type FetchLike,
+  type IndexedDepositAddress,
   type NetworkConfig,
   type OneClickToken,
-  type OutpointSnapshot,
   assertQuoteMatchesRequest,
-  buildDepositAddress,
+  buildIndexedDepositAddress,
   buildQuoteRequest,
   checkDepositAmount,
+  chooseDepositIndex,
   describeAmountProblem,
-  errorMessage,
   fetchLimits,
   fetchVerifiedSigners,
   largestPayoutSats,
   providerFeesOf,
-  snapshotOutpoints,
+  toXOnly,
 } from '@satway/core';
 
-import type { Backend, Receipt } from '../../shared/index.js';
+import { type Backend, type Receipt, loadReceipts } from '../../shared/index.js';
 
 const POPULAR = ['USDC', 'USDT', 'ETH', 'BNB'];
 
@@ -81,27 +82,75 @@ export function toBaseUnits(amount: string, decimals: number): string {
   return units.toString();
 }
 
-async function snapshotPrior(
-  config: NetworkConfig,
-  address: string,
-  scriptPubKey: string,
-  fetchFn: FetchLike | undefined
-): Promise<OutpointSnapshot> {
-  try {
-    return await snapshotOutpoints(config.btcApiUrl, address, scriptPubKey, { fetchFn });
-  } catch (err) {
-    throw new Error(
-      `Could not read your Bitcoin deposit address, so the deposit was not started: ${errorMessage(err) ?? String(err)}`,
-      { cause: err }
-    );
+export function randomBelow(maxExclusive: number): number {
+  if (!Number.isSafeInteger(maxExclusive) || maxExclusive < 1 || maxExclusive > 2 ** 32) {
+    throw new Error('Cannot draw a random number in that range');
   }
+  const limit = 2 ** 32 - (2 ** 32 % maxExclusive);
+  const buffer = new Uint32Array(1);
+  for (;;) {
+    crypto.getRandomValues(buffer);
+    const value = buffer[0] ?? limit;
+    if (value < limit) return value % maxExclusive;
+  }
+}
+
+function ownerKey(owner: DepositIndexOwner): string {
+  return [
+    owner.stacksAddress,
+    toXOnly(owner.reclaimPublicKey),
+    toXOnly(owner.signersPublicKey),
+  ].join('|');
+}
+
+const reservedThisSession = new Map<string, Set<number>>();
+
+function reserve(owner: DepositIndexOwner, depositIndex: number): void {
+  const key = ownerKey(owner);
+  const set = reservedThisSession.get(key) ?? new Set<number>();
+  set.add(depositIndex);
+  reservedThisSession.set(key, set);
+}
+
+export function localDepositIndices(
+  owner: DepositIndexOwner,
+  receipts: readonly Receipt[] = loadReceipts()
+): number[] {
+  const key = ownerKey(owner);
+  const saved = receipts.filter(r => ownerKey(r) === key).map(r => r.depositIndex);
+  return [...new Set([...saved, ...(reservedThisSession.get(key) ?? [])])].sort((a, b) => a - b);
+}
+
+export interface PrepareOptions {
+  dry: boolean;
+  fetchFn?: FetchLike;
+  now?: Date;
+  randomInt?(maxExclusive: number): number;
+  localIndices?: readonly number[];
+}
+
+async function depositAddressFor(
+  config: NetworkConfig,
+  owner: DepositIndexOwner,
+  options: PrepareOptions
+): Promise<IndexedDepositAddress> {
+  if (options.dry) return buildIndexedDepositAddress({ ...owner, depositIndex: 0 }, config);
+  const choice = await chooseDepositIndex({
+    config,
+    owner,
+    localIndices: options.localIndices ?? localDepositIndices(owner),
+    randomInt: options.randomInt ?? randomBelow,
+    fetchFn: options.fetchFn,
+  });
+  reserve(owner, choice.deposit.depositIndex);
+  return choice.deposit;
 }
 
 export async function prepareDeposit(
   config: NetworkConfig,
   backend: Backend,
   input: DepositInput,
-  options: { dry: boolean; fetchFn?: FetchLike; now?: Date }
+  options: PrepareOptions
 ): Promise<Prepared> {
   const fetchFn = options.fetchFn;
   const [signers, limits] = await Promise.all([
@@ -109,13 +158,15 @@ export async function prepareDeposit(
     fetchLimits(config.sbtcApiUrl, fetchFn),
   ]);
 
-  const deposit = buildDepositAddress({
-    stacksAddress: input.stacksAddress,
-    reclaimPublicKey: input.reclaimPublicKey,
-    signersPublicKey: signers.signersPublicKey,
-    maxSignerFeeSats: config.baseSignerFeeSats,
-    reclaimLockBlocks: config.reclaimLockBlocks,
-  });
+  const deposit = await depositAddressFor(
+    config,
+    {
+      stacksAddress: input.stacksAddress,
+      reclaimPublicKey: input.reclaimPublicKey,
+      signersPublicKey: signers.signersPublicKey,
+    },
+    options
+  );
 
   const request = buildQuoteRequest(config, {
     originAsset: input.token.assetId,
@@ -125,17 +176,14 @@ export async function prepareDeposit(
     dry: options.dry,
     now: options.now,
   });
-  const [response, prior] = await Promise.all([
-    backend.quote(request),
-    options.dry ? null : snapshotPrior(config, deposit.address, deposit.scriptPubKey, fetchFn),
-  ]);
+  const response = await backend.quote(request);
   assertQuoteMatchesRequest(request, response);
 
   const minimumSats = Number(response.quote.minAmountOut);
   const check = checkDepositAmount(
     minimumSats,
     limits,
-    config.baseSignerFeeSats,
+    deposit.maxSignerFeeSats,
     largestPayoutSats(response.quote)
   );
   if (!check.ok) {
@@ -144,18 +192,20 @@ export async function prepareDeposit(
   const warnings: string[] = [];
   if (check.feeCapCoversWholeAmount) {
     warnings.push(
-      `This deposit is smaller than the ${config.baseSignerFeeSats}-sat cap on the signers’ fee. That is normally fine, but in a Bitcoin fee spike a small deposit could be mostly consumed by fees.`
+      `This deposit is smaller than the ${deposit.maxSignerFeeSats}-sat cap on the signers’ fee. That is normally fine, but in a Bitcoin fee spike a small deposit could be mostly consumed by fees.`
     );
   }
 
   const receipt: Receipt = {
-    version: 1,
+    version: 2,
+    scriptVersion: 'v1',
     createdAt: (options.now ?? new Date()).toISOString(),
     stacksAddress: input.stacksAddress,
     reclaimPublicKey: input.reclaimPublicKey,
     reclaimKeyAddress: input.reclaimKeyAddress,
     signersPublicKey: signers.signersPublicKey,
-    maxSignerFeeSats: config.baseSignerFeeSats,
+    depositIndex: deposit.depositIndex,
+    maxSignerFeeSats: deposit.maxSignerFeeSats,
     reclaimLockBlocks: config.reclaimLockBlocks,
     depositAddress: deposit.address,
     depositScriptPubKey: deposit.scriptPubKey,
@@ -169,7 +219,6 @@ export async function prepareDeposit(
     },
     refundTo: input.refundTo.trim(),
     quoteResponse: response,
-    ...(prior ? { priorOutpoints: prior.outpoints, priorTruncated: prior.truncated } : {}),
   };
 
   return {
