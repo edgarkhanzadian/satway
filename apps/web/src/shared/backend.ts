@@ -25,7 +25,7 @@ export type BackgroundRegistration =
 
 export interface Backend {
   tokens(): Promise<OneClickToken[]>;
-  quote(request: OneClickQuoteRequest): Promise<OneClickQuoteResponse>;
+  quote(request: OneClickQuoteRequest, signal?: AbortSignal): Promise<OneClickQuoteResponse>;
   status(depositAddress: string, depositMemo?: string): Promise<OneClickStatusResponse>;
   register(
     depositScript: string,
@@ -79,8 +79,10 @@ export function createBackend(baseUrl: string): Backend {
   }
   return {
     tokens: () => call(`${base}/tokens`, oneClickTokensSchema),
-    quote: (request: OneClickQuoteRequest) =>
-      call(`${base}/quote`, oneClickQuoteResponseSchema, { init: jsonPost(request) }),
+    quote: (request: OneClickQuoteRequest, signal?: AbortSignal) =>
+      call(`${base}/quote`, oneClickQuoteResponseSchema, {
+        init: signal ? { ...jsonPost(request), signal } : jsonPost(request),
+      }),
     status(depositAddress, depositMemo) {
       const params = new URLSearchParams({ depositAddress });
       if (depositMemo) params.set('depositMemo', depositMemo);

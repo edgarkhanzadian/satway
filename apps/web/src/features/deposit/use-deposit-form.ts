@@ -1,12 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { type SourceWallet, nextRefundField, walletAddressFor, walletCovers } from '@satway/chains';
-import { type OneClickToken, MAINNET_CONFIG as config, errorMessage } from '@satway/core';
+import {
+  type FetchLike,
+  type OneClickToken,
+  MAINNET_CONFIG as config,
+  errorMessage,
+} from '@satway/core';
 
 import {
   type ActiveDeposit,
   type Backend,
   type WalletAccount,
+  abortableFetch,
   downloadReceipt,
   rememberReceipt,
   useFlow,
@@ -15,6 +21,7 @@ import { firstRegistration } from './background-registration.js';
 import { claimDepositIndex, prepareDeposit } from './flow.js';
 import {
   type FormEffect,
+  type FormEvent,
   type FormView,
   INITIAL_FORM,
   formMachine,
@@ -60,6 +67,33 @@ function pickAsset(
   return tokens.find(t => walletCovers(source, t))?.assetId ?? base;
 }
 
+export interface QuoteRun {
+  backend: Backend;
+  signal: AbortSignal;
+  dispatch(event: FormEvent): void;
+  fetchFn?: FetchLike;
+}
+
+export async function runQuote(
+  run: QuoteRun,
+  effect: Extract<FormEffect, { type: 'quote' }>
+): Promise<void> {
+  try {
+    const prepared = await prepareDeposit(config, run.backend, effect.inputs, {
+      dry: effect.dry,
+      fetchFn: abortableFetch(run.signal, run.fetchFn),
+      signal: run.signal,
+    });
+    run.dispatch({ type: 'quoted', request: effect.request, prepared });
+  } catch (err) {
+    run.dispatch({
+      type: 'quote-failed',
+      request: effect.request,
+      message: errorMessage(err) ?? null,
+    });
+  }
+}
+
 export function useDepositForm(deps: DepositFormDeps): DepositForm {
   const { backend, account, source, tokens } = deps;
   const onActiveRef = useRef(deps.onActive);
@@ -70,17 +104,8 @@ export function useDepositForm(deps: DepositFormDeps): DepositForm {
   const flow = useFlow(formMachine, () => INITIAL_FORM, run);
   const { dispatch } = flow;
 
-  async function quote(effect: Extract<FormEffect, { type: 'quote' }>) {
-    try {
-      const prepared = await prepareDeposit(config, backend, effect.inputs, { dry: effect.dry });
-      dispatch({ type: 'quoted', request: effect.request, prepared });
-    } catch (err) {
-      dispatch({
-        type: 'quote-failed',
-        request: effect.request,
-        message: errorMessage(err) ?? null,
-      });
-    }
+  function quote(effect: Extract<FormEffect, { type: 'quote' }>) {
+    return runQuote({ backend, signal: flow.signal(effect.request), dispatch }, effect);
   }
 
   async function activate(effect: Extract<FormEffect, { type: 'activate' }>) {

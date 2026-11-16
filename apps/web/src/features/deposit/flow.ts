@@ -129,6 +129,7 @@ export function claimDepositIndex(
 export interface PrepareOptions {
   dry: boolean;
   fetchFn?: FetchLike;
+  signal?: AbortSignal;
   now?: Date;
   randomInt?(maxExclusive: number): number;
   localIndices?: readonly number[];
@@ -180,7 +181,7 @@ export async function prepareDeposit(
     dry: options.dry,
     now: options.now,
   });
-  const response = await backend.quote(request);
+  const response = await backend.quote(request, options.signal);
   assertQuoteMatchesRequest(request, response);
 
   const minimumSats = Number(response.quote.minAmountOut);

@@ -36,6 +36,22 @@ describe('createBackend', () => {
     expect(await createBackend(BASE).tokens()).toEqual(tokens);
   });
 
+  it('aborts a quote request when its signal aborts', async () => {
+    let passed: AbortSignal | null | undefined;
+    vi.stubGlobal('fetch', (_url: string, init?: RequestInit) => {
+      passed = init?.signal;
+      return new Promise<Response>((_, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+      });
+    });
+    const controller = new AbortController();
+    const attempt = createBackend(BASE).quote(quoteRequest(), controller.signal);
+    await Promise.resolve();
+    controller.abort(new Error('edited'));
+    await expect(attempt).rejects.toThrow();
+    expect(passed?.aborted).toBe(true);
+  });
+
   it.each([
     ['tokens', (b: ReturnType<typeof createBackend>) => b.tokens(), { tokens: [] }],
     ['a quote', (b: ReturnType<typeof createBackend>) => b.quote(quoteRequest()), { quote: {} }],

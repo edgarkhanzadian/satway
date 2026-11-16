@@ -16,6 +16,7 @@ import {
   pendingQuote,
   reduceForm,
 } from '../../../src/features/deposit/form-state.js';
+import { runQuote } from '../../../src/features/deposit/use-deposit-form.js';
 import { createFlowStore } from '../../../src/shared/flow-store.js';
 import { INPUTS, prepared } from './deposit-fixtures.js';
 
@@ -357,6 +358,37 @@ describe('deposit form regressions', () => {
       repriced: null,
       busy: false,
     });
+  });
+
+  it('an edit aborts the network calls of the quote that is running', async () => {
+    const seen: AbortSignal[] = [];
+    function fetchFn(_url: string, init?: RequestInit): Promise<Response> {
+      const signal = init?.signal;
+      if (!signal) return Promise.reject(new Error('no signal'));
+      seen.push(signal);
+      return new Promise((_, reject) => {
+        signal.addEventListener('abort', () => reject(new Error('aborted')));
+      });
+    }
+    const backend = {
+      tokens: () => Promise.reject(new Error('not used')),
+      quote: () => Promise.reject(new Error('not used')),
+      status: () => Promise.reject(new Error('not used')),
+      register: () => Promise.reject(new Error('not used')),
+    };
+    const s = createFlowStore(formMachine, INITIAL_FORM, effect => {
+      if (effect.type !== 'quote') return;
+      void runQuote(
+        { backend, signal: s.signal(effect.request), dispatch: s.dispatch, fetchFn },
+        effect
+      );
+    });
+    s.dispatch({ type: 'preview-requested', inputs: INPUTS });
+    await Promise.resolve();
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every(signal => !signal.aborted)).toBe(true);
+    s.dispatch({ type: 'edited' });
+    expect(seen.every(signal => signal.aborted)).toBe(true);
   });
 
   it('a late live quote for old inputs is never activated nor shown as a reprice', () => {

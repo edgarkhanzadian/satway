@@ -110,7 +110,7 @@ test.describe('H. the live quote at Continue is worse than the preview', () => {
     ],
   ] as const) {
     for (const factor of [1, 0.9]) {
-      test(`a late live quote after editing ${what} is discarded (live ×${factor})`, async ({
+      test(`a live quote in flight when ${what} is edited is aborted and never used (live ×${factor})`, async ({
         app,
         world,
         api,
@@ -127,8 +127,8 @@ test.describe('H. the live quote at Continue is worse than the preview', () => {
           'true'
         );
         held.release();
-        await expect.poll(() => world.oneClick.quotes.filter(q => !q.dry).length).toBe(1);
         await app.harnessIdle();
+        expect(world.oneClick.quotes.filter(q => !q.dry)).toEqual([]);
         expect(downloads).toEqual([]);
         expect((await app.storage())[RECEIPTS]).toBeUndefined();
         expect(api.depositPosts()).toEqual([]);
