@@ -4,12 +4,13 @@ import { css } from 'satway-styles/css';
 import { styled } from 'satway-styles/jsx';
 import { actions, button, field, notice, sheet } from 'satway-styles/recipes';
 
-import { type FetchLike, MAINNET_CONFIG as config, errorMessage } from '@satway/core';
+import { MAINNET_CONFIG as config, errorMessage } from '@satway/core';
 
 import {
   type Backend,
   type Receipt,
   type WalletAccount,
+  abortableFetch,
   checkProgress,
   loadReceipts,
   receiptId,
@@ -35,13 +36,6 @@ const entry = css({
 const entryLabel = css({ margin: 'space.00', textStyle: 'emphasis' });
 const entrySummary = css({ marginBlock: 'space.02', color: 'muted', fontSize: 'sm' });
 
-function signalled(signal: AbortSignal): FetchLike {
-  return (input, init) => {
-    const inner = init?.signal;
-    return fetch(input, { ...init, signal: inner ? AbortSignal.any([inner, signal]) : signal });
-  };
-}
-
 export function entryLabelOf(receipt: Receipt): string {
   return `${sendAmountText(sendAmountOf(receipt), receipt.origin.symbol)}, started ${new Date(receipt.createdAt).toLocaleString()}`;
 }
@@ -63,7 +57,7 @@ export function YourDeposits(props: {
         config,
         backend,
         effect.receipt,
-        signalled(flow.signal(effect.request))
+        abortableFetch(flow.signal(effect.request))
       );
       if (effect.type === 'check-entry') {
         dispatch({ type: 'entry-checked', request: effect.request, id: effect.id, snapshot });

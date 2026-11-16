@@ -28,6 +28,12 @@ export const sharedRestrictedSyntax = [
     message: 'Use async/await instead of .then().',
   },
   {
+    selector:
+      "MemberExpression[object.name='AbortSignal'][property.name=/^(any|timeout)$/], MemberExpression[object.name='Promise'][property.name='withResolvers'], MemberExpression[object.name=/^(Object|Map)$/][property.name='groupBy'], MemberExpression[object.name='Array'][property.name='fromAsync']",
+    message:
+      'This API is newer than the browsers the web app supports. Forward an abort into a new AbortController, or write the helper yourself.',
+  },
+  {
     selector: 'CallExpression[callee.type=/^(ArrowFunctionExpression|FunctionExpression)$/]',
     message:
       'Do not use an IIFE. Declare a named function and call it, or compute the value with a function.',

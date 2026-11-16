@@ -11,6 +11,7 @@ import {
 import {
   type Backend,
   type WithdrawalReceiptFile,
+  abortableFetch,
   activeWithdrawal,
   checkWithdrawal,
   forgetWithdrawal,
@@ -18,7 +19,7 @@ import {
   useFlow,
   withdrawalId,
 } from '../../shared/index.js';
-import { abortableFetch, abortableStatus } from './abortable.js';
+import { abortableStatus } from './abortable.js';
 import { loadKnownStatuses, rememberKnownStatus } from './entry-statuses.js';
 import { storedWithdrawal } from './stored-withdrawal.js';
 import { type ListIo, listRunner } from './withdrawal-list-effects.js';

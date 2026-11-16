@@ -9,6 +9,7 @@ import {
   type ActiveWithdrawal,
   type Backend,
   type WithdrawalReceiptFile,
+  abortableFetch,
   checkWithdrawal,
   downloadWithdrawalReceipt,
   forgetWithdrawalDraft,
@@ -17,7 +18,7 @@ import {
   useFlow,
   withdrawalId,
 } from '../../shared/index.js';
-import { abortableFetch, abortableStatus } from './abortable.js';
+import { abortableStatus } from './abortable.js';
 import { storedWithdrawal } from './stored-withdrawal.js';
 import { type TrackingIo, trackingRunner } from './tracking-effects.js';
 import {
