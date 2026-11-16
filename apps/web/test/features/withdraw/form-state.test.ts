@@ -17,6 +17,7 @@ import {
   formView,
   pendingQuote,
   reduceForm,
+  startSigning,
 } from '../../../src/features/withdraw/form-state.js';
 import { createFlowStore } from '../../../src/shared/flow-store.js';
 import { SENDER } from '../../shared/withdrawal-fixtures.js';
@@ -63,6 +64,7 @@ function steps() {
         inputs: FORM,
         mode: 'preview',
         previous: null,
+        notice: null,
       }),
       'quoting a preview again': at({
         kind: 'quoting',
@@ -70,6 +72,7 @@ function steps() {
         inputs: FORM,
         mode: 'preview',
         previous: previewed,
+        notice: null,
       }),
       'quoting live': at({
         kind: 'quoting',
@@ -77,6 +80,7 @@ function steps() {
         inputs: FORM,
         mode: 'live',
         previous: previewed,
+        notice: null,
       }),
       previewed: at(previewed),
       confirming: at(confirming),
@@ -160,7 +164,14 @@ describe('reduceForm, every event in every state', () => {
     function quoting(previous: Previewed | null): FormState {
       return {
         last: LAST + 1,
-        step: { kind: 'quoting', request: LAST + 1, inputs: EDITED, mode: 'preview', previous },
+        step: {
+          kind: 'quoting',
+          request: LAST + 1,
+          inputs: EDITED,
+          mode: 'preview',
+          previous,
+          notice: null,
+        },
       };
     }
     expectTable(
@@ -174,15 +185,29 @@ describe('reduceForm, every event in every state', () => {
     );
   });
 
-  describe('live-requested', () => {
+  describe('live-requested for inputs other than the previewed ones', () => {
+    expectTable(
+      () => ({ type: 'live-requested', inputs: EDITED }),
+      () => ({})
+    );
+  });
+
+  describe('live-requested for the previewed inputs', () => {
     function quoting(previous: Previewed): FormState {
       return {
         last: LAST + 1,
-        step: { kind: 'quoting', request: LAST + 1, inputs: EDITED, mode: 'live', previous },
+        step: {
+          kind: 'quoting',
+          request: LAST + 1,
+          inputs: FORM,
+          mode: 'live',
+          previous,
+          notice: null,
+        },
       };
     }
     expectTable(
-      () => ({ type: 'live-requested', inputs: EDITED }),
+      () => ({ type: 'live-requested', inputs: { ...FORM } }),
       s => ({
         previewed: quoting(s.previewed),
         'failed under a preview': quoting(s.previewed),
@@ -288,11 +313,27 @@ describe('reduceForm, every event in every state', () => {
       () => ({ type: 'wallet-declined', message: 'Declined' }),
       s => ({
         editing: at({ kind: 'failed', message: 'Declined', after: null }),
+        'quoting a first preview': at(declinedWhileQuoting('preview', null)),
+        'quoting a preview again': at(declinedWhileQuoting('preview', s.previewed)),
+        'quoting live': at(declinedWhileQuoting('live', s.previewed)),
+        previewed: at({ kind: 'failed', message: 'Declined', after: s.previewed }),
+        confirming: at({ kind: 'failed', message: 'Declined', after: s.confirming }),
         signing: at({ kind: 'failed', message: 'Declined', after: s.confirming }),
+        'failed with nothing quoted': at({ kind: 'failed', message: 'Declined', after: null }),
+        'failed under a preview': at({ kind: 'failed', message: 'Declined', after: s.previewed }),
+        'failed under a live quote': at({
+          kind: 'failed',
+          message: 'Declined',
+          after: s.confirming,
+        }),
       })
     );
   });
 });
+
+function declinedWhileQuoting(mode: 'preview' | 'live', previous: Previewed | null): FormStep {
+  return { kind: 'quoting', request: LAST, inputs: FORM, mode, previous, notice: 'Declined' };
+}
 
 describe('formView', () => {
   it('derives busy from quoting and keeps the earlier preview on screen while it works', () => {
@@ -384,6 +425,29 @@ describe('regressions', () => {
     expect(flow.get().step).toMatchObject({ kind: 'confirming', inputs: FORM, live: quotes.live });
   });
 
+  it('decline message survives an edit and a new quote during the prompt', () => {
+    const flow = store();
+    flow.dispatch({ type: 'preview-requested', inputs: FORM });
+    flow.dispatch({ type: 'wallet-declined', message: 'Nothing was signed' });
+    expect(formView(flow.get().step)).toMatchObject({ busy: true, error: 'Nothing was signed' });
+    flow.dispatch({ type: 'preview-ready', request: pending(flow.get()), preview: quotes.preview });
+    expect(formView(flow.get().step)).toMatchObject({
+      error: 'Nothing was signed',
+      preview: quotes.preview,
+    });
+    flow.dispatch({ type: 'live-requested', inputs: FORM });
+    expect(formView(flow.get().step).error).toBeNull();
+  });
+
+  it('a live quote is asked only for the inputs that were previewed', () => {
+    const flow = store();
+    flow.dispatch({ type: 'preview-requested', inputs: FORM });
+    flow.dispatch({ type: 'preview-ready', request: pending(flow.get()), preview: quotes.preview });
+    const previewed = flow.get();
+    flow.dispatch({ type: 'live-requested', inputs: EDITED });
+    expect(flow.get()).toBe(previewed);
+  });
+
   it('a decline keeps the live quote so the user can sign again', () => {
     const s = steps();
     const declined = reduceForm(s.all.signing, { type: 'wallet-declined', message: 'No' });
@@ -391,5 +455,57 @@ describe('regressions', () => {
     expect(formView(declined.step)).toMatchObject({ error: 'No', live: quotes.live });
     expect(again.step.kind).toBe('signing');
     expect(formView(again.step).error).toBeNull();
+  });
+});
+
+describe('startSigning', () => {
+  const NOW = new Date('2026-11-17T12:00:00.000Z');
+
+  function fresh(): LiveQuote {
+    return {
+      ...quotes.live,
+      receipt: {
+        ...quotes.live.receipt,
+        preparedAt: new Date(NOW.getTime() - 60_000).toISOString(),
+        quoteDeadline: new Date(NOW.getTime() + 48 * 3_600_000).toISOString(),
+      },
+    };
+  }
+
+  function asFlow(state: FormState) {
+    const store = createFlowStore(formMachine, state, () => undefined);
+    return { current: store.get, dispatch: store.dispatch, get: store.get };
+  }
+
+  function confirmingStore(live: LiveQuote) {
+    const step: Confirming = { kind: 'confirming', inputs: FORM, preview: quotes.preview, live };
+    return asFlow(at(step));
+  }
+
+  it('signs the quote the state holds now, with the token of the inputs it was made for', () => {
+    const live = fresh();
+    const flow = confirmingStore(live);
+    const signing = startSigning(flow, NOW);
+    expect(signing?.live).toBe(live);
+    expect(signing?.inputs.token).toBe(FORM.token);
+    expect(flow.get().step.kind).toBe('signing');
+  });
+
+  it('refuses a stale quote without opening the wallet, and keeps the preview', () => {
+    const flow = confirmingStore(quotes.live);
+    const stale = new Date(Date.parse(quotes.live.receipt.preparedAt) + 16 * 60_000);
+    expect(startSigning(flow, stale)).toBeNull();
+    expect(flow.get().step).toMatchObject({ kind: 'failed', after: { kind: 'previewed' } });
+  });
+
+  it('does nothing when no live quote is on screen any more, or it is already being signed', () => {
+    const editing = asFlow(INITIAL_FORM);
+    expect(startSigning(editing, NOW)).toBeNull();
+    expect(editing.get()).toBe(INITIAL_FORM);
+    const flow = confirmingStore(fresh());
+    startSigning(flow, NOW);
+    const signing = flow.get();
+    expect(startSigning(flow, NOW)).toBeNull();
+    expect(flow.get()).toBe(signing);
   });
 });

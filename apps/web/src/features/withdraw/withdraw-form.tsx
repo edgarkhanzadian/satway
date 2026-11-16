@@ -27,10 +27,16 @@ import {
   previewFor,
   sats,
   satsOrNull,
-  signingRefusal,
   withdrawalDestinations,
 } from './flow.js';
-import { type FormEvent, INITIAL_FORM, formMachine, formView } from './form-state.js';
+import {
+  type FormEvent,
+  INITIAL_FORM,
+  type Quoting,
+  formMachine,
+  formView,
+  startSigning,
+} from './form-state.js';
 import { ConfirmLiveQuote, PreviewDetails } from './quote-details.js';
 import { DECLINED_MESSAGE, signWithdrawal } from './sign-withdrawal.js';
 
@@ -142,20 +148,21 @@ export function WithdrawForm(props: WithdrawFormProps) {
 
   const form = token ? { token, amount, recipient, refundTo, slippageBps } : null;
 
-  function startedQuote(event: FormEvent): number | null {
+  function startedQuote(event: FormEvent): Quoting | null {
     const before = flow.current();
     dispatch(event);
     const after = flow.current();
     if (after.last === before.last || after.step.kind !== 'quoting') return null;
-    return after.step.request;
+    return after.step;
   }
 
   async function getPreview() {
     if (!form) return;
-    const request = startedQuote({ type: 'preview-requested', inputs: form });
-    if (request === null) return;
+    const quoting = startedQuote({ type: 'preview-requested', inputs: form });
+    if (quoting === null) return;
+    const { request } = quoting;
     try {
-      const preview = await previewFor(deps, form);
+      const preview = await previewFor(deps, quoting.inputs);
       dispatch({ type: 'preview-ready', request, preview });
     } catch (err) {
       dispatch({
@@ -167,13 +174,19 @@ export function WithdrawForm(props: WithdrawFormProps) {
   }
 
   async function getLiveQuote() {
-    if (!form || !view.preview) return;
-    const preview = view.preview;
-    const request = startedQuote({ type: 'live-requested', inputs: form });
-    if (request === null) return;
+    if (!form) return;
+    const quoting = startedQuote({ type: 'live-requested', inputs: form });
+    if (quoting === null || quoting.previous === null) return;
+    const { request, inputs, previous } = quoting;
     const signal = flow.signal(request);
     try {
-      const next = await liveQuoteFor(deps, form, account.stacksAddress, preview, signal);
+      const next = await liveQuoteFor(
+        deps,
+        inputs,
+        account.stacksAddress,
+        previous.preview,
+        signal
+      );
       if (signal.aborted) return;
       setBalance(next.balanceSats);
       dispatch({ type: 'live-ready', request, live: next });
@@ -189,18 +202,13 @@ export function WithdrawForm(props: WithdrawFormProps) {
   const walletOpen = view.signing || props.walletPromptOpen;
 
   async function sign() {
-    const quote = view.live;
-    if (!token || !quote || walletOpen) return;
-    const refusal = signingRefusal(config, quote.receipt, new Date());
-    if (refusal) {
-      dispatch({ type: 'sign-refused', message: refusal });
-      return;
-    }
-    dispatch({ type: 'sign-started' });
+    if (props.walletPromptOpen) return;
+    const signing = startSigning(flow, new Date());
+    if (!signing) return;
     const { onSigning } = props;
     onSigning(true);
     try {
-      const outcome = await signWithdrawal(props, quote, token);
+      const outcome = await signWithdrawal(props, signing.live, signing.inputs.token);
       dispatch(
         outcome === 'declined'
           ? { type: 'wallet-declined', message: DECLINED_MESSAGE }
