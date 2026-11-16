@@ -8,7 +8,7 @@ export type Reaction =
   | { kind: 'approve' }
   | { kind: 'reject'; code: number; message: string }
   | { kind: 'hang' }
-  | { kind: 'late'; gate: Promise<void> }
+  | { kind: 'late'; gate: Promise<void>; then: 'approve' | { code: number; message: string } }
   | { kind: 'malformed'; value: unknown }
   | { kind: 'lost'; then: 'hang' | { code: number; message: string } };
 
@@ -73,9 +73,13 @@ export class Behaviour {
     this.add(method, { kind: 'hang' }, options.times ?? 1);
   }
 
-  late(method: string): Gate {
+  late(method: string, options: { reject?: { code: number; message?: string } } = {}): Gate {
     const gate = new Deferred();
-    this.add(method, { kind: 'late', gate: gate.promise }, 1);
+    const reject = options.reject;
+    const then = reject
+      ? { code: reject.code, message: reject.message ?? 'User rejected the request.' }
+      : 'approve';
+    this.add(method, { kind: 'late', gate: gate.promise, then }, 1);
     return gate;
   }
 
@@ -110,6 +114,7 @@ export class Behaviour {
         return new Promise<never>(() => undefined);
       case 'late':
         await reaction.gate;
+        if (reaction.then !== 'approve') return { ok: false, error: reaction.then };
         return this.settle(approve);
       case 'malformed':
         return { ok: true, value: reaction.value };

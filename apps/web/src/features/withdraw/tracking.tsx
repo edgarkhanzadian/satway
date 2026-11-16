@@ -71,12 +71,16 @@ export function WithdrawalTracking(props: {
   backend: Backend;
   receipt: WithdrawalReceiptFile;
   receiptUnsaved: boolean;
+  walletPrompt: boolean;
   onRoute(route: WithdrawalRouteUpdate | null): void;
   onReceipt(receipt: WithdrawalReceiptFile): void;
   onDiscard(receipt: WithdrawalReceiptFile): void;
   onDone(): void;
 }) {
   const { receipt } = props;
+  if (receipt.stacksTxid === null && props.walletPrompt) {
+    return <WaitingForWallet receipt={receipt} onRoute={props.onRoute} />;
+  }
   if (receipt.stacksTxid === null) {
     return (
       <UnconfirmedSignature
@@ -88,6 +92,32 @@ export function WithdrawalTracking(props: {
     );
   }
   return <Following {...props} stacksTxid={receipt.stacksTxid} />;
+}
+
+function WaitingForWallet(props: {
+  receipt: WithdrawalReceiptFile;
+  onRoute(route: WithdrawalRouteUpdate | null): void;
+}) {
+  const { receipt, onRoute } = props;
+
+  useEffect(() => {
+    onRoute({ destination: destinationOf(receipt), milestones: null });
+  }, [onRoute, receipt]);
+
+  return (
+    <section className={sheet()}>
+      <styled.h2 textStyle="heading" marginBottom="space.06">
+        Waiting for your wallet
+      </styled.h2>
+      <p className={notice({ tone: 'status' })} role="status">
+        Your Stacks wallet is asking you to sign this withdrawal. Approve or decline it there; this
+        page updates as soon as the wallet answers.
+      </p>
+      <dl className={details()}>
+        <ReceiptFacts receipt={receipt} />
+      </dl>
+    </section>
+  );
 }
 
 function UnconfirmedSignature(props: {

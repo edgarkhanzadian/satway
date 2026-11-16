@@ -15,18 +15,20 @@ import {
 } from '@satway/core';
 
 import {
+  type ActiveWithdrawal,
   type Backend,
   type WalletAccount,
   type WithdrawalBackend,
-  type WithdrawalReceiptFile,
   activeWithdrawal,
   downloadWithdrawalReceipt,
   forgetWithdrawalDraft,
   isStacksWalletRejection,
   latestRequests,
+  loadWithdrawals,
   rememberWithdrawal,
   setActiveWithdrawal,
   withStacksTxid,
+  withdrawalId,
   withdrawalReceiptOf,
 } from '../../shared/index.js';
 import type { WithdrawalRouteUpdate } from '../../ui/index.js';
@@ -69,48 +71,51 @@ export interface WithdrawProps {
   quotes: WithdrawalBackend;
   account: WalletAccount | null;
   destinationWallet: SourceWallet | null;
-  resume: WithdrawalReceiptFile | null;
+  active: ActiveWithdrawal | null;
+  onActive(update: (current: ActiveWithdrawal | null) => ActiveWithdrawal | null): void;
   requestWithdrawal(call: WithdrawalContractCall): Promise<string>;
   onRoute(route: WithdrawalRouteUpdate | null): void;
-  onClosed(): void;
 }
 
-interface Active {
-  receipt: WithdrawalReceiptFile;
-  receiptUnsaved: boolean;
+export function storedActiveWithdrawal(): ActiveWithdrawal | null {
+  const receipt = activeWithdrawal(config);
+  return receipt ? { receipt, receiptUnsaved: false, walletPrompt: false } : null;
 }
 
 export function Withdraw(props: WithdrawProps) {
-  const [active, setActive] = useState<Active | null>(() => {
-    const receipt = props.resume ?? activeWithdrawal(config);
-    return receipt ? { receipt, receiptUnsaved: false } : null;
-  });
-  const { onRoute } = props;
+  const { active, onActive, onRoute } = props;
+  const [signingHere, setSigningHere] = useState(false);
   useEffect(() => () => onRoute(null), [onRoute]);
 
-  if (active) {
+  if (active && !(active.walletPrompt && signingHere)) {
     return (
       <WithdrawalTracking
         backend={props.backend}
         receipt={active.receipt}
         receiptUnsaved={active.receiptUnsaved}
+        walletPrompt={active.walletPrompt}
         onRoute={onRoute}
         onReceipt={receipt => {
           const remembered = rememberWithdrawal(config, receipt);
           setActiveWithdrawal(receipt);
           downloadWithdrawalReceipt(receipt);
-          setActive({ receipt, receiptUnsaved: !remembered });
+          onActive(() => ({ receipt, receiptUnsaved: !remembered, walletPrompt: false }));
         }}
         onDiscard={receipt => {
+          const id = withdrawalId(receipt);
+          const stored = loadWithdrawals(config).find(r => withdrawalId(r) === id);
+          if (stored && stored.stacksTxid !== null) {
+            setActiveWithdrawal(stored);
+            onActive(() => ({ receipt: stored, receiptUnsaved: false, walletPrompt: false }));
+            return;
+          }
           forgetWithdrawalDraft(config, receipt);
           setActiveWithdrawal(null);
-          setActive(null);
-          props.onClosed();
+          onActive(() => null);
         }}
         onDone={() => {
           setActiveWithdrawal(null);
-          setActive(null);
-          props.onClosed();
+          onActive(() => null);
         }}
       />
     );
@@ -150,19 +155,13 @@ export function Withdraw(props: WithdrawProps) {
     );
   }
 
-  return (
-    <WithdrawForm
-      {...props}
-      account={props.account}
-      onStarted={(receipt, receiptUnsaved) => setActive({ receipt, receiptUnsaved })}
-    />
-  );
+  return <WithdrawForm {...props} account={props.account} onSigning={setSigningHere} />;
 }
 
 function WithdrawForm(
   props: WithdrawProps & {
     account: WalletAccount;
-    onStarted(receipt: WithdrawalReceiptFile, receiptUnsaved: boolean): void;
+    onSigning(signing: boolean): void;
   }
 ) {
   const { backend, quotes, account, destinationWallet, onRoute } = props;
@@ -316,24 +315,35 @@ function WithdrawForm(
     });
     const draftSaved = rememberWithdrawal(config, draft);
     if (draftSaved) setActiveWithdrawal(draft);
+    const mine = withdrawalId(draft);
+    const { onActive, onSigning } = props;
+    function show(next: ActiveWithdrawal | null) {
+      onActive(current =>
+        current === null || withdrawalId(current.receipt) === mine ? next : current
+      );
+    }
+    onSigning(true);
+    show({ receipt: draft, receiptUnsaved: !draftSaved, walletPrompt: true });
     try {
       const txid = await props.requestWithdrawal(quote.receipt.contractCall);
       const receipt = withStacksTxid(draft, txid);
       const remembered = rememberWithdrawal(config, receipt);
       setActiveWithdrawal(receipt);
       downloadWithdrawalReceipt(receipt);
-      props.onStarted(receipt, !remembered);
+      show({ receipt, receiptUnsaved: !remembered, walletPrompt: false });
     } catch (err) {
       if (isStacksWalletRejection(err)) {
         forgetWithdrawalDraft(config, draft);
         setActiveWithdrawal(null);
+        show(null);
         setError('You declined the request in your wallet, so nothing was signed or sent.');
         return;
       }
       setError(null);
-      props.onStarted(draft, !draftSaved);
+      show({ receipt: draft, receiptUnsaved: !draftSaved, walletPrompt: false });
     } finally {
       setSigning(false);
+      onSigning(false);
     }
   }
 

@@ -40,6 +40,12 @@ export interface WithdrawalReceiptFile {
   quoteDeadline: string;
 }
 
+export interface ActiveWithdrawal {
+  receipt: WithdrawalReceiptFile;
+  receiptUnsaved: boolean;
+  walletPrompt: boolean;
+}
+
 const text = z.string().min(1);
 const hexText = z.string().regex(/^(?:[0-9a-f]{2})+$/);
 

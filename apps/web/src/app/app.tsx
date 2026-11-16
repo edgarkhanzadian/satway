@@ -13,12 +13,12 @@ import {
   requestWithdrawalWithWallet,
   signReclaimWithWallet,
 } from '../features/stacks-wallet/index.js';
-import { FollowWithdrawal, Withdraw } from '../features/withdraw/index.js';
+import { FollowWithdrawal, Withdraw, storedActiveWithdrawal } from '../features/withdraw/index.js';
 import {
   type ActiveDeposit,
+  type ActiveWithdrawal,
   type Receipt,
   type WalletAccount,
-  type WithdrawalReceiptFile,
   createBackend,
   createWithdrawalBackend,
 } from '../shared/index.js';
@@ -40,7 +40,9 @@ export function App() {
   const [tab, setTab] = useState<'deposit' | 'withdraw' | 'recover'>('deposit');
   const quotes = useMemo(() => createWithdrawalBackend(API_URL), []);
   const [withdrawRoute, setWithdrawRoute] = useState<WithdrawalRouteUpdate | null>(null);
-  const [withdrawResume, setWithdrawResume] = useState<WithdrawalReceiptFile | null>(null);
+  const [activeWithdrawal, setActiveWithdrawal] = useState<ActiveWithdrawal | null>(
+    storedActiveWithdrawal
+  );
   const withdraw = tab === 'withdraw';
   const [resume, setResume] = useState<Receipt | null>(null);
   const [active, setActive] = useState<ActiveDeposit | null>(null);
@@ -220,15 +222,14 @@ export function App() {
 
           {tab === 'withdraw' && (
             <Withdraw
-              key={withdrawResume?.depositAddress ?? 'new'}
               backend={backend}
               quotes={quotes}
               account={account}
               destinationWallet={source}
-              resume={withdrawResume}
+              active={activeWithdrawal}
+              onActive={setActiveWithdrawal}
               requestWithdrawal={requestWithdrawalWithWallet}
               onRoute={setWithdrawRoute}
-              onClosed={() => setWithdrawResume(null)}
             />
           )}
 
@@ -237,7 +238,7 @@ export function App() {
               <FollowWithdrawal
                 backend={backend}
                 onTrack={receipt => {
-                  setWithdrawResume(receipt);
+                  setActiveWithdrawal({ receipt, receiptUnsaved: false, walletPrompt: false });
                   setTab('withdraw');
                 }}
               />

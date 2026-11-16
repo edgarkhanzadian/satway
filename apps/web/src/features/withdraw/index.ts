@@ -1,2 +1,2 @@
 export { FollowWithdrawal } from './follow-withdrawal.js';
-export { Withdraw } from './withdraw.js';
+export { Withdraw, storedActiveWithdrawal } from './withdraw.js';
