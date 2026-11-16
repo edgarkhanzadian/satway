@@ -101,4 +101,42 @@ test.describe('H. the live quote at Continue is worse than the preview', () => {
     await app.continue();
     await expect(app.page.getByText(/^The price moved/)).toHaveCount(0);
   });
+
+  for (const [what, edit] of [
+    ['the amount', (app: SatwayApp) => app.amountInput.fill('200')],
+    [
+      'the refund address',
+      (app: SatwayApp) => app.refundInput.fill('0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed'),
+    ],
+  ] as const) {
+    for (const factor of [1, 0.9]) {
+      test(`a late live quote after editing ${what} is discarded (live ×${factor})`, async ({
+        app,
+        world,
+        api,
+      }) => {
+        const downloads = await quoted(app);
+        await app.getQuote();
+        if (factor !== 1) lowerLiveQuote(world, factor);
+        const held = world.hold({ service: 'oneclick', path: /^\/v0\/quote$/ });
+        await app.page.getByRole('button', { name: 'Continue' }).click();
+        await expect(app.page.getByRole('button', { name: 'Working…' })).toBeVisible();
+        await edit(app);
+        await expect(app.page.getByRole('button', { name: 'Get quote' })).not.toHaveAttribute(
+          'aria-disabled',
+          'true'
+        );
+        held.release();
+        await expect.poll(() => world.oneClick.quotes.filter(q => !q.dry).length).toBe(1);
+        await app.harnessIdle();
+        expect(downloads).toEqual([]);
+        expect((await app.storage())[RECEIPTS]).toBeUndefined();
+        expect(api.depositPosts()).toEqual([]);
+        await expect(app.page.getByRole('heading', { name: 'Deposit in progress' })).toHaveCount(0);
+        await expect(app.page.getByText(/^The price moved/)).toHaveCount(0);
+        await expect(app.page.getByRole('button', { name: 'Continue' })).toHaveCount(0);
+        await expect(app.definition('You receive about')).toHaveCount(0);
+      });
+    }
+  }
 });

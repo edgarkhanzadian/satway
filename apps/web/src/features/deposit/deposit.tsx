@@ -119,6 +119,13 @@ export function Deposit(props: {
   const [previews] = useState(latestRequests);
   const [tokensFailed, setTokensFailed] = useState(false);
   const [tokenAttempt, setTokenAttempt] = useState(0);
+  const activating = useRef(false);
+  const cancelPreviews = useRef(() => {
+    previews.cancel();
+    setPreview(null);
+    setRepriced(null);
+    if (!activating.current) setBusy(false);
+  });
 
   useEffect(() => {
     async function loadTokens() {
@@ -161,10 +168,9 @@ export function Deposit(props: {
     autofilledRefund.current = next.autofilled;
     if (next.value !== refundRef.current) {
       setRefundTo(next.value);
-      previews.cancel();
-      setPreview(null);
+      cancelPreviews.current();
     }
-  }, [walletRefund, previews]);
+  }, [walletRefund]);
 
   useEffect(() => {
     if (active) return;
@@ -174,28 +180,48 @@ export function Deposit(props: {
 
   async function run(dry: boolean) {
     if (!token || !account) return;
+    const shown = preview;
     const isLatest = previews.begin();
     setBusy(true);
     setError(null);
+    setRepriced(null);
+    let prepared: Prepared;
     try {
-      const prepared = await prepareDeposit(
+      prepared = await prepareDeposit(
         config,
         backend,
         { ...account, token, amount, refundTo },
         { dry }
       );
-      if (dry) {
-        if (isLatest()) setPreview(prepared);
-        return;
+    } catch (err) {
+      if (isLatest()) {
+        setError(errorMessage(err) ?? null);
+        setBusy(false);
       }
-      if (preview && liveQuoteWorse(preview, prepared, config.slippageBps)) {
-        setRepriced(prepared);
-        return;
-      }
+      return;
+    }
+    if (!isLatest()) return;
+    if (dry) {
+      setPreview(prepared);
+      setBusy(false);
+      return;
+    }
+    if (shown && liveQuoteWorse(shown, prepared, config.slippageBps)) {
+      setRepriced(prepared);
+      setBusy(false);
+      return;
+    }
+    await activateNow(prepared);
+  }
+
+  async function activateNow(prepared: Prepared) {
+    activating.current = true;
+    try {
       await activate(prepared);
     } catch (err) {
-      if (!dry || isLatest()) setError(errorMessage(err) ?? null);
+      setError(errorMessage(err) ?? null);
     } finally {
+      activating.current = false;
       setBusy(false);
     }
   }
@@ -225,19 +251,11 @@ export function Deposit(props: {
     }
     setBusy(true);
     setError(null);
-    try {
-      await activate(live);
-    } catch (err) {
-      setError(errorMessage(err) ?? null);
-    } finally {
-      setBusy(false);
-    }
+    await activateNow(live);
   }
 
   function inputsChanged() {
-    previews.cancel();
-    setPreview(null);
-    setRepriced(null);
+    cancelPreviews.current();
   }
 
   if (active) {
