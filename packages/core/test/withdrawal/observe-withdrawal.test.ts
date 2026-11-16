@@ -109,6 +109,35 @@ describe('observeWithdrawal on the real accepted withdrawal 5131', () => {
     });
     const result = await observe(watched, routesFor(W), status);
     expect(result.progress).toMatchObject({ stage: 'done', terminal: true });
+    expect(result.facts.destinationTxHashes).toEqual([hash]);
+  });
+
+  it('shows EVM delivery hashes 0x-prefixed and lowercase, however 1Click spells them', async () => {
+    const status = statusOf(watched.quoteResponse, 'SUCCESS', {
+      amountOut: '6515571',
+      destinationChainTxHashes: [
+        { hash: `0x${'AB'.repeat(32)}`, explorerUrl: null },
+        { hash: 'cd'.repeat(32), explorerUrl: null },
+        { hash: `0x${'ab'.repeat(32)}`, explorerUrl: null },
+      ],
+    });
+    const result = await observe(watched, routesFor(W), status);
+    expect(result.facts.destinationTxHashes).toEqual([
+      `0x${'ab'.repeat(32)}`,
+      `0x${'cd'.repeat(32)}`,
+    ]);
+  });
+
+  it('keeps delivery hashes bare for a destination that is not an EVM address', async () => {
+    const quoteResponse = {
+      ...watched.quoteResponse,
+      quoteRequest: { ...watched.quoteResponse.quoteRequest, recipient: 'not-an-evm-address' },
+    };
+    const status = statusOf(quoteResponse, 'SUCCESS', {
+      amountOut: '6515571',
+      destinationChainTxHashes: [{ hash: `0x${'ab'.repeat(32)}`, explorerUrl: null }],
+    });
+    const result = await observe({ ...watched, quoteResponse }, routesFor(W), status);
     expect(result.facts.destinationTxHashes).toEqual(['ab'.repeat(32)]);
   });
 

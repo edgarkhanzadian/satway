@@ -91,7 +91,7 @@ test.describe('X1. a withdrawal that works, from sBTC to another chain', () => {
     await expect(app.page.getByRole('heading', { name: 'Withdrawal complete' })).toBeVisible();
     await withdraw.expectSteps(STEP_NAMES.map(() => 'Done'));
     for (const stop of WITHDRAWAL_STOPS) await expect(withdraw.stop(stop)).toContainText('Done');
-    await expect(app.definition('Delivery transaction')).toContainText(hash.replace(/^0x/, ''));
+    await expect(app.definition('Delivery transaction')).toHaveText(hash.toLowerCase());
     await expect(app.definition('Signer fee charged')).toHaveText(
       `${SIGNER_FEE_SATS.toLocaleString('en-US')} sats`
     );

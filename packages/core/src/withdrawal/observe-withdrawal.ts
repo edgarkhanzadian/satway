@@ -5,7 +5,7 @@ import {
   StatusEchoMismatchError,
   type SwapRefund,
   assertStatusMatchesQuote,
-  destinationTxHashesOf,
+  deliveryTxHashesOf,
   parseOneClickStatus,
   refundOf,
 } from '../oneclick/index.js';
@@ -206,7 +206,10 @@ export async function observeWithdrawal(
     payoutVerified: payout?.ok ?? false,
     swapStatus: swap,
     swapEcho: echo.state,
-    destinationTxHashes: destinationTxHashesOf(swapStatus),
+    destinationTxHashes: deliveryTxHashesOf(
+      swapStatus,
+      watched.quoteResponse.quoteRequest.recipient
+    ),
     refund,
     deadlinePassed,
     mismatches,

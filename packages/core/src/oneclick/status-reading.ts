@@ -13,6 +13,16 @@ export function destinationTxHashesOf(status: OneClickStatusResponse | null): st
   return [...new Set(hashes.filter(h => h !== null))];
 }
 
+const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+
+export function deliveryTxHashesOf(
+  status: OneClickStatusResponse | null,
+  recipient: string
+): string[] {
+  const hashes = destinationTxHashesOf(status);
+  return EVM_ADDRESS.test(recipient) ? hashes.map(h => `0x${h}`) : hashes;
+}
+
 function satsOf(text: string | undefined | null): number | null {
   if (text === undefined || text === null || !/^\d+$/.test(text)) return null;
   const n = Number(text);
