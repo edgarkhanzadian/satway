@@ -133,7 +133,7 @@ export function Recover(props: {
   const plan = snapshot
     ? planReclaim({
         outputs: snapshot.outputs,
-        selected: snapshot.payout,
+        selected: snapshot.payouts.find(o => !o.spent) ?? null,
         tipHeight: snapshot.tipHeight,
         reclaimLockBlocks: receipt?.reclaimLockBlocks ?? config.reclaimLockBlocks,
       })

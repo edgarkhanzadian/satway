@@ -202,13 +202,12 @@ export async function fetchTransaction(
 export interface DepositOutputs {
   outputs: AddressOutput[];
   truncated: boolean;
-  historyRead: boolean;
+  foreignTxids: string[];
   requests: number;
 }
 
 export interface DepositOutputsOptions {
   txids?: readonly string[];
-  history?: 'always' | 'never' | 'when-no-txid-match';
   maxPages?: number;
   fetchFn?: FetchLike;
 }
@@ -228,40 +227,34 @@ export async function fetchDepositOutputs(
 ): Promise<DepositOutputs> {
   const fetchFn = options.fetchFn ?? defaultFetch;
   const seen = new Map<string, SeenOutput>();
-  let requests = 0;
-  let matched = false;
-  const txids = [...new Set((options.txids ?? []).map(t => t.toLowerCase()))].filter(t =>
-    TXID.test(t)
+  const history = await fetchAddressHistory(btcApiUrl, depositAddress, depositScriptPubKey, {
+    maxPages: options.maxPages,
+    fetchFn,
+  });
+  let requests = history.requests;
+  addSeen(seen, history.outputs);
+  const unspent = await fetchUnspentOutputs(btcApiUrl, depositAddress, fetchFn);
+  requests += 1;
+  const seenTxids = new Set([...seen.values(), ...unspent].map(o => o.txid.toLowerCase()));
+  const txids = [...new Set((options.txids ?? []).map(t => t.toLowerCase()))].filter(
+    t => TXID.test(t) && !seenTxids.has(t)
   );
+  const foreignTxids: string[] = [];
   for (const txid of txids.slice(0, MAX_DIRECT_TX_LOOKUPS)) {
     const tx = await fetchTransaction(btcApiUrl, txid, fetchFn);
     requests += 1;
     if (!tx) continue;
     const found = seenInTx(tx, depositScriptPubKey);
-    if (found.length > 0) matched = true;
+    if (found.length === 0) foreignTxids.push(txid);
     addSeen(seen, found);
   }
-  const mode = options.history ?? 'when-no-txid-match';
-  const readHistory = mode === 'always' || (mode === 'when-no-txid-match' && !matched);
-  let truncated = false;
-  if (readHistory) {
-    const history = await fetchAddressHistory(btcApiUrl, depositAddress, depositScriptPubKey, {
-      maxPages: options.maxPages,
-      fetchFn,
-    });
-    requests += history.requests;
-    truncated = history.truncated;
-    addSeen(seen, history.outputs);
-  }
-  const unspent = await fetchUnspentOutputs(btcApiUrl, depositAddress, fetchFn);
-  requests += 1;
   const unspentKeys = new Set(unspent.map(outpointOf));
   const outputs: AddressOutput[] = [...unspent];
   for (const [key, o] of seen) {
     if (unspentKeys.has(key)) continue;
     outputs.push({ ...o, spent: o.confirmed });
   }
-  return { outputs, truncated, historyRead: readHistory, requests };
+  return { outputs, truncated: history.truncated, foreignTxids, requests };
 }
 
 export interface OutpointSnapshot {
@@ -276,7 +269,6 @@ export async function snapshotOutpoints(
   options: { maxPages?: number; fetchFn?: FetchLike } = {}
 ): Promise<OutpointSnapshot> {
   const res = await fetchDepositOutputs(btcApiUrl, depositAddress, depositScriptPubKey, {
-    history: 'always',
     maxPages: options.maxPages,
     fetchFn: options.fetchFn,
   });

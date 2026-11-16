@@ -7,9 +7,11 @@ import type { AddressOutput } from '@satway/core';
 
 import type { RegistrationErrorNote, Snapshot } from '../../src/shared/progress.js';
 import {
+  ForeignPayoutNotice,
   MintUnknownNotice,
+  PayoutDetails,
   RegistrationNotices,
-  otherNote,
+  payoutNote,
   registrationNoticeGroups,
 } from '../../src/ui/payout-notes.js';
 import { SendRecordView } from '../../src/ui/send-record-view.js';
@@ -25,6 +27,28 @@ const PAYOUT: AddressOutput = {
   spent: false,
 };
 const OUT = `${TXID}:0`;
+const EMPTY: Snapshot = {
+  progress: {
+    stage: 'minting',
+    message: 'm.',
+    terminal: false,
+    needsNotification: false,
+    blocksUntilReclaim: null,
+  },
+  swap: null,
+  payouts: [],
+  belowMinimum: [],
+  foreignTxids: [],
+  outputs: [],
+  mints: new Map(),
+  mintUnknown: false,
+  tipHeight: null,
+  truncated: false,
+  registrationError: null,
+  registrationErrors: [],
+  remaining: null,
+  refund: null,
+};
 const OTHER = `${'b'.repeat(64)}:1`;
 
 function note(kind: RegistrationErrorNote['kind'], outpoint = OUT): RegistrationErrorNote {
@@ -36,7 +60,7 @@ function note(kind: RegistrationErrorNote['kind'], outpoint = OUT): Registration
   };
 }
 
-type Notes = Pick<Snapshot, 'payout' | 'candidates' | 'registrationErrors'>;
+type Notes = Pick<Snapshot, 'payouts' | 'registrationErrors'>;
 
 function html(snapshot: Notes): string {
   return renderToStaticMarkup(<RegistrationNotices snapshot={snapshot} />);
@@ -44,19 +68,19 @@ function html(snapshot: Notes): string {
 
 describe('registration notices', () => {
   it('shows nothing when registration succeeded or was not needed', () => {
-    expect(html({ payout: PAYOUT, candidates: [], registrationErrors: [] })).toBe('');
-    expect(html({ payout: null, candidates: [], registrationErrors: [] })).toBe('');
+    expect(html({ payouts: [PAYOUT], registrationErrors: [] })).toBe('');
+    expect(html({ payouts: [], registrationErrors: [] })).toBe('');
   });
 
   it('says a transient failure is being retried', () => {
-    const out = html({ payout: PAYOUT, candidates: [], registrationErrors: [note('transient')] });
+    const out = html({ payouts: [PAYOUT], registrationErrors: [note('transient')] });
     expect(out).toContain('have not been told about your Bitcoin payment yet');
     expect(out).toContain('This page keeps retrying.');
     expect(out).not.toContain('reclaimed after the timelock');
   });
 
   it('explains a rejection, that the BTC is safe and how to retry later', () => {
-    const out = html({ payout: PAYOUT, candidates: [], registrationErrors: [note('rejected')] });
+    const out = html({ payouts: [PAYOUT], registrationErrors: [note('rejected')] });
     expect(out).toContain('they refused the registration');
     expect(out).toContain('bad deposit');
     expect(out).toContain('Your BTC is safe at the deposit address');
@@ -65,18 +89,16 @@ describe('registration notices', () => {
     expect(out).not.toContain('This page keeps retrying.');
   });
 
-  it('counts candidates as the payout and keeps other outputs apart', () => {
+  it('counts every payout as the deposit and keeps other outputs apart', () => {
     const groups = registrationNoticeGroups({
-      payout: null,
-      candidates: [PAYOUT],
+      payouts: [PAYOUT],
       registrationErrors: [note('rejected'), note('transient', OTHER)],
     });
     expect(groups.rejected.map(e => e.outpoint)).toEqual([OUT]);
     expect(groups.transient).toEqual([]);
     expect(groups.others.map(e => e.outpoint)).toEqual([OTHER]);
     const out = html({
-      payout: null,
-      candidates: [],
+      payouts: [],
       registrationErrors: [note('transient', OTHER)],
     });
     expect(out).toContain('Other payments to this address could not be registered');
@@ -93,9 +115,46 @@ describe('mint status notes', () => {
     expect(renderToStaticMarkup(<MintUnknownNotice snapshot={{ mintUnknown: false }} />)).toBe('');
   });
 
-  it('describes another payment whose status is unknown without calling it unregistered', () => {
-    expect(otherNote(PAYOUT, 'unknown')).toMatch(/not known/);
-    expect(otherNote(PAYOUT, null)).toBe('It is not registered with the sBTC signers.');
+  it('describes each payment by its mint status without calling an unknown one unregistered', () => {
+    expect(payoutNote(PAYOUT, 'unknown')).toMatch(/not known/);
+    expect(payoutNote(PAYOUT, null)).toBe('It is not registered with the sBTC signers yet.');
+    expect(payoutNote({ ...PAYOUT, spent: true }, 'confirmed')).toBe(
+      'sBTC has been minted for it.'
+    );
+    expect(payoutNote({ ...PAYOUT, spent: true }, 'accepted')).toBe('It has already been spent.');
+    expect(payoutNote(PAYOUT, 'pending')).toMatch(/status: pending/);
+  });
+
+  it('warns about a payout transaction that does not pay the deposit address', () => {
+    const out = renderToStaticMarkup(<ForeignPayoutNotice snapshot={{ foreignTxids: [TXID] }} />);
+    expect(out).toContain(TXID);
+    expect(out).toContain('which does not pay your deposit address');
+    expect(out).toContain('contact the swap provider');
+    expect(renderToStaticMarkup(<ForeignPayoutNotice snapshot={{ foreignTxids: [] }} />)).toBe('');
+  });
+
+  it('lists several payouts with their own status', () => {
+    const second = { ...PAYOUT, txid: 'b'.repeat(64), vout: 1 };
+    const out = renderToStaticMarkup(
+      <dl>
+        <PayoutDetails
+          snapshot={{
+            ...EMPTY,
+            payouts: [PAYOUT, second],
+            mints: new Map([[OUT, 'confirmed']]),
+          }}
+        />
+      </dl>
+    );
+    expect(out).toContain('Bitcoin payouts');
+    expect(out).toContain('sBTC has been minted for it.');
+    expect(out).toContain('It is not registered with the sBTC signers yet.');
+    const one = renderToStaticMarkup(
+      <dl>
+        <PayoutDetails snapshot={{ ...EMPTY, payouts: [PAYOUT] }} />
+      </dl>
+    );
+    expect(one).toContain('Bitcoin payout<');
   });
 });
 

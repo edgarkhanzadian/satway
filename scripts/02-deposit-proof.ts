@@ -1,10 +1,12 @@
+import { randomInt } from 'node:crypto';
+
 import {
   OneClickClient,
   type OneClickStatusResponse,
   applyRegistrations,
-  buildDepositAddress,
   buildQuoteRequest,
   checkDepositAmount,
+  chooseDepositIndex,
   MAINNET_CONFIG as config,
   fetchLimits,
   fetchVerifiedSigners,
@@ -12,7 +14,6 @@ import {
   outpointOf,
   providerFeesOf,
   registerOutputs,
-  snapshotOutpoints,
 } from '@satway/core';
 
 import { loadEnv, optional, required } from './lib/env.js';
@@ -44,13 +45,13 @@ async function quote(args: string[]) {
 
   const signers = await fetchVerifiedSigners(config);
   const limits = await fetchLimits(config.sbtcApiUrl);
-  const deposit = buildDepositAddress({
-    stacksAddress,
-    reclaimPublicKey,
-    signersPublicKey: signers.signersPublicKey,
-    maxSignerFeeSats: config.baseSignerFeeSats,
-    reclaimLockBlocks: config.reclaimLockBlocks,
+  const choice = await chooseDepositIndex({
+    config,
+    owner: { stacksAddress, reclaimPublicKey, signersPublicKey: signers.signersPublicKey },
+    localIndices: [],
+    randomInt: max => randomInt(max),
   });
+  const { depositIndex, maxSignerFeeSats, ...deposit } = choice.deposit;
 
   const tokens = await client.tokens();
   const token = tokens.find(t => t.blockchain === chain && t.symbol === symbol);
@@ -66,11 +67,10 @@ async function quote(args: string[]) {
     depositAddress: deposit.address,
     dry: false,
   });
-  const prior = await snapshotOutpoints(config.btcApiUrl, deposit.address, deposit.scriptPubKey);
   const response = await client.quote(request);
   const q = response.quote;
 
-  const check = checkDepositAmount(Number(q.minAmountOut), limits, config.baseSignerFeeSats);
+  const check = checkDepositAmount(Number(q.minAmountOut), limits, maxSignerFeeSats);
   if (!check.ok) {
     console.error(
       `Refusing: the swap could deliver as little as ${q.minAmountOut} sats, which sBTC would not accept (${check.problems.join(', ')}).`
@@ -84,15 +84,14 @@ async function quote(args: string[]) {
     stacksAddress,
     reclaimPublicKey,
     signersPublicKey: signers.signersPublicKey,
-    maxSignerFeeSats: config.baseSignerFeeSats,
+    depositIndex,
+    maxSignerFeeSats,
     reclaimLockBlocks: config.reclaimLockBlocks,
     deposit,
     origin: { chain, symbol, assetId: token.assetId },
     refundTo,
     quoteResponse: response,
     notify,
-    priorOutpoints: prior.outpoints,
-    priorTruncated: prior.truncated,
     events: [],
   };
   const path = saveProof(`${record.createdAt.replace(/[:.]/g, '-')}.json`, record);
@@ -100,7 +99,12 @@ async function quote(args: string[]) {
   const extra = providerFeesOf(request, response).reduce((sum, f) => sum + f.fee, 0);
   console.log('Quote accepted. Nothing has moved yet.\n');
   console.log(`  sBTC recipient        ${stacksAddress}`);
-  console.log(`  sBTC deposit address  ${deposit.address}`);
+  console.log(`  sBTC deposit address  ${deposit.address} (index ${depositIndex})`);
+  if (choice.emily === 'unreachable') {
+    console.log(
+      `  note                  Emily was unreachable; the index was checked on Bitcoin only`
+    );
+  }
   console.log(`  expected payout       ${q.amountOut} sats (at least ${q.minAmountOut})`);
   console.log(`  provider fees         ${extra} bps plus ${q.withdrawFee ?? '?'} sats withdrawal`);
   console.log(`  refund goes to        ${refundTo} on ${chain}`);
@@ -109,7 +113,7 @@ async function quote(args: string[]) {
   );
   if (check.feeCapCoversWholeAmount) {
     console.log(
-      `  note                  payout is below the ${config.baseSignerFeeSats}-sat signer fee cap; fine normally, risky in a fee spike`
+      `  note                  payout is below the ${maxSignerFeeSats}-sat signer fee cap; fine normally, risky in a fee spike`
     );
   }
   console.log('\nTo run the proof, send from your own wallet:');
@@ -137,8 +141,7 @@ async function watch(args: string[]) {
     }
 
     let observed = await observeDeposit(config, ctx, status);
-    const { selection } = observed;
-    const payout = selection.payout;
+    const [payout] = observed.payouts;
     if (observed.truncated) {
       log(
         record,
@@ -146,23 +149,19 @@ async function watch(args: string[]) {
         'address history is longer than the page cap; older outputs unchecked'
       );
     }
-    if (selection.ambiguous) {
-      log(
-        record,
-        'warning',
-        `${selection.candidates.length} possible payouts and no 1Click hash: ${selection.candidates.map(c => `${outpointOf(c)} ${c.amountSats} sats`).join(', ')}`
-      );
-    }
-    for (const o of selection.others) {
+    for (const o of observed.payouts.slice(1)) {
       log(record, 'other-output', `${outpointOf(o)} ${o.amountSats} sats also paid the address`);
     }
-    for (const o of selection.belowMinimum) {
+    for (const txid of observed.foreignTxids) {
+      log(record, 'warning', `1Click names payout ${txid}, which does not pay the deposit address`);
+    }
+    for (const o of observed.belowMinimum) {
       log(record, 'below-minimum', `${outpointOf(o)} ${o.amountSats} sats cannot be minted`);
     }
 
     const progress = observed.progress;
     const detail = payout
-      ? `payout ${outpointOf(payout)} ${payout.amountSats} sats (matched by ${selection.basis ?? 'unknown'})${progress.blocksUntilReclaim !== null ? `, reclaimable in ${progress.blocksUntilReclaim} blocks` : ''}`
+      ? `payout ${outpointOf(payout)} ${payout.amountSats} sats ${progress.blocksUntilReclaim !== null ? `, reclaimable in ${progress.blocksUntilReclaim} blocks` : ''}`
       : `swap ${observed.swap ?? 'not seen yet'}`;
     log(record, progress.stage, detail);
 

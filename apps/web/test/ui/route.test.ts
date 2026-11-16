@@ -82,14 +82,6 @@ describe('routeState during a deposit', () => {
       },
     ],
     [
-      'payout-ambiguous',
-      {
-        stops: ['done', 'done', 'current', 'pending'],
-        legs: ['done', 'done', 'active'],
-        current: 2,
-      },
-    ],
-    [
       'awaiting-notification',
       {
         stops: ['done', 'done', 'current', 'pending'],
@@ -154,7 +146,6 @@ describe('routeState during a deposit', () => {
       swapping: true,
       'awaiting-payout': true,
       'payout-unconfirmed': true,
-      'payout-ambiguous': true,
       'awaiting-notification': true,
       minting: true,
       done: true,

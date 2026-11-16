@@ -2,18 +2,15 @@ import {
   type AddressOutput,
   type FetchLike,
   type NetworkConfig,
-  type PriorOutputs,
   depositAddressFromScripts,
   errorMessage,
   fetchDeposit,
   fetchLimits,
   fetchTipHeight,
   fetchUnspentOutputs,
-  isPriorOutput,
   notifyDeposit,
   outpointOf,
   outputsToRegister,
-  priorOutputsOf,
 } from '@satway/core';
 
 import {
@@ -83,29 +80,8 @@ function once<T>(load: () => Promise<T>): () => Promise<T> {
   };
 }
 
-function eligibleFor(output: RegisteredOutput, prior: PriorOutputs): boolean {
-  const [txid = '', voutText = ''] = output.outpoint.split(':');
-  return !isPriorOutput(
-    { txid, vout: Number(voutText), confirmed: output.confirmed, blockTime: output.blockTime },
-    prior
-  );
-}
-
 export function watchSatisfied(deposit: WatchedDeposit): boolean {
-  const known = deposit.registered ?? [];
-  const regs = [...registrationsOf(deposit)].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  const used = new Set<string>();
-  for (const reg of regs) {
-    const prior = priorOutputsOf({
-      createdAt: reg.createdAt,
-      priorOutpoints: reg.priorOutpoints ?? undefined,
-      priorTruncated: reg.priorTruncated,
-    });
-    const match = known.find(o => !used.has(o.outpoint) && eligibleFor(o, prior));
-    if (!match) return false;
-    used.add(match.outpoint);
-  }
-  return true;
+  return (deposit.registered ?? []).length >= registrationsOf(deposit).length;
 }
 
 export function watchExpired(deposit: WatchedDeposit, now: Date): boolean {
@@ -149,20 +125,10 @@ async function watchAddress(
     await deleteWatched(kv, address);
     throw new Error('Stored scripts do not match the stored address; record dropped');
   }
-  const priors = registrationsOf(deposit).map(r =>
-    priorOutputsOf({
-      createdAt: r.createdAt,
-      priorOutpoints: r.priorOutpoints ?? undefined,
-      priorTruncated: r.priorTruncated,
-    })
-  );
   const registered = new Map((deposit.registered ?? []).map(r => [r.outpoint, r]));
   const unspent = await fetchUnspentOutputs(config.btcApiUrl, derived.address, fetchFn);
 
-  function isPrior(o: AddressOutput): boolean {
-    return priors.every(p => isPriorOutput(o, p));
-  }
-  const fresh = unspent.filter(o => !isPrior(o) && !registered.has(outpointOf(o)));
+  const fresh = unspent.filter(o => !registered.has(outpointOf(o)));
   let pending = false;
   if (fresh.length > 0) {
     if (budget.remaining() < SHARED_LOOKUP_COST + REGISTRATION_COST + RECORD_WRITE_COST) {
@@ -175,7 +141,6 @@ async function watchAddress(
       return;
     }
     const all = outputsToRegister(fresh, {
-      isPrior,
       minimumSats: minimum,
       tipHeight: await ctx.shared.tip(),
       reclaimLockBlocks: config.reclaimLockBlocks,

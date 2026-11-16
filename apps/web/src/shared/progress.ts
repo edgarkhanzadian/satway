@@ -6,7 +6,6 @@ import {
   type NetworkConfig,
   type OneClickStatusResponse,
   type OneClickSwapStatus,
-  type PayoutBasis,
   type Progress,
   type RegistrationFailureKind,
   type Stage,
@@ -16,7 +15,6 @@ import {
   errorMessage,
   mintStatusUnknown,
   observeDeposit,
-  outpointOf,
   refundOf,
   registerOutputs,
   remainingDepositOf,
@@ -28,12 +26,9 @@ import type { Receipt } from './receipt.js';
 export interface Snapshot {
   progress: Progress;
   swap: OneClickSwapStatus | null;
-  payout: AddressOutput | null;
-  basis: PayoutBasis | null;
-  mint: MintStatus;
-  candidates: AddressOutput[];
-  otherOutputs: AddressOutput[];
+  payouts: AddressOutput[];
   belowMinimum: AddressOutput[];
+  foreignTxids: string[];
   outputs: AddressOutput[];
   mints: ReadonlyMap<string, MintStatus>;
   mintUnknown: boolean;
@@ -54,16 +49,11 @@ export interface RegistrationErrorNote {
 
 export function depositContextOf(receipt: Receipt): WatchedDepositContext {
   return {
-    createdAt: receipt.createdAt,
-    quoteTimestamp: receipt.quoteResponse.timestamp,
-    priorOutpoints: receipt.priorOutpoints,
-    priorTruncated: receipt.priorTruncated,
     depositAddress: receipt.depositAddress,
     depositScriptPubKey: receipt.depositScriptPubKey,
     depositScript: receipt.depositScript,
     reclaimScript: receipt.reclaimScript,
     reclaimLockBlocks: receipt.reclaimLockBlocks,
-    minAmountOut: receipt.quoteResponse.quote.minAmountOut,
   };
 }
 
@@ -126,9 +116,6 @@ export async function checkProgress(
   }
   const results = await registerOutputs(config, receipt, observed.toRegister, fetchFn);
   const o = applyRegistrations(observed, results, receipt.reclaimLockBlocks);
-  const { selection } = o;
-  const payout = selection.payout;
-  const candidateKeys = new Set(selection.candidates.map(outpointOf));
   const registrationErrors = results.flatMap(r =>
     r.failure === null
       ? []
@@ -144,12 +131,9 @@ export async function checkProgress(
   return {
     progress: o.progress,
     swap: o.swap,
-    payout,
-    basis: selection.basis,
-    mint: payout ? (o.mints.get(outpointOf(payout)) ?? null) : null,
-    candidates: selection.ambiguous ? selection.candidates : [],
-    otherOutputs: selection.others.filter(x => !candidateKeys.has(outpointOf(x))),
-    belowMinimum: selection.belowMinimum,
+    payouts: o.payouts,
+    belowMinimum: o.belowMinimum,
+    foreignTxids: o.foreignTxids,
     outputs: o.outputs,
     mints: o.mints,
     mintUnknown: mintStatusUnknown(o.mints),

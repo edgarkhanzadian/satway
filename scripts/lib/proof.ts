@@ -20,6 +20,7 @@ export interface ProofRecord {
   stacksAddress: string;
   reclaimPublicKey: string;
   signersPublicKey: string;
+  depositIndex: number;
   maxSignerFeeSats: number;
   reclaimLockBlocks: number;
   deposit: DepositAddress;
@@ -27,8 +28,6 @@ export interface ProofRecord {
   refundTo: string;
   quoteResponse: OneClickQuoteResponse;
   notify: boolean;
-  priorOutpoints?: string[];
-  priorTruncated?: boolean;
   events: { at: string; stage: string; note?: string }[];
   result?: {
     payoutTxid: string;
@@ -44,6 +43,7 @@ const proofRecordSchema: z.ZodType<ProofRecord> = z.looseObject({
   stacksAddress: z.string(),
   reclaimPublicKey: z.string(),
   signersPublicKey: z.string(),
+  depositIndex: z.number(),
   maxSignerFeeSats: z.number(),
   reclaimLockBlocks: z.number(),
   deposit: z.looseObject({
@@ -56,8 +56,6 @@ const proofRecordSchema: z.ZodType<ProofRecord> = z.looseObject({
   refundTo: z.string(),
   quoteResponse: oneClickQuoteResponseSchema,
   notify: z.boolean(),
-  priorOutpoints: z.array(z.string()).optional(),
-  priorTruncated: z.boolean().optional(),
   events: z.array(
     z.looseObject({ at: z.string(), stage: z.string(), note: z.string().optional() })
   ),
@@ -117,15 +115,10 @@ export function log(record: ProofRecord, stage: string, note?: string): void {
 
 export function contextOfProof(record: ProofRecord): WatchedDepositContext {
   return {
-    createdAt: record.createdAt,
-    quoteTimestamp: record.quoteResponse.timestamp,
-    priorOutpoints: record.priorOutpoints,
-    priorTruncated: record.priorTruncated,
     depositAddress: record.deposit.address,
     depositScriptPubKey: record.deposit.scriptPubKey,
     depositScript: record.deposit.depositScript,
     reclaimScript: record.deposit.reclaimScript,
     reclaimLockBlocks: record.reclaimLockBlocks,
-    minAmountOut: record.quoteResponse.quote.minAmountOut,
   };
 }

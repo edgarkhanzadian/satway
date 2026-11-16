@@ -11,7 +11,6 @@ export type Stage =
   | 'swapping'
   | 'awaiting-payout'
   | 'payout-unconfirmed'
-  | 'payout-ambiguous'
   | 'awaiting-notification'
   | 'minting'
   | 'done'
@@ -25,16 +24,21 @@ export const MINT_UNKNOWN = 'unknown';
 
 export type MintStatus = EmilyDepositStatus | typeof MINT_UNKNOWN | null;
 
+export interface PayoutObservation {
+  payout: Payout;
+  spent?: boolean;
+  spender?: PayoutSpender | null;
+  mint: MintStatus;
+}
+
 export interface Observations {
   swap: OneClickSwapStatus | null;
-  payout: Payout | null;
-  payoutSpent?: boolean;
-  payoutSpender?: PayoutSpender | null;
-  ambiguousMints?: readonly MintStatus[];
-  mint: MintStatus;
+  payouts: readonly PayoutObservation[];
   tipHeight: number | null;
   reclaimLockBlocks: number;
 }
+
+type PayoutContext = Pick<Observations, 'tipHeight' | 'reclaimLockBlocks'>;
 
 export interface Progress {
   stage: Stage;
@@ -44,8 +48,9 @@ export interface Progress {
   blocksUntilReclaim: number | null;
 }
 
-function payoutProgress(o: Observations, payout: Payout): Progress {
-  const untilReclaim = blocksUntilReclaimFor(payout, o.tipHeight, o.reclaimLockBlocks);
+function payoutProgress(ctx: PayoutContext, o: PayoutObservation): Progress {
+  const payout = o.payout;
+  const untilReclaim = blocksUntilReclaimFor(payout, ctx.tipHeight, ctx.reclaimLockBlocks);
   const base = { needsNotification: false, blocksUntilReclaim: untilReclaim };
 
   if (o.mint === 'confirmed') {
@@ -56,8 +61,8 @@ function payoutProgress(o: Observations, payout: Payout): Progress {
       message: 'sBTC has been minted to your Stacks address.',
     };
   }
-  if (o.payoutSpent === true) {
-    if (o.mint === MINT_UNKNOWN && o.payoutSpender !== 'reclaim') {
+  if (o.spent === true) {
+    if (o.mint === MINT_UNKNOWN && o.spender !== 'reclaim') {
       return {
         ...base,
         blocksUntilReclaim: null,
@@ -67,7 +72,7 @@ function payoutProgress(o: Observations, payout: Payout): Progress {
           'The BTC from this payout has been moved out of the deposit address. The sBTC signers’ API could not be reached, so whether they minted it is not known yet. Check again in a few minutes.',
       };
     }
-    if (o.mint === null || o.mint === 'failed' || o.payoutSpender === 'reclaim') {
+    if (o.mint === null || o.mint === 'failed' || o.spender === 'reclaim') {
       return {
         ...base,
         blocksUntilReclaim: null,
@@ -167,30 +172,51 @@ function payoutProgress(o: Observations, payout: Payout): Progress {
   };
 }
 
-function ambiguousProgress(mints: readonly MintStatus[]): Progress {
-  const base = { needsNotification: false, blocksUntilReclaim: null };
-  if (mints.every(m => m === 'confirmed')) {
-    return {
-      ...base,
-      stage: 'done',
-      terminal: true,
-      message: `sBTC has been minted for each of the ${mints.length} payments that arrived at your deposit address.`,
-    };
-  }
-  return {
-    ...base,
-    stage: 'payout-ambiguous',
-    terminal: false,
-    message: `${mints.length} payments that could each be this deposit arrived at your deposit address, and the swap provider has not said which one is yours. Each is being registered with the sBTC signers; they are listed below.`,
-  };
+const SWAP_IN_FLIGHT: ReadonlySet<OneClickSwapStatus> = new Set([
+  'PENDING_DEPOSIT',
+  'INCOMPLETE_DEPOSIT',
+  'KNOWN_DEPOSIT_TX',
+  'PROCESSING',
+]);
+
+function mintedEarlyNote(count: number): string {
+  return count === 1
+    ? 'sBTC was minted for a payment that reached your deposit address before this swap finished.'
+    : `sBTC was minted for ${count} payments that reached your deposit address before this swap finished.`;
 }
 
 export function deriveProgress(o: Observations): Progress {
-  if (o.payout) return payoutProgress(o, o.payout);
-  if (o.ambiguousMints && o.ambiguousMints.length > 1) return ambiguousProgress(o.ambiguousMints);
+  if (o.payouts.length === 0) return swapProgress(o.swap);
+  const each = o.payouts.map(p => payoutProgress(o, p));
+  const allDone = each.every(p => p.stage === 'done');
+  if (allDone && o.swap !== null && SWAP_IN_FLIGHT.has(o.swap)) {
+    const waiting = swapProgress(o.swap);
+    return { ...waiting, message: `${mintedEarlyNote(each.length)} ${waiting.message}` };
+  }
+  const [only] = each;
+  if (only && each.length === 1) return only;
+  if (allDone) {
+    return {
+      needsNotification: false,
+      blocksUntilReclaim: null,
+      stage: 'done',
+      terminal: true,
+      message: `sBTC has been minted for each of the ${each.length} payments that arrived at your deposit address.`,
+    };
+  }
+  const primary = each.find(p => p.stage !== 'done') ?? only;
+  if (!primary) return swapProgress(o.swap);
+  return {
+    ...primary,
+    terminal: each.every(p => p.terminal),
+    needsNotification: each.some(p => p.needsNotification),
+    message: `${each.length} payments arrived at your deposit address. Each is handled on its own and listed below. ${primary.message}`,
+  };
+}
 
+function swapProgress(swap: OneClickSwapStatus | null): Progress {
   const base = { needsNotification: false, blocksUntilReclaim: null };
-  switch (o.swap) {
+  switch (swap) {
     case null:
     case 'PENDING_DEPOSIT':
       return {
@@ -238,6 +264,6 @@ export function deriveProgress(o: Observations): Progress {
           'The swap failed. Contact the swap provider with your swap deposit address to recover the funds.',
       };
     default:
-      throw new Error(`Unknown swap status: ${String(o.swap satisfies never)}`);
+      throw new Error(`Unknown swap status: ${String(swap satisfies never)}`);
   }
 }

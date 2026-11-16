@@ -169,7 +169,7 @@ interface World {
   swap?: OneClickSwapStatus;
   hashes?: string[];
   payoutVout?: number | null;
-  prior?: Out[];
+  foreignTx?: string;
   outputs?: Out[];
   fillers?: number;
   mint?: string | null;
@@ -224,7 +224,7 @@ function world(w: World = {}) {
   const arriving = [...(w.outputs ?? []), ...(payout ? [payout] : [])];
 
   function visible(): Out[] {
-    return [...(state.arrived ? arriving : []), ...(w.prior ?? [])];
+    return state.arrived ? arriving : [];
   }
 
   function txs() {
@@ -310,6 +310,13 @@ function world(w: World = {}) {
       return jsonRes(chain.slice(start, start + 25));
     }
     const txMatch = /\/tx\/([0-9a-f]{64})$/.exec(url);
+    if (txMatch && txMatch[1] === w.foreignTx) {
+      return jsonRes({
+        txid: w.foreignTx,
+        vout: [{ scriptpubkey: OTHER_SPK, value: 36_000 }],
+        status: { confirmed: false },
+      });
+    }
     if (txMatch) {
       const tx = txs().find(t => t.txid === txMatch[1]);
       return tx ? jsonRes(tx) : new Response('Transaction not found', { status: 404 });
@@ -573,7 +580,7 @@ describe('checkProgress', () => {
       },
     ]);
     expect(snap.progress.stage).toBe('minting');
-    expect(snap.payout).toMatchObject({ vout: 2, amountSats: 35_500 });
+    expect(snap.payouts).toMatchObject([{ vout: 2, amountSats: 35_500 }]);
     expect(snap.registrationError).toBeNull();
     expect(snap.registrationErrors).toEqual([]);
   });
@@ -605,7 +612,7 @@ describe('checkProgress', () => {
     const w = world({ swap: 'SUCCESS', payoutVout: 0, notifyStatus: 400 });
     const snap = await checkProgress(config, w.backend, await receiptFor(w), w.fetchFn);
     expect(w.posts).toHaveLength(1);
-    expect(snap.mint).toBeNull();
+    expect(snap.mints.get(`${D.txid}:0`)).toBeNull();
     expect(snap.registrationError).toMatch(/HTTP 400 .*invalid transaction hex/);
     expect(snap.registrationErrors[0]).toMatchObject({ kind: 'rejected', status: 400 });
   });
@@ -640,8 +647,6 @@ describe('checkProgress', () => {
 const REAL_OUT = `${D.txid}:0`;
 const OTHER_TXID = CHAIN[2]?.txid ?? '';
 const OTHER_OUT = `${OTHER_TXID}:2`;
-const OLD_TXID = 'cc'.repeat(32);
-const BEFORE = Date.parse(NOW.toISOString()) / 1000 - 86_400;
 
 function postedOutpoints(w: ReturnType<typeof world>): string[] {
   return w.posts.map(p => {
@@ -652,7 +657,7 @@ function postedOutpoints(w: ReturnType<typeof world>): string[] {
   });
 }
 
-describe('checkProgress: which output is the payout', () => {
+describe('checkProgress: payments to the deposit address', () => {
   it('a later unconfirmed 546-sat output does not hijack status or registration', async () => {
     const w = world({
       swap: 'SUCCESS',
@@ -660,138 +665,96 @@ describe('checkProgress: which output is the payout', () => {
       outputs: [{ txid: OTHER_TXID, vout: 2, value: 546, confirmed: false }],
     });
     const snap = await checkProgress(config, w.backend, await receiptFor(w), w.fetchFn);
-    expect(snap.payout).toMatchObject({ txid: D.txid, vout: 0, amountSats: 35_500 });
+    expect(snap.payouts).toMatchObject([{ txid: D.txid, vout: 0, amountSats: 35_500 }]);
     expect(snap.progress.stage).toBe('minting');
     expect(postedOutpoints(w)).toEqual([REAL_OUT]);
     expect(snap.belowMinimum).toMatchObject([{ txid: OTHER_TXID, amountSats: 546 }]);
   });
 
-  it('dust before the payout leaves the deposit waiting, then the real payout is picked', async () => {
+  it('dust before the payout leaves the deposit waiting, then the payout is followed', async () => {
     const dust: Out = { txid: OTHER_TXID, vout: 2, value: 546, confirmed: false };
     const before = world({ swap: 'PROCESSING', outputs: [dust] });
     const receipt = await receiptFor(before);
     const waiting = await checkProgress(config, before.backend, receipt, before.fetchFn);
-    expect(waiting.payout).toBeNull();
+    expect(waiting.payouts).toEqual([]);
     expect(waiting.progress).toMatchObject({ stage: 'swapping', terminal: false });
     expect(before.posts).toHaveLength(0);
 
-    const after = world({ swap: 'SUCCESS', hashes: [D.txid], payoutVout: 0, outputs: [dust] });
+    const after = world({ swap: 'SUCCESS', payoutVout: 0, outputs: [dust] });
     after.arrive();
     const paid = await checkProgress(config, after.backend, receipt, after.fetchFn);
-    expect(paid.payout).toMatchObject({ txid: D.txid, vout: 0 });
-    expect(paid.basis).toBe('hash');
+    expect(paid.payouts).toMatchObject([{ txid: D.txid, vout: 0 }]);
     expect(postedOutpoints(after)).toEqual([REAL_OUT]);
   });
 
-  it('a second deposit on an address whose first payout was minted waits for its own payout', async () => {
-    const old: Out = {
-      txid: OLD_TXID,
-      vout: 0,
-      value: 50_000,
-      confirmed: true,
-      height: TIP - 5_000,
-      time: BEFORE,
-    };
-    const w = world({
-      swap: 'PENDING_DEPOSIT',
-      prior: [old],
-      mints: { [`${OLD_TXID}:0`]: 'confirmed' },
-    });
-    const receipt = await receiptFor(w);
-    expect(receipt.priorOutpoints).toEqual([`${OLD_TXID}:0`]);
-    const snap = await checkProgress(config, w.backend, receipt, w.fetchFn);
-    expect(snap.progress).toMatchObject({ stage: 'awaiting-funds', terminal: false });
-    expect(snap.payout).toBeNull();
-    expect(w.posts).toHaveLength(0);
-  });
-
-  it.each(['PENDING_DEPOSIT', 'INCOMPLETE_DEPOSIT', 'PROCESSING'] as const)(
-    'while this swap is %s, another deposit’s payout to the same address is not adopted but is still registered',
-    async swap => {
-      const w = world({ swap, payoutVout: 0, mint: 'confirmed' });
+  it.each([
+    [null, 'minting'],
+    ['SUCCESS', 'minting'],
+    ['PROCESSING', 'minting'],
+    ['REFUNDED', 'minting'],
+  ] as const)(
+    'with the swap status %s, any payment at the address is the payout',
+    async (swap, stage) => {
+      const w = world({ ...(swap ? { swap } : {}), payoutVout: 0 });
       const snap = await checkProgress(config, w.backend, await receiptFor(w), w.fetchFn);
-      expect(snap.payout).toBeNull();
-      expect(snap.basis).toBeNull();
-      expect(snap.progress.terminal).toBe(false);
-      expect(snap.progress.stage).toBe(swap === 'PROCESSING' ? 'swapping' : 'awaiting-funds');
-      expect(snap.otherOutputs).toMatchObject([{ txid: D.txid, amountSats: 35_500 }]);
-
-      const fresh = world({ swap, payoutVout: 0 });
-      const unregistered = await checkProgress(
-        config,
-        fresh.backend,
-        await receiptFor(fresh),
-        fresh.fetchFn
-      );
-      expect(unregistered.payout).toBeNull();
-      expect(postedOutpoints(fresh)).toEqual([REAL_OUT]);
-      expect(unregistered.mints.get(REAL_OUT)).toBe('pending');
+      expect(snap.swap).toBe(swap);
+      expect(snap.payouts).toMatchObject([{ txid: D.txid }]);
+      expect(snap.progress.stage).toBe(stage);
+      expect(postedOutpoints(w)).toEqual([REAL_OUT]);
     }
   );
 
-  it('an old receipt without a snapshot still ignores a payout confirmed long before it', async () => {
-    const old: Out = {
-      txid: OLD_TXID,
-      vout: 0,
-      value: 50_000,
-      confirmed: true,
-      height: TIP - 5_000,
-      time: BEFORE,
-    };
-    const w = world({
-      swap: 'PENDING_DEPOSIT',
-      prior: [old],
-      mints: { [`${OLD_TXID}:0`]: 'confirmed' },
-    });
-    const legacy = structuredClone(await receiptFor(w));
-    delete legacy.priorOutpoints;
-    delete legacy.priorTruncated;
-    const parsed = verifyReceipt(JSON.parse(JSON.stringify(legacy)));
-    expect(parsed.priorOutpoints).toBeUndefined();
-    const snap = await checkProgress(config, w.backend, parsed, w.fetchFn);
-    expect(snap.progress.stage).toBe('awaiting-funds');
-  });
+  it.each(['PENDING_DEPOSIT', 'INCOMPLETE_DEPOSIT', 'PROCESSING'] as const)(
+    'a payment minted while this swap is %s is not called done',
+    async swap => {
+      const w = world({ swap, payoutVout: 0, mint: 'confirmed' });
+      const snap = await checkProgress(config, w.backend, await receiptFor(w), w.fetchFn);
+      expect(snap.payouts).toMatchObject([{ txid: D.txid }]);
+      expect(snap.progress.terminal).toBe(false);
+      expect(snap.progress.stage).toBe(swap === 'PROCESSING' ? 'swapping' : 'awaiting-funds');
+      expect(snap.progress.message).toMatch(/^sBTC was minted for a payment/);
+    }
+  );
 
-  it('the 1Click hash beats an attacker output in the amount range', async () => {
-    const w = world({
-      swap: 'SUCCESS',
-      hashes: [`0x${D.txid.toUpperCase()}`],
-      payoutVout: 0,
-      outputs: [{ txid: OTHER_TXID, vout: 2, value: 36_000, confirmed: false }],
-    });
-    const snap = await checkProgress(config, w.backend, await receiptFor(w), w.fetchFn);
-    expect(snap.payout).toMatchObject({ txid: D.txid });
-    expect(snap.basis).toBe('hash');
-    expect(snap.otherOutputs).toMatchObject([{ txid: OTHER_TXID, amountSats: 36_000 }]);
+  it('two payments are both shown and registered, and the deposit is done only when both are minted', async () => {
+    const second: Out = { txid: OTHER_TXID, vout: 2, value: 36_000, confirmed: false };
+    const w = world({ swap: 'SUCCESS', payoutVout: 0, outputs: [second] });
+    const receipt = await receiptFor(w);
+    const snap = await checkProgress(config, w.backend, receipt, w.fetchFn);
+    expect(snap.payouts.map(o => o.txid)).toEqual([D.txid, OTHER_TXID]);
     expect(postedOutpoints(w).sort()).toEqual([REAL_OUT, OTHER_OUT].sort());
+    expect(snap.progress.message).toMatch(/^2 payments arrived at your deposit address\./);
+    expect(snap.progress.terminal).toBe(false);
+
+    w.emily.set(REAL_OUT, 'confirmed');
+    const half = await checkProgress(config, w.backend, receipt, w.fetchFn);
+    expect(half.progress.stage).not.toBe('done');
+    w.emily.set(OTHER_OUT, 'confirmed');
+    const both = await checkProgress(config, w.backend, receipt, w.fetchFn);
+    expect(both.progress).toMatchObject({ stage: 'done', terminal: true });
   });
 
-  it('without a hash, one candidate is selected by amount', async () => {
-    const w = world({ swap: 'SUCCESS', payoutVout: 0 });
+  it('warns when 1Click names a payout transaction that does not pay the deposit address', async () => {
+    const w = world({ swap: 'SUCCESS', hashes: [OTHER_TXID], payoutVout: 0 });
     const snap = await checkProgress(config, w.backend, await receiptFor(w), w.fetchFn);
-    expect(snap.basis).toBe('amount');
-    expect(snap.payout).toMatchObject({ txid: D.txid });
-  });
+    expect(snap.payouts).toMatchObject([{ txid: D.txid }]);
+    expect(snap.foreignTxids).toEqual([]);
 
-  it('without a hash, two candidates are reported as ambiguous and both are registered', async () => {
-    const w = world({
+    const foreign = world({
       swap: 'SUCCESS',
-      payoutVout: 0,
-      outputs: [{ txid: OTHER_TXID, vout: 2, value: 36_000, confirmed: false }],
+      hashes: [OTHER_TXID],
+      outputs: [],
+      foreignTx: OTHER_TXID,
     });
-    const snap = await checkProgress(config, w.backend, await receiptFor(w), w.fetchFn);
-    expect(snap.payout).toBeNull();
-    expect(snap.progress.stage).toBe('payout-ambiguous');
-    expect(snap.candidates.map(c => c.txid).sort()).toEqual([D.txid, OTHER_TXID].sort());
-    expect(postedOutpoints(w).sort()).toEqual([REAL_OUT, OTHER_OUT].sort());
-  });
-
-  it('with 1Click unavailable, the payout is still found by amount', async () => {
-    const w = world({ payoutVout: 0 });
-    const snap = await checkProgress(config, w.backend, await receiptFor(w), w.fetchFn);
-    expect(snap.swap).toBeNull();
-    expect(snap.basis).toBe('amount');
-    expect(snap.progress.stage).toBe('minting');
+    const none = await checkProgress(
+      config,
+      foreign.backend,
+      await receiptFor(foreign),
+      foreign.fetchFn
+    );
+    expect(none.payouts).toEqual([]);
+    expect(none.foreignTxids).toEqual([OTHER_TXID]);
+    expect(none.progress.stage).toBe('awaiting-payout');
   });
 
   it('one failed registration does not stop the next, and the error names the outpoint', async () => {
@@ -875,9 +838,8 @@ describe('checkProgress: the sBTC signers’ API cannot be read', () => {
   it('still shows the outputs, marks the mint status unknown and registers nothing blindly', async () => {
     const w = world({ swap: 'SUCCESS', hashes: [D.txid], payoutVout: 0, emilyReadsDown: true });
     const snap = await checkProgress(config, w.backend, await receiptFor(w), w.fetchFn);
-    expect(snap.payout).toMatchObject({ txid: D.txid, vout: 0 });
+    expect(snap.payouts).toMatchObject([{ txid: D.txid, vout: 0 }]);
     expect(snap.outputs).toHaveLength(1);
-    expect(snap.mint).toBe('unknown');
     expect(snap.mints.get(REAL_OUT)).toBe('unknown');
     expect(snap.mintUnknown).toBe(true);
     expect(snap.progress).toMatchObject({ stage: 'awaiting-notification', terminal: false });
@@ -893,7 +855,7 @@ describe('checkProgress: the sBTC signers’ API cannot be read', () => {
     expect(snap.progress.message).not.toMatch(/never processed/);
     const plan = planReclaim({
       outputs: snap.outputs,
-      selected: snap.payout,
+      selected: snap.payouts[0] ?? null,
       tipHeight: snap.tipHeight,
       reclaimLockBlocks: receipt.reclaimLockBlocks,
     });
@@ -911,19 +873,18 @@ describe('checkProgress: busy addresses', () => {
   it('finds the payout behind 60 newer transactions by paging history', async () => {
     const w = world({ payoutVout: 0, fillers: 60 });
     const snap = await checkProgress(config, w.backend, await receiptFor(w), w.fetchFn);
-    expect(snap.payout).toMatchObject({ txid: D.txid });
+    expect(snap.payouts).toMatchObject([{ txid: D.txid }]);
     expect(snap.truncated).toBe(false);
   });
 
-  it('reads the payout directly when 1Click reports its hash, without paging', async () => {
-    const w = world({ swap: 'SUCCESS', hashes: [D.txid], payoutVout: 0, fillers: 60 });
+  it('a reported hash already in the history costs no extra request', async () => {
+    const w = world({ swap: 'SUCCESS', hashes: [D.txid], payoutVout: 0 });
     const receipt = await receiptFor(w);
     const start = w.urls.length;
     const snap = await checkProgress(config, w.backend, receipt, w.fetchFn);
     const used = w.urls.slice(start);
-    expect(snap.payout).toMatchObject({ txid: D.txid });
-    expect(used.some(u => u.includes('/txs/'))).toBe(false);
-    expect(used.filter(u => !u.endsWith('/deposit'))).toHaveLength(6);
+    expect(snap.payouts).toMatchObject([{ txid: D.txid }]);
+    expect(used.some(u => u.endsWith(`/tx/${D.txid}`))).toBe(false);
   });
 
   it('surfaces a truncated history instead of pretending it is complete', async () => {
@@ -965,7 +926,7 @@ describe('checkProgress: timelock', () => {
     const receipt = await receiptFor(w);
     w.setTip(TIP + 2_000);
     const snap = await checkProgress(config, w.backend, receipt, w.fetchFn);
-    expect(snap.payout?.spent).toBe(true);
+    expect(snap.payouts[0]?.spent).toBe(true);
     expect(snap.progress.stage).toBe('minting');
   });
 });
@@ -974,7 +935,7 @@ describe('reclaim target from a snapshot', () => {
   function planOf(snap: Awaited<ReturnType<typeof checkProgress>>) {
     return planReclaim({
       outputs: snap.outputs,
-      selected: snap.payout,
+      selected: snap.payouts.find(o => !o.spent) ?? null,
       tipHeight: snap.tipHeight,
       reclaimLockBlocks: config.reclaimLockBlocks,
     });
@@ -997,6 +958,7 @@ describe('reclaim target from a snapshot', () => {
     const plan = planOf(snap);
     expect(plan.target?.output).toMatchObject({ txid: D.txid, vout: 0 });
     expect(plan.options.map(o => o.output.amountSats)).toEqual([35_500, 2_000]);
+    expect(snap.belowMinimum).toMatchObject([{ amountSats: 2_000 }]);
   });
 
   it('after the payout is reclaimed the remaining output is still offered, never by default', async () => {

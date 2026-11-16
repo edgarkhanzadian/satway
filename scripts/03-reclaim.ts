@@ -6,6 +6,7 @@ import {
   broadcastTransaction,
   buildReclaimPsbt,
   MAINNET_CONFIG as config,
+  depositPayouts,
   destinationTxHashesOf,
   errorMessage,
   fetchDeposit,
@@ -17,12 +18,8 @@ import {
   isOutputSpent,
   outpointOf,
   planReclaim,
-  priorOutputsOf,
-  quotedSatsOf,
   reclaimAmountProblem,
   reclaimTxVsize,
-  reportedAmountOutOf,
-  selectPayout,
   signReclaimPsbt,
 } from '@satway/core';
 
@@ -163,24 +160,15 @@ async function chooseOutput(record: Parameters<typeof contextOfProof>[0]): Promi
   const [fetched, tip, limits] = await Promise.all([
     fetchDepositOutputs(config.btcApiUrl, ctx.depositAddress, ctx.depositScriptPubKey, {
       txids: destinationTxHashesOf(status),
-      history: 'always',
     }),
     fetchTipHeight(config.btcApiUrl),
     fetchLimits(config.sbtcApiUrl).catch(() => null),
   ]);
   if (fetched.truncated) console.log('Note     address history truncated; older outputs unchecked');
-  const selection = selectPayout({
-    outputs: fetched.outputs,
-    prior: priorOutputsOf(ctx),
-    minAmountOutSats: quotedSatsOf(ctx.minAmountOut),
-    reportedAmountOutSats: reportedAmountOutOf(status),
-    destinationTxHashes: destinationTxHashesOf(status),
-    perDepositMinimum: limits?.perDepositMinimum ?? null,
-    swapStatus: status?.status ?? null,
-  });
+  const { payouts } = depositPayouts(fetched.outputs, limits?.perDepositMinimum ?? null);
   const plan = planReclaim({
     outputs: fetched.outputs,
-    selected: selection.payout,
+    selected: payouts.find(o => !o.spent) ?? null,
     tipHeight: tip,
     reclaimLockBlocks: record.reclaimLockBlocks,
   });
@@ -198,14 +186,11 @@ async function chooseOutput(record: Parameters<typeof contextOfProof>[0]): Promi
     }
     return found;
   }
-  if (plan.target) {
-    console.log(`Payout   selected by ${selection.basis ?? 'unknown'}`);
-    return plan.target;
-  }
+  if (plan.target) return plan.target;
   console.error(
-    selection.payout
-      ? 'The payout of this deposit has already been spent. Pick an output explicitly with --outpoint <txid:vout>.'
-      : 'Could not tell which output is this deposit’s payout. Pick one explicitly with --outpoint <txid:vout>.'
+    payouts.length > 0
+      ? 'Every payout to this deposit address has already been spent. Pick an output explicitly with --outpoint <txid:vout>.'
+      : 'No payment of at least the sBTC minimum reached this deposit address. Pick an output explicitly with --outpoint <txid:vout>.'
   );
   listOptions(plan);
   process.exit(1);

@@ -8,12 +8,13 @@ function sats(n: number): string {
   return `${n.toLocaleString('en-US')} sats`;
 }
 
-export function otherNote(output: AddressOutput, mint: MintStatus): string {
+export function payoutNote(output: AddressOutput, mint: MintStatus): string {
+  if (mint === 'confirmed') return 'sBTC has been minted for it.';
   if (output.spent) return 'It has already been spent.';
-  if (mint === null) return 'It is not registered with the sBTC signers.';
+  if (mint === null) return 'It is not registered with the sBTC signers yet.';
   if (mint === MINT_UNKNOWN)
     return 'Whether it is registered with the sBTC signers is not known, because their API could not be reached.';
-  return `It is registered with the sBTC signers too (status: ${mint}).`;
+  return `It is registered with the sBTC signers (status: ${mint}).`;
 }
 
 function Where(props: { output: AddressOutput }) {
@@ -27,39 +28,25 @@ function Where(props: { output: AddressOutput }) {
 
 export function PayoutDetails(props: { snapshot: Snapshot }) {
   const { snapshot } = props;
-  const payout = snapshot.payout;
+  const [only] = snapshot.payouts;
   return (
     <>
-      {payout && (
+      {only && snapshot.payouts.length === 1 && (
         <>
           <dt>Bitcoin payout</dt>
           <dd>
-            {sats(payout.amountSats)}
-            <Where output={payout} />
-            {snapshot.basis === 'amount'
-              ? '. Matched by its amount, because the swap provider has not reported its transaction yet.'
-              : null}
+            {sats(only.amountSats)}
+            <Where output={only} />
           </dd>
         </>
       )}
-      {snapshot.candidates.length > 0 && (
+      {snapshot.payouts.length > 1 && (
         <>
-          <dt>Possible payouts</dt>
-          {snapshot.candidates.map(o => (
+          <dt>Bitcoin payouts</dt>
+          {snapshot.payouts.map(o => (
             <dd key={outpointOf(o)}>
               {sats(o.amountSats)}
-              <Where output={o} />
-            </dd>
-          ))}
-        </>
-      )}
-      {snapshot.otherOutputs.length > 0 && (
-        <>
-          <dt>Other payments</dt>
-          {snapshot.otherOutputs.map(o => (
-            <dd key={outpointOf(o)}>
-              Another payment of {sats(o.amountSats)} also arrived at this address
-              <Where output={o} />. {otherNote(o, snapshot.mints.get(outpointOf(o)) ?? null)}
+              <Where output={o} />. {payoutNote(o, snapshot.mints.get(outpointOf(o)) ?? null)}
             </dd>
           ))}
         </>
@@ -80,6 +67,22 @@ export function PayoutDetails(props: { snapshot: Snapshot }) {
   );
 }
 
+export function ForeignPayoutNotice(props: { snapshot: Pick<Snapshot, 'foreignTxids'> }) {
+  if (props.snapshot.foreignTxids.length === 0) return null;
+  return (
+    <p className={notice({ tone: 'warn' })} role="status">
+      The swap provider reports its Bitcoin payout in{' '}
+      {props.snapshot.foreignTxids.map((txid, i) => (
+        <span key={txid}>
+          {i > 0 ? ' and ' : ''}transaction <code>{txid}</code>
+        </span>
+      ))}
+      , which does not pay your deposit address. This page follows only payments to your deposit
+      address. If none arrives, contact the swap provider with your swap deposit address.
+    </p>
+  );
+}
+
 export function PayoutNotices(props: { snapshot: Snapshot }) {
   const { snapshot } = props;
   return (
@@ -90,6 +93,7 @@ export function PayoutNotices(props: { snapshot: Snapshot }) {
           checked. Older payments may be missing from this page.
         </p>
       )}
+      <ForeignPayoutNotice snapshot={snapshot} />
       <MintUnknownNotice snapshot={snapshot} />
       <RegistrationNotices snapshot={snapshot} />
     </>
@@ -114,11 +118,9 @@ export interface RegistrationNoticeGroups {
 }
 
 export function registrationNoticeGroups(
-  snapshot: Pick<Snapshot, 'payout' | 'candidates' | 'registrationErrors'>
+  snapshot: Pick<Snapshot, 'payouts' | 'registrationErrors'>
 ): RegistrationNoticeGroups {
-  const watched = new Set(
-    [...(snapshot.payout ? [snapshot.payout] : []), ...snapshot.candidates].map(outpointOf)
-  );
+  const watched = new Set(snapshot.payouts.map(outpointOf));
   const mine = snapshot.registrationErrors.filter(e => watched.has(e.outpoint));
   return {
     rejected: mine.filter(e => e.kind === 'rejected'),
@@ -141,7 +143,7 @@ function Reasons(props: { notes: RegistrationErrorNote[] }) {
 }
 
 export function RegistrationNotices(props: {
-  snapshot: Pick<Snapshot, 'payout' | 'candidates' | 'registrationErrors'>;
+  snapshot: Pick<Snapshot, 'payouts' | 'registrationErrors'>;
 }) {
   const groups = registrationNoticeGroups(props.snapshot);
   return (

@@ -5,13 +5,15 @@ import {
   HttpError,
   TooManyOutputsError,
   fetchAddressHistory,
+  fetchAddressTxCount,
   fetchDepositOutputs,
   fetchTransactionHex,
   fetchUnspentOutputs,
   payoutsInTx,
 } from '../../src/index.js';
 import { fakeEsplora, txidOf } from '../fake-esplora.js';
-import { REAL_DEPOSIT as D, REAL_DEPOSIT_TX_HEX, defined } from '../fixtures.js';
+import { REAL_DEPOSIT as D, REAL_DEPOSIT_TX_HEX, defined, jsonResponse } from '../fixtures.js';
+import { REAL_UNUSED_ADDRESS_STATS, REAL_USED_ADDRESS_STATS } from '../real-responses.js';
 
 const realTx: BtcTx = {
   txid: D.txid,
@@ -182,35 +184,61 @@ describe('fetchAddressHistory', () => {
 });
 
 describe('fetchDepositOutputs', () => {
-  it('reads the payout directly by its txid, without paging history, behind 60 newer transactions', async () => {
-    const esplora = fakeEsplora({
-      address: D.address,
-      spk: D.scriptPubKey,
-      txs: busyAddress(60, 59),
-    });
-    const res = await fetchDepositOutputs('https://btc.example', D.address, D.scriptPubKey, {
-      txids: [txidOf(60).toUpperCase()],
-      fetchFn: esplora.fetchFn,
-    });
-    expect(esplora.urls).toEqual([
-      `https://btc.example/tx/${txidOf(60)}`,
-      `https://btc.example/address/${D.address}/utxo`,
-    ]);
-    expect(res.outputs).toMatchObject([{ txid: txidOf(60), amountSats: 40_000, spent: false }]);
-    expect(res).toMatchObject({ truncated: false, historyRead: false, requests: 2 });
-  });
+  const base = `https://btc.example/address/${D.address}`;
 
-  it('falls back to history when the txid does not pay the address yet', async () => {
+  it('reads the history and the unspent set, and a reported hash it already saw costs nothing', async () => {
     const esplora = fakeEsplora({
       address: D.address,
       spk: D.scriptPubKey,
       txs: busyAddress(3, 1),
     });
     const res = await fetchDepositOutputs('https://btc.example', D.address, D.scriptPubKey, {
-      txids: ['ee'.repeat(32)],
+      txids: [txidOf(2).toUpperCase()],
       fetchFn: esplora.fetchFn,
     });
-    expect(res.historyRead).toBe(true);
+    expect(esplora.urls).toEqual([`${base}/txs/mempool`, `${base}/txs/chain`, `${base}/utxo`]);
+    expect(res.outputs.map(o => o.txid)).toEqual([txidOf(2)]);
+    expect(res).toMatchObject({ truncated: false, foreignTxids: [], requests: 3 });
+  });
+
+  it('still finds a reported, already spent payout that the history page limit cut off', async () => {
+    const esplora = fakeEsplora({
+      address: D.address,
+      spk: D.scriptPubKey,
+      txs: busyAddress(60, 59).map(tx =>
+        tx.txid === txidOf(60)
+          ? { ...tx, outputs: tx.outputs.map(o => ({ ...o, spent: true })) }
+          : tx
+      ),
+    });
+    const res = await fetchDepositOutputs('https://btc.example', D.address, D.scriptPubKey, {
+      txids: [txidOf(60)],
+      maxPages: 1,
+      fetchFn: esplora.fetchFn,
+    });
+    expect(esplora.urls.at(-1)).toBe(`https://btc.example/tx/${txidOf(60)}`);
+    expect(res.outputs).toMatchObject([{ txid: txidOf(60), amountSats: 40_000, spent: true }]);
+    expect(res).toMatchObject({ truncated: true, foreignTxids: [] });
+  });
+
+  it('reports a hash that names a transaction not paying this address', async () => {
+    const esplora = fakeEsplora({
+      address: D.address,
+      spk: D.scriptPubKey,
+      txs: [
+        ...busyAddress(3, 1),
+        {
+          txid: 'ee'.repeat(32),
+          outputs: [{ spk: '0014' + '22'.repeat(20), value: 40_000 }],
+          confirmed: false,
+        },
+      ],
+    });
+    const res = await fetchDepositOutputs('https://btc.example', D.address, D.scriptPubKey, {
+      txids: [`0x${'ee'.repeat(32)}`.slice(2), 'ff'.repeat(32)],
+      fetchFn: esplora.fetchFn,
+    });
+    expect(res.foreignTxids).toEqual(['ee'.repeat(32)]);
     expect(res.outputs.map(o => o.txid)).toEqual([txidOf(2)]);
   });
 
@@ -228,7 +256,6 @@ describe('fetchDepositOutputs', () => {
       ],
     });
     const res = await fetchDepositOutputs('https://btc.example', D.address, D.scriptPubKey, {
-      history: 'always',
       fetchFn: esplora.fetchFn,
     });
     expect(res.outputs).toMatchObject([{ txid: txidOf(1), spent: true }]);
@@ -238,10 +265,33 @@ describe('fetchDepositOutputs', () => {
     const esplora = fakeEsplora({ address: D.address, spk: D.scriptPubKey, txs: [] });
     await fetchDepositOutputs('https://btc.example', D.address, D.scriptPubKey, {
       txids: ['../x', '0xnothex'],
-      history: 'never',
       fetchFn: esplora.fetchFn,
     });
-    expect(esplora.urls).toEqual([`https://btc.example/address/${D.address}/utxo`]);
+    expect(esplora.urls).toEqual([`${base}/txs/mempool`, `${base}/txs/chain`, `${base}/utxo`]);
+  });
+});
+
+describe('fetchAddressTxCount', () => {
+  it('adds chain and mempool transactions from the recorded real responses', async () => {
+    const urls: string[] = [];
+    function fetchFn(url: string): Promise<Response> {
+      urls.push(url);
+      return Promise.resolve(
+        jsonResponse(url.endsWith(D.address) ? REAL_USED_ADDRESS_STATS : REAL_UNUSED_ADDRESS_STATS)
+      );
+    }
+    expect(await fetchAddressTxCount('https://btc.example', D.address, { fetchFn })).toBe(6);
+    expect(await fetchAddressTxCount('https://btc.example', 'bc1pother', { fetchFn })).toBe(0);
+    expect(urls[0]).toBe(`https://btc.example/address/${D.address}`);
+  });
+
+  it('counts a mempool-only transaction as use', async () => {
+    function fetchFn(): Promise<Response> {
+      return Promise.resolve(
+        jsonResponse({ chain_stats: { tx_count: 0 }, mempool_stats: { tx_count: 1 } })
+      );
+    }
+    expect(await fetchAddressTxCount('https://btc.example', D.address, { fetchFn })).toBe(1);
   });
 });
 

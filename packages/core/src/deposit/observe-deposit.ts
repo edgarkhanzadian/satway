@@ -9,8 +9,6 @@ import {
   type OneClickStatusResponse,
   type OneClickSwapStatus,
   destinationTxHashesOf,
-  quotedSatsOf,
-  reportedAmountOutOf,
 } from '../oneclick/index.js';
 import {
   DepositCheckError,
@@ -22,46 +20,43 @@ import {
   notifyDeposit,
 } from '../sbtc/index.js';
 import { type FetchLike, HttpError, type NetworkConfig, errorMessage } from '../shared/index.js';
+import { MAX_REGISTRATIONS_PER_CHECK, depositPayouts, outputsToRegister } from './payouts.js';
 import {
-  MAX_REGISTRATIONS_PER_CHECK,
-  type PayoutSelection,
-  type PriorOutputs,
-  type PriorSource,
-  isPriorOutput,
-  outputsToRegister,
-  priorOutputsOf,
-  selectPayout,
-} from './payout-selection.js';
-import { MINT_UNKNOWN, type MintStatus, type Progress, deriveProgress } from './status.js';
+  MINT_UNKNOWN,
+  type MintStatus,
+  type PayoutObservation,
+  type Progress,
+  deriveProgress,
+} from './status.js';
 
 export type DepositEndpointsConfig = Pick<NetworkConfig, 'btcApiUrl' | 'sbtcApiUrl'>;
 
-export interface WatchedDepositContext extends PriorSource {
+export interface WatchedDepositContext {
   depositAddress: string;
   depositScriptPubKey: string;
   depositScript: string;
   reclaimScript: string;
   reclaimLockBlocks: number;
-  minAmountOut: string;
 }
 
 export interface DepositObservation {
   swap: OneClickSwapStatus | null;
   outputs: AddressOutput[];
-  selection: PayoutSelection;
-  prior: PriorOutputs;
+  payouts: AddressOutput[];
+  belowMinimum: AddressOutput[];
+  foreignTxids: string[];
   truncated: boolean;
   tipHeight: number | null;
   perDepositMinimum: number | null;
   mints: Map<string, MintStatus>;
-  payoutSpender: PayoutSpender | null;
+  spenders: Map<string, PayoutSpender | null>;
   toRegister: AddressOutput[];
   progress: Progress;
   requests: number;
 }
 
-function spenderNeeded(payout: AddressOutput | null, mint: MintStatus): boolean {
-  return payout?.spent === true && mint !== null && mint !== 'confirmed' && mint !== 'failed';
+function spenderNeeded(payout: AddressOutput, mint: MintStatus): boolean {
+  return payout.spent && mint !== null && mint !== 'confirmed' && mint !== 'failed';
 }
 
 export type RegistrationFailureKind = 'transient' | 'rejected';
@@ -98,22 +93,16 @@ export function classifyRegistrationError(err: unknown, sbtcApiUrl: string): Reg
 }
 
 function progressFor(
-  o: Pick<DepositObservation, 'swap' | 'selection' | 'mints' | 'tipHeight' | 'payoutSpender'>,
+  o: Pick<DepositObservation, 'swap' | 'payouts' | 'mints' | 'tipHeight' | 'spenders'>,
   reclaimLockBlocks: number
 ): Progress {
-  const payout = o.selection.payout;
-  return deriveProgress({
-    swap: o.swap,
+  const payouts: PayoutObservation[] = o.payouts.map(payout => ({
     payout,
-    payoutSpent: payout?.spent,
-    payoutSpender: o.payoutSpender,
-    ambiguousMints: o.selection.ambiguous
-      ? o.selection.candidates.map(c => o.mints.get(outpointOf(c)) ?? null)
-      : undefined,
-    mint: payout ? (o.mints.get(outpointOf(payout)) ?? null) : null,
-    tipHeight: o.tipHeight,
-    reclaimLockBlocks,
-  });
+    spent: payout.spent,
+    spender: o.spenders.get(outpointOf(payout)) ?? null,
+    mint: o.mints.get(outpointOf(payout)) ?? null,
+  }));
+  return deriveProgress({ swap: o.swap, payouts, tipHeight: o.tipHeight, reclaimLockBlocks });
 }
 
 async function optional<T>(load: () => Promise<T>): Promise<T | null> {
@@ -145,10 +134,9 @@ export async function observeDeposit(
   config: DepositEndpointsConfig,
   ctx: WatchedDepositContext,
   status: OneClickStatusResponse | null,
-  options: { fetchFn?: FetchLike; history?: DepositOutputsOptions['history'] } = {}
+  options: { fetchFn?: FetchLike; maxPages?: DepositOutputsOptions['maxPages'] } = {}
 ): Promise<DepositObservation> {
   const fetchFn = options.fetchFn;
-  const hashes = destinationTxHashesOf(status);
   const [limits, tipHeight] = await Promise.all([
     optional(() => fetchLimits(config.sbtcApiUrl, fetchFn)),
     optional(() => fetchTipHeight(config.btcApiUrl, fetchFn)),
@@ -158,61 +146,46 @@ export async function observeDeposit(
     config.btcApiUrl,
     ctx.depositAddress,
     ctx.depositScriptPubKey,
-    { txids: hashes, history: options.history, fetchFn }
+    { txids: destinationTxHashesOf(status), maxPages: options.maxPages, fetchFn }
   );
-  const prior = priorOutputsOf(ctx);
-  const selection = selectPayout({
-    outputs: fetched.outputs,
-    prior,
-    minAmountOutSats: quotedSatsOf(ctx.minAmountOut),
-    reportedAmountOutSats: reportedAmountOutOf(status),
-    destinationTxHashes: hashes,
-    perDepositMinimum,
-    swapStatus: status?.status ?? null,
-  });
+  const { payouts, belowMinimum } = depositPayouts(fetched.outputs, perDepositMinimum);
   const toRegister = outputsToRegister(fetched.outputs, {
-    isPrior: o => o !== selection.payout && isPriorOutput(o, prior),
-    minimumSats: perDepositMinimum ?? selection.lowerBoundSats,
+    minimumSats: perDepositMinimum,
     tipHeight,
     reclaimLockBlocks: ctx.reclaimLockBlocks,
   });
 
   const lookups = new Map<string, AddressOutput>();
-  for (const o of [
-    ...(selection.payout ? [selection.payout] : []),
-    ...selection.candidates,
-    ...toRegister,
-  ]) {
-    lookups.set(outpointOf(o), o);
-  }
+  for (const o of [...payouts, ...toRegister]) lookups.set(outpointOf(o), o);
   const mints = new Map<string, MintStatus>();
   for (const [key, o] of [...lookups].slice(0, MAX_REGISTRATIONS_PER_CHECK + 1)) {
     mints.set(key, await readMint(config.sbtcApiUrl, o, fetchFn));
   }
 
-  const payout = selection.payout;
-  const checkSpender = spenderNeeded(
-    payout,
-    payout ? (mints.get(outpointOf(payout)) ?? null) : null
-  );
-  const payoutSpender =
-    payout && checkSpender
-      ? await optional(() => fetchPayoutSpender(config.btcApiUrl, payout, ctx, fetchFn))
-      : null;
+  const spenders = new Map<string, PayoutSpender | null>();
+  for (const payout of payouts) {
+    const key = outpointOf(payout);
+    if (!mints.has(key) || !spenderNeeded(payout, mints.get(key) ?? null)) continue;
+    spenders.set(
+      key,
+      await optional(() => fetchPayoutSpender(config.btcApiUrl, payout, ctx, fetchFn))
+    );
+  }
 
   const swap = status?.status ?? null;
-  const observed = { swap, selection, mints, tipHeight, payoutSpender };
+  const observed = { swap, payouts, mints, tipHeight, spenders };
   return {
     ...observed,
     outputs: fetched.outputs,
-    prior,
+    belowMinimum,
+    foreignTxids: fetched.foreignTxids,
     truncated: fetched.truncated,
     perDepositMinimum,
     toRegister: toRegister.filter(
       o => mints.has(outpointOf(o)) && mints.get(outpointOf(o)) === null
     ),
     progress: progressFor(observed, ctx.reclaimLockBlocks),
-    requests: fetched.requests + 2 + mints.size + (checkSpender ? 2 : 0),
+    requests: fetched.requests + 2 + mints.size + spenders.size * 2,
   };
 }
 

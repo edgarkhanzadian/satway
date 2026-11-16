@@ -46,11 +46,6 @@ const BY_STAGE: Record<Stage, Row> = {
     legs: ['done', 'active', 'pending'],
     current: 2,
   },
-  'payout-ambiguous': {
-    stops: ['done', 'done', 'current', 'pending'],
-    legs: ['done', 'done', 'active'],
-    current: 2,
-  },
   'awaiting-notification': {
     stops: ['done', 'done', 'current', 'pending'],
     legs: ['done', 'done', 'active'],

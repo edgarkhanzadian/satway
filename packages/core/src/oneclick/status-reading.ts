@@ -23,20 +23,6 @@ export function deliveryTxHashesOf(
   return EVM_ADDRESS.test(recipient) ? hashes.map(h => `0x${h}`) : hashes;
 }
 
-function satsOf(text: string | undefined | null): number | null {
-  if (text === undefined || text === null || !/^\d+$/.test(text)) return null;
-  const n = Number(text);
-  return Number.isSafeInteger(n) ? n : null;
-}
-
-export function reportedAmountOutOf(status: OneClickStatusResponse | null): number | null {
-  return satsOf(status?.swapDetails.amountOut);
-}
-
-export function quotedSatsOf(text: string): number | null {
-  return satsOf(text);
-}
-
 const BASE_UNITS = /^\d+$/;
 
 export function remainingDepositOf(

@@ -12,7 +12,6 @@ import {
   parseWith,
   refundOf,
   remainingDepositOf,
-  reportedAmountOutOf,
 } from '../../src/index.js';
 import { REAL_LIVE_QUOTE, REAL_LIVE_STATUS } from '../real-responses.js';
 import { REAL_BTC_ORIGIN_STATUS } from '../real-withdrawal-quotes.js';
@@ -88,7 +87,6 @@ describe('the 1Click status schema reads real responses', () => {
     expect(status.swapDetails.depositedAmount).toBeUndefined();
     expect(status.swapDetails.refundReason).toBeUndefined();
     expect(destinationTxHashesOf(status)).toEqual([]);
-    expect(reportedAmountOutOf(status)).toBeNull();
     expect(refundOf(status)?.refunded).toBe(false);
   });
 
@@ -116,7 +114,7 @@ describe('the 1Click status schema reads real responses', () => {
   it('reads the payout hash and amount of a success', () => {
     const status = parseOneClickStatus(SHAPES[5]?.[1]);
     expect(destinationTxHashesOf(status)).toEqual([PAYOUT]);
-    expect(reportedAmountOutOf(status)).toBe(36226);
+    expect(status.swapDetails.amountOut).toBe('36226');
     expect(status.swapDetails.destinationChainTxHashes[0]?.explorerUrl).toBeUndefined();
   });
 

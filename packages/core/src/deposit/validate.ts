@@ -1,6 +1,7 @@
 import type { SbtcLimits } from '../sbtc/index.js';
 import { P2TR_DUST_SATS } from '../shared/index.js';
-import { PAYOUT_AMOUNT_TOLERANCE_BPS } from './payout-selection.js';
+
+export const PAYOUT_AMOUNT_TOLERANCE_BPS = 200;
 
 export type AmountProblem =
   | 'not-an-integer'

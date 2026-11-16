@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { type Observations, type Payout, deriveProgress } from '../../src/index.js';
+import {
+  type MintStatus,
+  type Observations,
+  type Payout,
+  type PayoutObservation,
+  type PayoutSpender,
+  deriveProgress,
+} from '../../src/index.js';
 
 const LOCK = 950;
 function payout(over: Partial<Payout> = {}): Payout {
@@ -13,14 +20,32 @@ function payout(over: Partial<Payout> = {}): Payout {
     ...over,
   };
 }
-function obs(over: Partial<Observations>): Observations {
+interface Single {
+  swap?: Observations['swap'];
+  payout?: Payout | null;
+  mint?: MintStatus;
+  payoutSpent?: boolean;
+  payoutSpender?: PayoutSpender | null;
+  tipHeight?: number | null;
+  payouts?: PayoutObservation[];
+}
+
+function obs(over: Single): Observations {
+  const single = over.payout
+    ? [
+        {
+          payout: over.payout,
+          mint: over.mint ?? null,
+          spent: over.payoutSpent,
+          spender: over.payoutSpender,
+        },
+      ]
+    : [];
   return {
-    swap: null,
-    payout: null,
-    mint: null,
-    tipHeight: 1_002,
+    swap: over.swap ?? null,
+    payouts: over.payouts ?? single,
+    tipHeight: over.tipHeight === undefined ? 1_002 : over.tipHeight,
     reclaimLockBlocks: LOCK,
-    ...over,
   };
 }
 
@@ -216,28 +241,76 @@ describe('deriveProgress: the mint status could not be read', () => {
     );
     expect(reclaimed).toMatchObject({ stage: 'reclaimed', terminal: true });
   });
-
-  it('several candidates with an unknown status are not done', () => {
-    const p = deriveProgress(obs({ ambiguousMints: ['confirmed', 'unknown'] }));
-    expect(p).toMatchObject({ stage: 'payout-ambiguous', terminal: false });
-  });
 });
 
-describe('deriveProgress: several possible payouts', () => {
-  it('says plainly that it cannot tell which payment is the deposit', () => {
-    const p = deriveProgress(obs({ swap: null, ambiguousMints: [null, 'pending'] }));
-    expect(p).toMatchObject({ stage: 'payout-ambiguous', terminal: false });
-    expect(p.message).toMatch(/^2 payments/);
+describe('deriveProgress: more than one payment to the deposit address', () => {
+  const first = payout({ txid: 'a1'.repeat(32), blockHeight: 1_000 });
+  const second = payout({ txid: 'b2'.repeat(32), blockHeight: 1_001, amountSats: 20_000 });
+
+  it('follows the earliest payment that is not minted yet, and says there are several', () => {
+    const p = deriveProgress(
+      obs({
+        swap: 'SUCCESS',
+        payouts: [
+          { payout: first, mint: 'confirmed' },
+          { payout: second, mint: null },
+        ],
+      })
+    );
+    expect(p).toMatchObject({
+      stage: 'awaiting-notification',
+      terminal: false,
+      needsNotification: true,
+    });
+    expect(p.message).toMatch(/^2 payments arrived at your deposit address\./);
   });
 
-  it('is done when every one of them has been minted', () => {
-    const p = deriveProgress(obs({ ambiguousMints: ['confirmed', 'confirmed'] }));
-    expect(p).toMatchObject({ stage: 'done', terminal: true });
+  it('is done only when every payment has been minted', () => {
+    const partly = deriveProgress(
+      obs({
+        payouts: [
+          { payout: first, mint: 'confirmed' },
+          { payout: second, mint: 'unknown' },
+        ],
+      })
+    );
+    expect(partly.stage).not.toBe('done');
+    expect(partly.terminal).toBe(false);
+    const all = deriveProgress(
+      obs({
+        swap: 'SUCCESS',
+        payouts: [
+          { payout: first, mint: 'confirmed' },
+          { payout: second, mint: 'confirmed' },
+        ],
+      })
+    );
+    expect(all).toMatchObject({ stage: 'done', terminal: true });
+    expect(all.message).toMatch(/each of the 2 payments/);
   });
 
-  it('a single candidate list is not ambiguous', () => {
-    expect(deriveProgress(obs({ swap: 'SUCCESS', ambiguousMints: [null] })).stage).toBe(
-      'awaiting-payout'
+  it('is terminal only when every payment is', () => {
+    const p = deriveProgress(
+      obs({
+        payouts: [
+          { payout: first, mint: 'failed' },
+          { payout: second, mint: 'pending' },
+        ],
+      })
+    );
+    expect(p.stage).toBe('mint-failed');
+    expect(p.terminal).toBe(false);
+  });
+
+  it('a minted payment while the swap is still in flight is not called done', () => {
+    for (const swap of ['PENDING_DEPOSIT', 'KNOWN_DEPOSIT_TX', 'PROCESSING'] as const) {
+      const p = deriveProgress(obs({ swap, payout: first, mint: 'confirmed' }));
+      expect(p.stage).not.toBe('done');
+      expect(p.terminal).toBe(false);
+      expect(p.message).toMatch(/^sBTC was minted for a payment/);
+    }
+    expect(deriveProgress(obs({ swap: null, payout: first, mint: 'confirmed' })).stage).toBe(
+      'done'
     );
   });
 
