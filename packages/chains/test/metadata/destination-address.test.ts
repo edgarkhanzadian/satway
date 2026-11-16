@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  checkDestinationAddress,
-  destinationSupported,
-  evmChecksumAddress,
-} from '../../src/index.js';
+import { checkDestinationAddress, evmChecksumAddress } from '../../src/index.js';
 
 const FIRST = '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed';
 
@@ -116,16 +112,5 @@ describe('checkDestinationAddress', () => {
   it('refuses chains whose addresses it cannot check', () => {
     const check = checkDestinationAddress('tron', 'TR7NHqjeKQxGTCi8q8ZY4pxL8otSzgjLj6t', {});
     expect(check.ok ? '' : check.message).toMatch(/to tron are not supported/);
-  });
-});
-
-describe('destinationSupported', () => {
-  it('supports EVM chains only', () => {
-    expect(destinationSupported('base')).toBe(true);
-    expect(destinationSupported('eth')).toBe(true);
-    expect(destinationSupported('sol')).toBe(false);
-    expect(destinationSupported('tron')).toBe(false);
-    expect(destinationSupported('btc')).toBe(false);
-    expect(destinationSupported('near')).toBe(false);
   });
 });

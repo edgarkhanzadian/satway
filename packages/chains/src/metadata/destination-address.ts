@@ -18,10 +18,6 @@ export interface DestinationToken {
   contractAddress?: string;
 }
 
-export function destinationSupported(blockchain: string): boolean {
-  return isEvmChain(blockchain);
-}
-
 export function evmChecksumAddress(address: string): string {
   const lower = address.toLowerCase().replace(/^0x/, '');
   const hash = bytesToHex(keccak_256(utf8ToBytes(lower)));
@@ -78,7 +74,7 @@ export function checkDestinationAddress(
   if (address !== input || /\s/.test(address)) {
     return { ok: false, message: 'The address has spaces in it. Copy it again from your wallet.' };
   }
-  if (!destinationSupported(blockchain)) {
+  if (!isEvmChain(blockchain)) {
     return {
       ok: false,
       message: `Withdrawals to ${blockchain} are not supported, because addresses on it cannot be checked here.`,

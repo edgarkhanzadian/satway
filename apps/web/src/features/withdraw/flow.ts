@@ -1,4 +1,4 @@
-import { checkDestinationAddress, destinationSupported } from '@satway/chains';
+import { checkDestinationAddress, isEvmChain } from '@satway/chains';
 import {
   type FetchLike,
   type OneClickToken,
@@ -39,7 +39,7 @@ export function withdrawalDestinations(
         t.blockchain !== 'btc' &&
         t.price > 0 &&
         !/deprecated/i.test(t.symbol) &&
-        destinationSupported(t.blockchain)
+        isEvmChain(t.blockchain)
     )
     .sort(
       (a, b) =>
