@@ -32,7 +32,7 @@ export const MAINNET_WITHDRAWAL_CONFIG: WithdrawalConfig = Object.freeze({
   minSigningDeadlineMarginMinutes: 1_440,
   withdrawalSlippageOptionsBps: Object.freeze([100, 300]),
   withdrawalDefaultSlippageBps: 100,
-  soloSweepVsize: 380,
+  soloSweepVsize: 400,
   feeCapMargin: 2,
   minFeeCapSats: 3_000,
   maxFeeCapSats: 100_000,

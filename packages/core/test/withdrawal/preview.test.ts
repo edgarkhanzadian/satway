@@ -95,7 +95,7 @@ describe('previewWithdrawal', () => {
   it('uses a given fee rate', async () => {
     const d = deps();
     const previewed = await previewWithdrawal(C, { ...input, feeRateSatsPerVbyte: 10 }, d.deps);
-    expect(previewed.ok ? previewed.preview.maxFeeSats : null).toBe(7_600);
+    expect(previewed.ok ? previewed.preview.maxFeeSats : null).toBe(8_000);
     expect(d.api.urls).not.toContain('https://mempool.space/api/fee-estimates');
   });
 

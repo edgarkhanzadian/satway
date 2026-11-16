@@ -163,7 +163,7 @@ test.describe('X2. a withdrawal that is refused before anything is signed or sen
     await expect(warnings.nth(0)).toContainText(preview.receive.replace(' on base', ''));
     await expect(warnings.nth(1)).toContainText(/^The guaranteed minimum is now/);
     await expect(warnings.nth(2)).toHaveText(
-      'Bitcoin fees went up: the signers’ fee cap is now 7,600 sats, up from 3,000.'
+      'Bitcoin fees went up: the signers’ fee cap is now 8,000 sats, up from 3,000.'
     );
     expect(wallets.stacks.behaviour.calls('stx_callContract')).toHaveLength(0);
     const live = world.withdrawals.latestSwap();
@@ -175,6 +175,6 @@ test.describe('X2. a withdrawal that is refused before anything is signed or sen
     expect(wallets.stacks.behaviour.calls('stx_callContract')).toHaveLength(0);
     await withdraw.continueToConfirm();
     const started = await withdraw.sign();
-    expect(started.receipt.maxFeeSats).toBe(7_600);
+    expect(started.receipt.maxFeeSats).toBe(8_000);
   });
 });

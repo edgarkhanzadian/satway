@@ -21,20 +21,21 @@ describe('withdrawalFeeCap', () => {
   it('never goes below the floor', () => {
     expect(withdrawalFeeCap(W, 0.1)).toBe(3_000);
     expect(withdrawalFeeCap(W, 1)).toBe(3_000);
-    expect(withdrawalFeeCap(W, 3.9)).toBe(3_000);
+    expect(withdrawalFeeCap(W, 3.75)).toBe(3_000);
   });
 
   it('scales with the fee rate, solo sweep size and margin, rounding up', () => {
-    expect(withdrawalFeeCap(W, 4)).toBe(3_040);
-    expect(withdrawalFeeCap(W, 10)).toBe(7_600);
-    expect(withdrawalFeeCap(W, 10.01)).toBe(Math.ceil(10.01 * 380 * 2));
-    expect(withdrawalFeeCap(W, 100)).toBe(76_000);
+    expect(withdrawalFeeCap(W, 3.8)).toBe(3_040);
+    expect(withdrawalFeeCap(W, 4)).toBe(3_200);
+    expect(withdrawalFeeCap(W, 10)).toBe(8_000);
+    expect(withdrawalFeeCap(W, 10.01)).toBe(Math.ceil(10.01 * 400 * 2));
+    expect(withdrawalFeeCap(W, 100)).toBe(80_000);
   });
 
   it('refuses when the cap would exceed the upper bound', () => {
-    expect(withdrawalFeeCap(W, 131)).toBe(99_560);
-    expect(() => withdrawalFeeCap(W, 132)).toThrow(FeeCapError);
-    expect(() => withdrawalFeeCap(W, 132)).toThrow(/too high right now/);
+    expect(withdrawalFeeCap(W, 125)).toBe(100_000);
+    expect(() => withdrawalFeeCap(W, 125.01)).toThrow(FeeCapError);
+    expect(() => withdrawalFeeCap(W, 126)).toThrow(/too high right now/);
   });
 
   it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])('refuses a fee rate of %s', rate => {
