@@ -7,6 +7,7 @@ import {
 import {
   type ActiveWithdrawal,
   StacksWalletDeclinedError,
+  type WithdrawalReceiptFile,
   downloadWithdrawalReceipt,
   forgetWithdrawalDraft,
   rememberWithdrawal,
@@ -27,10 +28,25 @@ export interface SignDeps {
   onActive(update: (current: ActiveWithdrawal | null) => ActiveWithdrawal | null): void;
 }
 
+export interface SignStorage {
+  remember(receipt: WithdrawalReceiptFile): boolean;
+  setActive(receipt: WithdrawalReceiptFile | null): void;
+  forgetDraft(receipt: WithdrawalReceiptFile): void;
+  download(receipt: WithdrawalReceiptFile): void;
+}
+
+export const BROWSER_SIGN_STORAGE: SignStorage = {
+  remember: receipt => rememberWithdrawal(config, receipt),
+  setActive: setActiveWithdrawal,
+  forgetDraft: receipt => forgetWithdrawalDraft(config, receipt),
+  download: downloadWithdrawalReceipt,
+};
+
 export async function signWithdrawal(
   deps: SignDeps,
   quote: LiveQuote,
-  token: Pick<OneClickToken, 'assetId' | 'blockchain' | 'symbol' | 'decimals'>
+  token: Pick<OneClickToken, 'assetId' | 'blockchain' | 'symbol' | 'decimals'>,
+  storage: SignStorage = BROWSER_SIGN_STORAGE
 ): Promise<SignOutcome> {
   const draft = withdrawalReceiptOf(quote.receipt, {
     assetId: token.assetId,
@@ -38,8 +54,8 @@ export async function signWithdrawal(
     symbol: token.symbol,
     decimals: token.decimals,
   });
-  const draftSaved = rememberWithdrawal(config, draft);
-  if (draftSaved) setActiveWithdrawal(draft);
+  const draftSaved = storage.remember(draft);
+  if (draftSaved) storage.setActive(draft);
   const mine = withdrawalId(draft);
   function show(next: ActiveWithdrawal | null) {
     deps.onActive(current =>
@@ -50,15 +66,15 @@ export async function signWithdrawal(
   try {
     const txid = await deps.requestWithdrawal(quote.receipt.contractCall);
     const receipt = withStacksTxid(draft, txid);
-    const remembered = rememberWithdrawal(config, receipt);
-    setActiveWithdrawal(receipt);
-    downloadWithdrawalReceipt(receipt);
+    const remembered = storage.remember(receipt);
+    storage.setActive(receipt);
+    storage.download(receipt);
     show({ receipt, receiptUnsaved: !remembered, walletPrompt: false });
     return 'sent';
   } catch (err) {
     if (err instanceof StacksWalletDeclinedError) {
-      forgetWithdrawalDraft(config, draft);
-      setActiveWithdrawal(null);
+      storage.forgetDraft(draft);
+      storage.setActive(null);
       show(null);
       return 'declined';
     }
