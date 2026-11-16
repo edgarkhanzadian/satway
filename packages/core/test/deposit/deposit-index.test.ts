@@ -11,6 +11,7 @@ import {
   drawDepositIndex,
   fetchDepositsByReclaimKey,
   lowestUnusedIndex,
+  scanDepositAddresses,
   usedDepositIndices,
 } from '../../src/index.js';
 import { REAL_DEPOSIT as D, jsonResponse } from '../fixtures.js';
@@ -185,6 +186,12 @@ describe('drawDepositIndex', () => {
     expect(() => drawDepositIndex(full, () => 0)).toThrow(/used up/);
   });
 
+  it('can base the window on paid indices while still skipping reserved ones', () => {
+    const reserved = new Set([0, 1, 2]);
+    expect(drawDepositIndex(reserved, () => 0, new Set())).toBe(3);
+    expect(drawDepositIndex(reserved, max => max - 1, new Set())).toBe(DEPOSIT_INDEX_WINDOW - 1);
+  });
+
   it('refuses a random source that answers out of range', () => {
     expect(() => drawDepositIndex(new Set(), () => DEPOSIT_INDEX_WINDOW)).toThrow(/out of range/);
     expect(() => drawDepositIndex(new Set(), () => -1)).toThrow(/out of range/);
@@ -258,6 +265,52 @@ describe('chooseDepositIndex', () => {
     expect(choice.emilyError).toMatch(/502/);
     expect(choice.deposit.depositIndex).toBe(59);
     expect(world.urls.at(-1)).toBe(`${config.btcApiUrl}/address/${addressOf(59)}`);
+  });
+
+  it('bases the window on indices known to be paid, so a gap scan from 0 always finds the draw', async () => {
+    const world = fakeWorld({});
+    const choice = await chooseDepositIndex({
+      config,
+      owner,
+      localIndices: [0, 1, 2],
+      randomInt: max => max - 1,
+      fetchFn: world.fetchFn,
+    });
+    expect(choice.deposit.depositIndex).toBe(DEPOSIT_INDEX_WINDOW - 1);
+    const paid = choice.deposit.address;
+    const scan = await scanDepositAddresses({
+      config,
+      owner,
+      fetchFn: url =>
+        Promise.resolve(
+          jsonResponse(
+            url.endsWith(`/${paid}`) ? REAL_USED_ADDRESS_STATS : REAL_UNUSED_ADDRESS_STATS
+          )
+        ),
+    });
+    expect(scan.deposits.map(d => d.depositIndex)).toEqual([DEPOSIT_INDEX_WINDOW - 1]);
+  });
+
+  it('moves the window base past the indices this browser knows were paid', async () => {
+    const world = fakeWorld({});
+    const choice = await chooseDepositIndex({
+      config,
+      owner,
+      localIndices: [0, 1, 5],
+      paidLocalIndices: [0, 1],
+      randomInt: max => max - 1,
+      fetchFn: world.fetchFn,
+    });
+    expect(choice.deposit.depositIndex).toBe(2 + DEPOSIT_INDEX_WINDOW - 1);
+    const low = await chooseDepositIndex({
+      config,
+      owner,
+      localIndices: [0, 1, 5],
+      paidLocalIndices: [0, 1],
+      randomInt: sequence(3),
+      fetchFn: world.fetchFn,
+    });
+    expect(low.deposit.depositIndex).toBe(6);
   });
 
   it('does not start the deposit when the emptiness check cannot be made', async () => {

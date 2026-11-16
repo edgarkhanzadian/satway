@@ -61,9 +61,10 @@ export function lowestUnusedIndex(used: ReadonlySet<number>): number {
 
 export function drawDepositIndex(
   used: ReadonlySet<number>,
-  randomInt: (maxExclusive: number) => number
+  randomInt: (maxExclusive: number) => number,
+  onChain: ReadonlySet<number> = used
 ): number {
-  const lowest = lowestUnusedIndex(used);
+  const lowest = lowestUnusedIndex(onChain);
   const end = Math.min(lowest + DEPOSIT_INDEX_WINDOW, DEPOSIT_INDEX_LIMIT);
   const free: number[] = [];
   for (let n = lowest; n < end; n++) if (!used.has(n)) free.push(n);
@@ -92,6 +93,7 @@ export interface ChooseDepositIndexInput {
   config: DepositIndexEndpoints;
   owner: DepositIndexOwner;
   localIndices: Iterable<number>;
+  paidLocalIndices?: Iterable<number>;
   randomInt(maxExclusive: number): number;
   fetchFn?: FetchLike;
   maxDraws?: number;
@@ -130,10 +132,11 @@ export async function chooseDepositIndex(
 ): Promise<DepositIndexChoice> {
   const fromEmily = await emilyIndices(input);
   const used = new Set<number>([...input.localIndices, ...fromEmily.used]);
+  const onChain = new Set<number>([...(input.paidLocalIndices ?? []), ...fromEmily.used]);
   const occupied: number[] = [];
   const draws = input.maxDraws ?? MAX_DEPOSIT_INDEX_DRAWS;
   for (let attempt = 0; attempt < draws; attempt++) {
-    const n = drawDepositIndex(used, input.randomInt);
+    const n = drawDepositIndex(used, input.randomInt, onChain);
     const deposit = buildIndexedDepositAddress({ ...input.owner, depositIndex: n }, input.config);
     if (await addressIsUnused(input, deposit.address)) {
       return {
@@ -146,6 +149,7 @@ export async function chooseDepositIndex(
     }
     occupied.push(n);
     used.add(n);
+    onChain.add(n);
   }
   throw new Error(
     `Each of the ${draws} new Bitcoin deposit addresses tried already has transactions, so the deposit was not started. Try again in a few minutes.`
