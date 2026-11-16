@@ -166,10 +166,17 @@ export function deriveWithdrawalProgress(o: WithdrawalObservations): WithdrawalP
         false
       );
     case 'tx-dropped':
+      if (o.deadlinePassed) return lateWarning();
       return progress(
         'tx-replaced',
         'The withdrawal transaction was replaced or dropped from the Stacks mempool before it confirmed. A replacement with a higher fee makes the same withdrawal, so this page keeps checking for it.',
         false,
+        true
+      );
+    case 'tx-cancelled':
+      return progress(
+        'request-failed',
+        'Another transaction from your account was confirmed in place of the withdrawal, so the withdrawal never ran and no sBTC moved. Get a new quote to withdraw again.',
         true
       );
     case 'tx-failed':

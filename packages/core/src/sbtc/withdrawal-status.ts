@@ -483,6 +483,7 @@ export type WithdrawalStatus =
   | { kind: 'unknown-tx' }
   | { kind: 'tx-pending' }
   | { kind: 'tx-dropped'; txStatus: string; lookupError: string | null }
+  | { kind: 'tx-cancelled'; replacedBy: string }
   | { kind: 'tx-failed'; failure: WithdrawalTxFailure }
   | { kind: 'not-a-withdrawal'; message: string }
   | { kind: 'mismatch'; requestId: number | null; problems: string[]; soft: boolean }
@@ -534,6 +535,8 @@ export interface ContractCallIdentity {
   args: readonly string[];
 }
 
+const WITHDRAWAL_ARGUMENT_COUNT = 3;
+
 function plainArgs(args: readonly string[]): string {
   return JSON.stringify(args.map(arg => arg.toLowerCase().replace(/^0x/, '')));
 }
@@ -551,6 +554,7 @@ export function contractCallOf(tx: StacksTransaction): ContractCallIdentity | nu
 
 export function sameContractCall(a: ContractCallIdentity, b: ContractCallIdentity): boolean {
   return (
+    a.args.length === WITHDRAWAL_ARGUMENT_COUNT &&
     a.contractId === b.contractId &&
     a.functionName === b.functionName &&
     a.sender === b.sender &&
@@ -573,32 +577,48 @@ export function expectedWithdrawalCall(
   };
 }
 
+export type NonceFollowUp =
+  | { kind: 'replacement'; tx: StacksTransaction }
+  | { kind: 'cancelled'; tx: StacksTransaction }
+  | null;
+
+function sameSlot(a: StacksTransaction, b: StacksTransaction): boolean {
+  return a.sender_address === b.sender_address && a.nonce === b.nonce;
+}
+
 export async function findReplacementTransaction(
   config: Pick<WithdrawalStatusConfig, 'stxApiUrl'>,
   dropped: StacksTransaction,
   fetchFn?: FetchLike
-): Promise<StacksTransaction | null> {
-  if (dropped.nonce === undefined) return null;
+): Promise<NonceFollowUp> {
+  const original = contractCallOf(dropped);
+  if (dropped.nonce === undefined || original === null) return null;
   const droppedId = normalizeStacksTxid(dropped.tx_id);
-  const candidates = await fetchTransactionsAtNonce(
+  const { confirmed, pending } = await fetchTransactionsAtNonce(
     config.stxApiUrl,
     dropped.sender_address,
     dropped.nonce,
     fetchFn
   );
-  const original = contractCallOf(dropped);
-  const match = candidates.find(tx => {
+  function isOther(tx: StacksTransaction): boolean {
+    return normalizeStacksTxid(tx.tx_id) !== droppedId && !tx.tx_status.startsWith('dropped');
+  }
+  function makesTheSameCall(tx: StacksTransaction): boolean {
     const call = contractCallOf(tx);
-    return (
-      normalizeStacksTxid(tx.tx_id) !== droppedId &&
-      !tx.tx_status.startsWith('dropped') &&
-      original !== null &&
-      call !== null &&
-      sameContractCall(original, call)
-    );
-  });
-  if (!match) return null;
-  return (await fetchStacksTransaction(config.stxApiUrl, match.tx_id, fetchFn)) ?? match;
+    return call !== null && original !== null && sameContractCall(original, call);
+  }
+  const match = [...confirmed, ...pending].find(tx => isOther(tx) && makesTheSameCall(tx));
+  if (match) {
+    const reread = await fetchStacksTransaction(config.stxApiUrl, match.tx_id, fetchFn);
+    if (reread === null) return { kind: 'replacement', tx: match };
+    const same =
+      normalizeStacksTxid(reread.tx_id) === normalizeStacksTxid(match.tx_id) &&
+      sameSlot(reread, dropped) &&
+      makesTheSameCall(reread);
+    return same ? { kind: 'replacement', tx: reread } : null;
+  }
+  const other = confirmed.find(isOther);
+  return other ? { kind: 'cancelled', tx: other } : null;
 }
 
 async function statusOfTransaction(
@@ -667,16 +687,22 @@ export async function followWithdrawalStatus(
   if (!tx) return { stacksTxid: id, status: { kind: 'unknown-tx' } };
   const status = await statusOfTransaction(config, tx, expected, fetchFn);
   if (status.kind !== 'tx-dropped') return { stacksTxid: id, status };
-  let replacement: StacksTransaction | null;
+  let next: NonceFollowUp;
   try {
-    replacement = await findReplacementTransaction(config, tx, fetchFn);
+    next = await findReplacementTransaction(config, tx, fetchFn);
   } catch (err) {
     return { stacksTxid: id, status: { ...status, lookupError: errorMessage(err) ?? String(err) } };
   }
-  if (!replacement) return { stacksTxid: id, status };
+  if (next === null) return { stacksTxid: id, status };
+  if (next.kind === 'cancelled') {
+    return {
+      stacksTxid: id,
+      status: { kind: 'tx-cancelled', replacedBy: normalizeStacksTxid(next.tx.tx_id) },
+    };
+  }
   return {
-    stacksTxid: normalizeStacksTxid(replacement.tx_id),
-    status: await statusOfTransaction(config, replacement, expected, fetchFn),
+    stacksTxid: normalizeStacksTxid(next.tx.tx_id),
+    status: await statusOfTransaction(config, next.tx, expected, fetchFn),
   };
 }
 

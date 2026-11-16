@@ -295,9 +295,16 @@ describe('deriveWithdrawalProgress', () => {
         stacks: { kind: 'tx-dropped', txStatus: 'dropped_stale_garbage', lookupError: null },
         deadlinePassed: true,
       }),
-      'tx-replaced',
+      'deadline-passed',
       false,
       true,
+    ],
+    [
+      'another transaction was confirmed at the withdrawal’s nonce',
+      o({ stacks: { kind: 'tx-cancelled', replacedBy: 'ef'.repeat(32) } }),
+      'request-failed',
+      true,
+      false,
     ],
     [
       'the tx is not a withdrawal',

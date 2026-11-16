@@ -62,6 +62,7 @@ function stacksStatuses(o: WithdrawalObservation): Pick<Statuses, 'confirmed' | 
     case 'tx-dropped':
       return { confirmed: 'current', accepted: 'pending' };
     case 'tx-failed':
+    case 'tx-cancelled':
     case 'not-a-withdrawal':
       return { confirmed: 'failed', accepted: 'pending' };
     case 'mismatch':

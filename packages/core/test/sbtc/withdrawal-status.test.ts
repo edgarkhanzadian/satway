@@ -551,7 +551,7 @@ describe('following a dropped withdrawal transaction', () => {
     expect(followed).toEqual({ stacksTxid: pendingTxid, status: { kind: 'tx-pending' } });
   });
 
-  it('does not follow a transaction at the same nonce that makes a different call', async () => {
+  it('does not follow a confirmed different call at the same nonce, and ends the withdrawal', async () => {
     const other = structuredClone(w.requestTx);
     const call = defined(txOf(other).contract_call);
     const args = defined(call.function_args).map((a, i) =>
@@ -561,8 +561,92 @@ describe('following a dropped withdrawal transaction', () => {
     const followed = await followWithdrawalStatus(C, DROPPED_TXID, expectedOf(w), api.fetchFn);
     expect(followed).toEqual({
       stacksTxid: DROPPED_TXID,
-      status: { kind: 'tx-dropped', txStatus: 'dropped_replace_by_fee', lookupError: null },
+      status: { kind: 'tx-cancelled', replacedBy: w.requestTxid.replace(/^0x/, '') },
     });
+  });
+
+  it('ends the withdrawal when a different transaction confirmed at that nonce, like a wallet cancel', async () => {
+    const cancelTxid = 'ef'.repeat(32);
+    const cancel = {
+      tx_id: `0x${cancelTxid}`,
+      tx_status: 'success',
+      tx_type: 'token_transfer',
+      sender_address: w.sender,
+      nonce,
+      block_height: 9_000_000,
+    };
+    const api = apisWith([cancel], []);
+    const followed = await followWithdrawalStatus(C, DROPPED_TXID, expectedOf(w), api.fetchFn);
+    expect(followed).toEqual({
+      stacksTxid: DROPPED_TXID,
+      status: { kind: 'tx-cancelled', replacedBy: cancelTxid },
+    });
+  });
+
+  it('keeps waiting while the only other transaction at that nonce is still in the mempool', async () => {
+    const pending = {
+      tx_id: `0x${'ef'.repeat(32)}`,
+      tx_status: 'pending',
+      tx_type: 'token_transfer',
+      sender_address: w.sender,
+      nonce,
+    };
+    const api = apisWith([], [pending]);
+    const followed = await followWithdrawalStatus(C, DROPPED_TXID, expectedOf(w), api.fetchFn);
+    expect(followed.status.kind).toBe('tx-dropped');
+  });
+
+  it('never matches a call with no arguments, even to the same function', async () => {
+    const empty = (tx: StacksTransaction): StacksTransaction => ({
+      ...tx,
+      contract_call: { ...defined(tx.contract_call), function_args: [] },
+    });
+    const routes = routesFor(w);
+    const pendingTxid = 'cd'.repeat(32);
+    const pending = {
+      ...empty(txOf(w.requestTx)),
+      tx_id: `0x${pendingTxid}`,
+      tx_status: 'pending',
+    };
+    const api = fakeWithdrawalApis({
+      ...routes,
+      stacksTxs: { ...routes.stacksTxs, [DROPPED_TXID]: empty(droppedTx) },
+      overrides: {
+        [confirmedUrl]: jsonResponse({ results: [] }),
+        [mempoolUrl]: jsonResponse({ results: [pending] }),
+      },
+    });
+    const followed = await followWithdrawalStatus(C, DROPPED_TXID, expectedOf(w), api.fetchFn);
+    expect(followed.stacksTxid).toBe(DROPPED_TXID);
+  });
+
+  it('does not follow a replacement whose re-read by ID shows another sender, nonce or call', async () => {
+    const pendingTxid = 'cd'.repeat(32);
+    const listed = {
+      ...txOf(w.requestTx),
+      tx_id: `0x${pendingTxid}`,
+      tx_status: 'pending',
+      tx_result: undefined,
+      events: [],
+    };
+    for (const reread of [
+      { ...listed, sender_address: 'SP2J6ZY48GV1EZ5V2V5RB9MP66SW86PYKKNRV9EJ7' },
+      { ...listed, nonce: nonce + 1 },
+      { ...listed, contract_call: { ...defined(listed.contract_call), function_name: 'other' } },
+    ]) {
+      const routes = routesFor(w);
+      const api = fakeWithdrawalApis({
+        ...routes,
+        stacksTxs: { ...routes.stacksTxs, [DROPPED_TXID]: droppedTx, [pendingTxid]: reread },
+        overrides: {
+          [confirmedUrl]: jsonResponse({ results: [] }),
+          [mempoolUrl]: jsonResponse({ results: [listed] }),
+        },
+      });
+      const followed = await followWithdrawalStatus(C, DROPPED_TXID, expectedOf(w), api.fetchFn);
+      expect(followed.stacksTxid).toBe(DROPPED_TXID);
+      expect(followed.status.kind).toBe('tx-dropped');
+    }
   });
 
   it('keeps watching the dropped transaction when the replacement lookup fails', async () => {

@@ -5,6 +5,7 @@ import { deliverFromSigners, startWithdrawal, toDelivered } from '../src/scenari
 
 const WITHDRAWALS = 'satway.withdrawals.v1';
 const REPLACED = /^The withdrawal transaction was replaced or dropped from the Stacks mempool/;
+const CANCELLED = /^Another transaction from your account was confirmed in place of the withdrawal/;
 
 async function savedTxids(app: SatwayApp): Promise<(string | null)[]> {
   const raw = (await app.storage())[WITHDRAWALS] ?? '[]';
@@ -53,21 +54,25 @@ test.describe('X8. a fee-bumped replacement at the same nonce', () => {
     await deliverFromSigners(withdraw, world);
   });
 
-  test('a different withdrawal call at that nonce is not followed', async ({
-    app,
-    world,
-    wallets,
-  }) => {
-    const { withdraw } = await startWithdrawal(app, world, wallets);
-    await withdraw.waitFor(WITHDRAW_PROGRESS.awaitingTx);
-    const original = world.withdrawals.stacks.latestCall();
-    const other = world.withdrawals.stacks.replaceByFee(original.txid, 'different-call');
-    await withdraw.waitFor(REPLACED);
-    world.withdrawals.stacks.mineOther(other.txid);
-    await app.fastForward(60_000);
-    await withdraw.waitFor(REPLACED);
-    await expect(app.page.getByText(`0x${original.txid}`)).toBeVisible();
-    await expect(app.page.getByText(`0x${other.txid}`)).toHaveCount(0);
-    expect(await savedTxids(app)).toEqual([original.txid]);
-  });
+  for (const kind of ['different-call', 'cancel'] as const) {
+    test(`a ${kind} transaction at that nonce is not followed, and once confirmed the withdrawal ends`, async ({
+      app,
+      world,
+      wallets,
+    }) => {
+      const { withdraw } = await startWithdrawal(app, world, wallets);
+      await withdraw.waitFor(WITHDRAW_PROGRESS.awaitingTx);
+      const original = world.withdrawals.stacks.latestCall();
+      const other = world.withdrawals.stacks.replaceByFee(original.txid, kind);
+      await withdraw.waitFor(REPLACED);
+      expect(await savedTxids(app)).toEqual([original.txid]);
+      world.withdrawals.stacks.mineOther(other.txid);
+      await withdraw.waitFor(CANCELLED);
+      await expect(app.page.getByText(`0x${original.txid}`)).toBeVisible();
+      await expect(app.page.getByText(`0x${other.txid}`)).toHaveCount(0);
+      await expect(app.page.getByRole('button', { name: 'Start another' })).toBeVisible();
+      expect(await savedTxids(app)).toEqual([original.txid]);
+      expect(world.withdrawals.stacks.requests.size).toBe(0);
+    });
+  }
 });

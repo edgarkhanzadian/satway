@@ -103,12 +103,17 @@ export async function fetchStacksTransaction(
 
 const transactionListSchema = z.looseObject({ results: z.array(stacksTransactionSchema) });
 
+export interface TransactionsAtNonce {
+  confirmed: StacksTransaction[];
+  pending: StacksTransaction[];
+}
+
 export async function fetchTransactionsAtNonce(
   stxApiUrl: string,
   sender: string,
   nonce: number,
   fetchFn: FetchLike = defaultFetch
-): Promise<StacksTransaction[]> {
+): Promise<TransactionsAtNonce> {
   if (!Number.isSafeInteger(nonce) || nonce < 0) throw new Error('A nonce is a whole number');
   const who = encodeURIComponent(sender);
   const [confirmed, pending] = await Promise.all([
@@ -123,9 +128,13 @@ export async function fetchTransactionsAtNonce(
       transactionListSchema
     ),
   ]);
-  return [...confirmed.results, ...pending.results].filter(
-    tx => tx.sender_address === sender && tx.nonce === nonce
-  );
+  function atNonce(tx: StacksTransaction): boolean {
+    return tx.sender_address === sender && tx.nonce === nonce;
+  }
+  return {
+    confirmed: confirmed.results.filter(atNonce),
+    pending: pending.results.filter(atNonce),
+  };
 }
 
 const READ_ONLY_SENDER = 'SP000000000000000000002Q6VF78';
