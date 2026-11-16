@@ -4,6 +4,7 @@ import {
   type OneClickQuoteResponse,
   type OneClickStatusResponse,
   assertStatusMatchesQuote,
+  isSwapNotListed,
   oneClickQuoteResponseSchema,
   parseOneClickStatus,
 } from '../oneclick/index.js';
@@ -20,7 +21,7 @@ import {
   fetchWithdrawalLimits,
   withdrawalFeeCap,
 } from '../sbtc/index.js';
-import { type FetchLike, type WithdrawalFlowConfig, parseWith } from '../shared/index.js';
+import { type FetchLike, type WithdrawalFlowConfig, parseWith, sleep } from '../shared/index.js';
 import { buildWithdrawalQuoteRequest } from './build-quote-request.js';
 import { verifyWithdrawalQuote } from './verify-quote.js';
 
@@ -29,6 +30,8 @@ export interface WithdrawalDependencies {
   requestQuote(request: OneClickQuoteRequest): Promise<unknown>;
   fetchSwapStatus(depositAddress: string): Promise<unknown>;
   now?(): Date;
+  sleep?(ms: number, signal?: AbortSignal): Promise<void>;
+  signal?: AbortSignal;
 }
 
 export interface PrepareWithdrawalInput {
@@ -68,6 +71,31 @@ export type PreparedWithdrawal =
   | { ok: false; amountCheck: WithdrawalAmountCheck; limits: WithdrawalLimits }
   | { ok: true; receipt: WithdrawalReceipt };
 
+export const SWAP_LISTING_RETRY_DELAYS_MS: readonly number[] = [1_000, 2_000, 3_000, 3_000];
+
+async function listedSwapStatus(
+  depositAddress: string,
+  deps: WithdrawalDependencies
+): Promise<unknown> {
+  const wait = deps.sleep ?? sleep;
+  for (let attempt = 0; ; attempt += 1) {
+    deps.signal?.throwIfAborted();
+    try {
+      return await deps.fetchSwapStatus(depositAddress);
+    } catch (err) {
+      if (!isSwapNotListed(err)) throw err;
+      const delayMs = SWAP_LISTING_RETRY_DELAYS_MS[attempt];
+      if (delayMs === undefined) {
+        throw new Error(
+          '1Click has not listed the new swap yet, so nothing was sent. Try again in a minute.',
+          { cause: err }
+        );
+      }
+      await wait(delayMs, deps.signal);
+    }
+  }
+}
+
 export async function prepareWithdrawal(
   config: WithdrawalFlowConfig,
   input: PrepareWithdrawalInput,
@@ -105,7 +133,7 @@ export async function prepareWithdrawal(
 
   const rawDepositAddress = quoteResponse.quote.depositAddress ?? verified.depositAddress;
   const status: OneClickStatusResponse = parseOneClickStatus(
-    await deps.fetchSwapStatus(rawDepositAddress)
+    await listedSwapStatus(rawDepositAddress, deps)
   );
   assertStatusMatchesQuote(quoteResponse, status);
   if (status.status !== 'PENDING_DEPOSIT') {

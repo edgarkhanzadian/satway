@@ -6,6 +6,7 @@ import {
   RequestTimeoutError,
   ResponseShapeError,
   SLOW_REQUEST_TIMEOUT_MS,
+  SwapNotListedError,
 } from '@satway/core';
 
 import { createBackend } from '../../src/shared/backend.js';
@@ -123,6 +124,17 @@ describe('createBackend', () => {
   it('still surfaces the server message on an error status', async () => {
     answer({ message: 'refundTo is not valid' }, 400);
     await expect(createBackend(BASE).tokens()).rejects.toThrow('refundTo is not valid');
+  });
+
+  it('marks a status the swap provider has not listed yet', async () => {
+    answer({ message: 'Deposit address bc1qabc not found', statusCode: 404 }, 404);
+    const attempt = createBackend(BASE).status('bc1qabc');
+    await expect(attempt).rejects.toBeInstanceOf(SwapNotListedError);
+    await expect(attempt).rejects.toThrow('Deposit address bc1qabc not found');
+    answer({ message: 'Upstream error' }, 502);
+    await expect(createBackend(BASE).status('bc1qabc')).rejects.not.toBeInstanceOf(
+      SwapNotListedError
+    );
   });
 });
 

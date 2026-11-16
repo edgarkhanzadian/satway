@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   MAINNET_WITHDRAWAL_FLOW_CONFIG as C,
+  HttpError,
   type OneClickQuoteRequest,
   type OneClickQuoteResponse,
   type PrepareWithdrawalInput,
+  SWAP_LISTING_RETRY_DELAYS_MS,
+  SwapNotListedError,
   assertRecipientRoundTrip,
   decodeWithdrawalArguments,
   oneClickQuoteResponseSchema,
@@ -240,6 +243,115 @@ describe('prepareWithdrawal', () => {
       }),
     });
     await expect(prepareWithdrawal(C, input, d.deps)).rejects.toThrow(/testnet/);
+  });
+
+  it('waits for 1Click to list a fresh swap before reading its status', async () => {
+    const slept: number[] = [];
+    let misses = 2;
+    const d = deps({
+      status(q) {
+        if (misses > 0) {
+          misses -= 1;
+          throw new SwapNotListedError('Deposit address not found');
+        }
+        return statusFor(q);
+      },
+    });
+    const prepared = await prepareWithdrawal(C, input, {
+      ...d.deps,
+      sleep(ms) {
+        slept.push(ms);
+        return Promise.resolve();
+      },
+    });
+    expect(prepared.ok).toBe(true);
+    expect(slept).toEqual(SWAP_LISTING_RETRY_DELAYS_MS.slice(0, 2));
+    expect(d.seen.statusFor).toHaveLength(3);
+    expect(d.seen.requests).toHaveLength(1);
+  });
+
+  it('treats an HTTP 404 from 1Click as a swap that is not listed yet', async () => {
+    let misses = 1;
+    const d = deps({
+      status(q) {
+        if (misses > 0) {
+          misses -= 1;
+          throw new HttpError(404, 'https://1click/v0/status', 'not found');
+        }
+        return statusFor(q);
+      },
+    });
+    const prepared = await prepareWithdrawal(C, input, {
+      ...d.deps,
+      sleep: () => Promise.resolve(),
+    });
+    expect(prepared.ok).toBe(true);
+    expect(d.seen.statusFor).toHaveLength(2);
+  });
+
+  it('gives up with a clear message when the swap never gets listed', async () => {
+    const slept: number[] = [];
+    const d = deps({
+      status() {
+        throw new SwapNotListedError('Deposit address not found');
+      },
+    });
+    const attempt = prepareWithdrawal(C, input, {
+      ...d.deps,
+      sleep(ms) {
+        slept.push(ms);
+        return Promise.resolve();
+      },
+    });
+    await expect(attempt).rejects.toThrow(/1Click has not listed the new swap yet/);
+    expect(slept).toEqual([...SWAP_LISTING_RETRY_DELAYS_MS]);
+    expect(d.seen.statusFor).toHaveLength(SWAP_LISTING_RETRY_DELAYS_MS.length + 1);
+    const total = SWAP_LISTING_RETRY_DELAYS_MS.reduce((sum, ms) => sum + ms, 0);
+    expect(total).toBeGreaterThanOrEqual(5_000);
+    expect(total).toBeLessThanOrEqual(10_000);
+  });
+
+  it('does not retry a status that answers with a mismatch or another failure', async () => {
+    const slept: number[] = [];
+    function sleep(ms: number) {
+      slept.push(ms);
+      return Promise.resolve();
+    }
+    const mismatch = deps({
+      status: q =>
+        statusFor({ ...q, quote: { ...q.quote, depositAddress: PLACEHOLDER_REFUND_P2WPKH } }),
+    });
+    await expect(prepareWithdrawal(C, input, { ...mismatch.deps, sleep })).rejects.toThrow(
+      /differs/
+    );
+    expect(mismatch.seen.statusFor).toHaveLength(1);
+    const down = deps({
+      status() {
+        throw new HttpError(500, 'https://1click/v0/status', 'boom');
+      },
+    });
+    await expect(prepareWithdrawal(C, input, { ...down.deps, sleep })).rejects.toThrow(/HTTP 500/);
+    expect(down.seen.statusFor).toHaveLength(1);
+    expect(slept).toEqual([]);
+  });
+
+  it('stops waiting for the swap listing when aborted', async () => {
+    const controller = new AbortController();
+    const d = deps({
+      status() {
+        throw new SwapNotListedError('Deposit address not found');
+      },
+    });
+    const attempt = prepareWithdrawal(C, input, {
+      ...d.deps,
+      signal: controller.signal,
+      sleep() {
+        controller.abort(new Error('user left'));
+        return Promise.resolve();
+      },
+    });
+    await expect(attempt).rejects.toThrow(/user left/);
+    expect(d.seen.statusFor).toHaveLength(1);
   });
 
   it('passes upstream errors from the quote call', async () => {

@@ -8,7 +8,7 @@ import {
   withTimeout,
   z,
 } from '../../src/index.js';
-import { requestJson } from '../../src/shared/index.js';
+import { requestJson, sleep } from '../../src/shared/index.js';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -90,5 +90,33 @@ describe('request timeouts', () => {
     );
     outer.abort(new Error('the page moved on'));
     await expect(pending).rejects.toThrow('the page moved on');
+  });
+});
+
+describe('sleep', () => {
+  it('waits for the given time', async () => {
+    vi.useFakeTimers();
+    let done = false;
+    async function run() {
+      await sleep(1_000);
+      done = true;
+    }
+    const pending = run();
+    await vi.advanceTimersByTimeAsync(999);
+    expect(done).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await pending;
+    expect(done).toBe(true);
+  });
+
+  it('ends early when the signal aborts, leaving the caller to notice', async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const pending = sleep(60_000, controller.signal);
+    controller.abort(new Error('gone'));
+    await pending;
+    expect(controller.signal.aborted).toBe(true);
+    const aborted = AbortSignal.abort();
+    await sleep(60_000, aborted);
   });
 });

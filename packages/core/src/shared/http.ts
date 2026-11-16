@@ -99,6 +99,24 @@ export async function requestText(
   return text;
 }
 
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise(resolve => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    function stop() {
+      clearTimeout(timer);
+      resolve();
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', stop);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', stop, { once: true });
+  });
+}
+
 export function defaultFetch(input: string, init?: RequestInit): Promise<Response> {
   return fetch(input, init);
 }

@@ -5,6 +5,7 @@ import {
   type OneClickToken,
   type RequestOptions,
   SLOW_REQUEST_TIMEOUT_MS,
+  SwapNotListedError,
   oneClickQuoteResponseSchema,
   oneClickStatusResponseSchema,
   oneClickTokensSchema,
@@ -58,9 +59,22 @@ async function send(url: string, init?: RequestOptions): Promise<{ res: Response
   return { res, body };
 }
 
-async function call<T>(url: string, schema: z.ZodType<T>, init?: RequestOptions): Promise<T> {
+function plainFailure(_status: number, message: string): Error {
+  return new Error(message);
+}
+
+function statusFailure(status: number, message: string): Error {
+  return status === 404 ? new SwapNotListedError(message) : new Error(message);
+}
+
+async function call<T>(
+  url: string,
+  schema: z.ZodType<T>,
+  init?: RequestOptions,
+  failure: (status: number, message: string) => Error = plainFailure
+): Promise<T> {
   const { res, body } = await send(url, init);
-  if (!res.ok) throw new Error(messageOf(body) ?? `Request failed (${res.status})`);
+  if (!res.ok) throw failure(res.status, messageOf(body) ?? `Request failed (${res.status})`);
   return parseWith(schema, body, `the backend at ${endpointOf(url)}`);
 }
 
@@ -105,7 +119,12 @@ export function createBackend(baseUrl: string): Backend {
     status(depositAddress, depositMemo) {
       const params = new URLSearchParams({ depositAddress });
       if (depositMemo) params.set('depositMemo', depositMemo);
-      return call(`${base}/status?${params.toString()}`, oneClickStatusResponseSchema);
+      return call(
+        `${base}/status?${params.toString()}`,
+        oneClickStatusResponseSchema,
+        undefined,
+        statusFailure
+      );
     },
     async register(depositScript, reclaimScript, swapDepositAddress) {
       const url = `${base}/deposits`;
