@@ -160,6 +160,32 @@ export async function liveQuoteFor(
   };
 }
 
+const MINUTE_MS = 60_000;
+const FRESH_QUOTE = 'Select Continue for a fresh quote.';
+
+export function signingRefusal(
+  config: Pick<
+    WithdrawalFlowConfig,
+    'maxSigningQuoteAgeMinutes' | 'minSigningDeadlineMarginMinutes'
+  >,
+  quote: Pick<WithdrawalReceipt, 'preparedAt' | 'quoteDeadline'>,
+  now: Date
+): string | null {
+  const deadline = Date.parse(quote.quoteDeadline);
+  const left = deadline - now.getTime();
+  if (!Number.isFinite(deadline) || left <= 0) {
+    return `This quote has expired, so the wallet was not asked to sign. ${FRESH_QUOTE}`;
+  }
+  const age = now.getTime() - Date.parse(quote.preparedAt);
+  if (!Number.isFinite(age) || age > config.maxSigningQuoteAgeMinutes * MINUTE_MS) {
+    return `This quote is more than ${config.maxSigningQuoteAgeMinutes} minutes old, so the wallet was not asked to sign. ${FRESH_QUOTE}`;
+  }
+  if (left < config.minSigningDeadlineMarginMinutes * MINUTE_MS) {
+    return `Less than ${config.minSigningDeadlineMarginMinutes / 60} hours remain before this quote’s deadline, too little time for the payout to reach the swap, so the wallet was not asked to sign. ${FRESH_QUOTE}`;
+  }
+  return null;
+}
+
 export function describeQuoteChange(
   change: QuoteChange,
   preview: Pick<WithdrawalPreview, 'amountOut' | 'minAmountOut' | 'maxFeeSats'>,

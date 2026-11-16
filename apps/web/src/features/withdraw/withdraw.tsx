@@ -41,6 +41,7 @@ import {
   previewFor,
   sats,
   satsOrNull,
+  signingRefusal,
   withdrawalDestinations,
 } from './flow.js';
 import { WithdrawalTracking } from './tracking.js';
@@ -300,8 +301,9 @@ function WithdrawForm(
 
   async function sign(quote: LiveQuote) {
     if (!token || signing) return;
-    if (Date.parse(quote.receipt.quoteDeadline) <= Date.now()) {
-      setError('This quote has expired, so the wallet was not asked to sign. Get a new quote.');
+    const refusal = signingRefusal(config, quote.receipt, new Date());
+    if (refusal) {
+      setError(refusal);
       setLive(null);
       return;
     }

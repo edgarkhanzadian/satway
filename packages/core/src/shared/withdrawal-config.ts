@@ -8,6 +8,8 @@ export interface WithdrawalConfig {
   readonly tokenAssetName: string;
   readonly minWithdrawalSats: number;
   readonly withdrawalDeadlineMinutes: number;
+  readonly maxSigningQuoteAgeMinutes: number;
+  readonly minSigningDeadlineMarginMinutes: number;
   readonly withdrawalSlippageOptionsBps: readonly number[];
   readonly withdrawalDefaultSlippageBps: number;
   readonly soloSweepVsize: number;
@@ -26,6 +28,8 @@ export const MAINNET_WITHDRAWAL_CONFIG: WithdrawalConfig = Object.freeze({
   tokenAssetName: 'sbtc-token',
   minWithdrawalSats: 10_000,
   withdrawalDeadlineMinutes: 2_880,
+  maxSigningQuoteAgeMinutes: 15,
+  minSigningDeadlineMarginMinutes: 1_440,
   withdrawalSlippageOptionsBps: Object.freeze([100, 300]),
   withdrawalDefaultSlippageBps: 100,
   soloSweepVsize: 380,

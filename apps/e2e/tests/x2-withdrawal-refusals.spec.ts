@@ -171,6 +171,27 @@ test.describe('X2. a withdrawal that is refused before anything is signed or sen
     expect(world.oneClick.quotes).toHaveLength(0);
   });
 
+  test('a live quote older than 15 minutes is not signed; Continue fetches a fresh one', async ({
+    app,
+    world,
+    wallets,
+  }) => {
+    const withdraw = await openWithdraw(app, world, wallets, { destinationWallet: 'evm' });
+    await quoteWithdrawal(withdraw);
+    await withdraw.continueToConfirm();
+    await app.fastForward(15 * 60_000 + 1_000);
+    await withdraw.signButton.click();
+    await expect(app.page.getByRole('alert')).toHaveText(
+      'This quote is more than 15 minutes old, so the wallet was not asked to sign. Select Continue for a fresh quote.'
+    );
+    expect(wallets.stacks.behaviour.calls('stx_callContract')).toHaveLength(0);
+    const live = world.oneClick.quotes.filter(q => !q.dry).length;
+    await withdraw.continueToConfirm();
+    expect(world.oneClick.quotes.filter(q => !q.dry)).toHaveLength(live + 1);
+    const started = await withdraw.sign();
+    expect(started.receipt.stacksTxid).toBe(world.withdrawals.stacks.latestCall().txid);
+  });
+
   test('the live quote is worse than the preview: the confirm step says so before signing', async ({
     app,
     world,

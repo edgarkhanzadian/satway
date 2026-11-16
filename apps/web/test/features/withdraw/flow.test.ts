@@ -18,6 +18,7 @@ import {
   parseSats,
   previewFor,
   satsOrNull,
+  signingRefusal,
   withdrawalDestinations,
 } from '../../../src/features/withdraw/flow.js';
 import {
@@ -242,5 +243,41 @@ describe('describeQuoteChange', () => {
       'The guaranteed minimum is now 6.450415 USDC, down from 6.452028 USDC.',
       'Bitcoin fees went up: the signers’ fee cap is now 3,040 sats, up from 3,000.',
     ]);
+  });
+});
+
+describe('signingRefusal', () => {
+  const preparedAt = '2026-11-14T17:00:00.000Z';
+  const quoteDeadline = '2026-11-16T17:00:00.000Z';
+  const at = (iso: string) => signingRefusal(W, { preparedAt, quoteDeadline }, new Date(iso));
+
+  it('names its thresholds in the withdrawal config', () => {
+    expect(W.maxSigningQuoteAgeMinutes).toBe(15);
+    expect(W.minSigningDeadlineMarginMinutes).toBe(1_440);
+  });
+
+  it('lets a fresh quote with a long way to its deadline be signed', () => {
+    expect(at('2026-11-14T17:00:00.000Z')).toBeNull();
+    expect(at('2026-11-14T17:15:00.000Z')).toBeNull();
+  });
+
+  it('refuses a live quote older than 15 minutes', () => {
+    expect(at('2026-11-14T17:15:01.000Z')).toBe(
+      'This quote is more than 15 minutes old, so the wallet was not asked to sign. Select Continue for a fresh quote.'
+    );
+  });
+
+  it('refuses when less than 24 hours remain before the deadline, or it has passed', () => {
+    const near = signingRefusal(
+      W,
+      { preparedAt, quoteDeadline: '2026-11-15T16:59:59.000Z' },
+      new Date(preparedAt)
+    );
+    expect(near).toBe(
+      'Less than 24 hours remain before this quote’s deadline, too little time for the payout to reach the swap, so the wallet was not asked to sign. Select Continue for a fresh quote.'
+    );
+    expect(signingRefusal(W, { preparedAt, quoteDeadline: preparedAt }, new Date(preparedAt))).toBe(
+      'This quote has expired, so the wallet was not asked to sign. Select Continue for a fresh quote.'
+    );
   });
 });
