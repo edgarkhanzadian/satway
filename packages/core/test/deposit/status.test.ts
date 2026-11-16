@@ -390,6 +390,12 @@ describe('deriveProgress: a minted output that may not be this swap’s payout',
     });
   });
 
+  it('a deposit found without a swap is done once its outputs are minted, with no swap note', () => {
+    const p = deriveProgress({ ...obs({ swap: null, payouts: [mintedExtra] }), swapless: true });
+    expect(p).toMatchObject({ stage: 'done', terminal: true });
+    expect(p.message).not.toMatch(/swap status/);
+  });
+
   it('with no payout named by 1Click any minted output counts', () => {
     const p = deriveProgress(obs({ swap: 'SUCCESS', payouts: [mintedExtra] }));
     expect(p).toMatchObject({ stage: 'done', terminal: true });

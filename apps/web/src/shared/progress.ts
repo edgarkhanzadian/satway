@@ -166,7 +166,7 @@ export async function checkFoundDeposit(
   ctx: WatchedDepositContext,
   fetchFn?: FetchLike
 ): Promise<Snapshot> {
-  const observed = await observeDeposit(config, ctx, null, { fetchFn });
+  const observed = await observeDeposit(config, ctx, null, { fetchFn, swapless: true });
   return {
     ...(await registerObserved(config, ctx, observed, fetchFn)),
     remaining: null,

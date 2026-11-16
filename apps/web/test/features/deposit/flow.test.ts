@@ -26,7 +26,13 @@ import {
   type BackgroundRegistration,
   createBackend,
 } from '../../../src/shared/backend.js';
-import { ProgressReadError, checkProgress, paymentView } from '../../../src/shared/progress.js';
+import {
+  ProgressReadError,
+  checkFoundDeposit,
+  checkProgress,
+  depositContextOf,
+  paymentView,
+} from '../../../src/shared/progress.js';
 import {
   MAX_UNREADABLE_BACKUPS,
   RECEIPTS_KEY,
@@ -866,6 +872,14 @@ describe('checkProgress: payments to the deposit address', () => {
     const again = await checkProgress(config, w.backend, receipt, w.fetchFn, first.mints);
     expect(w.urls.slice(start).some(u => u.includes(`/deposit/${D.txid}/0`))).toBe(false);
     expect(again.progress).toMatchObject({ stage: 'done', terminal: true });
+  });
+
+  it('a deposit found without a receipt has no swap, so a minted output is the end', async () => {
+    const w = world({ payoutVout: 0, mint: 'confirmed' });
+    const receipt = await receiptFor(w);
+    const snap = await checkFoundDeposit(config, depositContextOf(receipt), w.fetchFn);
+    expect(snap.progress).toMatchObject({ stage: 'done', terminal: true });
+    expect(snap.progress.message).not.toMatch(/swap status/);
   });
 
   it('a minted output with the swap status unreadable keeps the page checking', async () => {

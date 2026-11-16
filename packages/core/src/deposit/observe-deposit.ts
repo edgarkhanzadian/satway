@@ -46,6 +46,7 @@ export interface WatchedDepositContext {
 
 export interface DepositObservation {
   swap: OneClickSwapStatus | null;
+  swapless: boolean;
   payoutTxids: string[];
   outputs: AddressOutput[];
   payouts: AddressOutput[];
@@ -101,7 +102,7 @@ export function classifyRegistrationError(err: unknown, sbtcApiUrl: string): Reg
 function progressFor(
   o: Pick<
     DepositObservation,
-    'swap' | 'payoutTxids' | 'payouts' | 'mints' | 'tipHeight' | 'spenders'
+    'swap' | 'swapless' | 'payoutTxids' | 'payouts' | 'mints' | 'tipHeight' | 'spenders'
   >,
   reclaimLockBlocks: number
 ): Progress {
@@ -115,6 +116,7 @@ function progressFor(
     swap: o.swap,
     payouts,
     payoutTxids: o.payoutTxids,
+    swapless: o.swapless,
     tipHeight: o.tipHeight,
     reclaimLockBlocks,
   });
@@ -187,6 +189,7 @@ export async function observeDeposit(
     fetchFn?: FetchLike;
     maxPages?: DepositOutputsOptions['maxPages'];
     known?: ReadonlyMap<string, MintStatus>;
+    swapless?: boolean;
   } = {}
 ): Promise<DepositObservation> {
   const fetchFn = options.fetchFn;
@@ -241,7 +244,8 @@ export async function observeDeposit(
   }
 
   const swap = status?.status ?? null;
-  const observed = { swap, payoutTxids, payouts, mints, tipHeight, spenders };
+  const swapless = options.swapless === true && status === null;
+  const observed = { swap, swapless, payoutTxids, payouts, mints, tipHeight, spenders };
   return {
     ...observed,
     outputs: fetched.outputs,

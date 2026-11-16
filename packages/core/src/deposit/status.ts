@@ -35,6 +35,7 @@ export interface Observations {
   swap: OneClickSwapStatus | null;
   payouts: readonly PayoutObservation[];
   payoutTxids?: readonly string[];
+  swapless?: boolean;
   tipHeight: number | null;
   reclaimLockBlocks: number;
 }
@@ -256,7 +257,7 @@ export function deriveProgress(o: Observations): Progress {
     return alongside(swapProgress(o.swap), each, arrivedEarlyNote(each.length));
   }
   const all = combined(each) ?? swapProgress(o.swap);
-  if (o.swap === 'SUCCESS') return all;
+  if (o.swap === 'SUCCESS' || (o.swap === null && o.swapless === true)) return all;
   if (o.swap === null && all.terminal) {
     return { ...all, terminal: false, message: `${all.message} ${STATUS_UNKNOWN_NOTE}` };
   }
