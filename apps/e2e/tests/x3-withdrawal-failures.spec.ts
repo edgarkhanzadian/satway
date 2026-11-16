@@ -55,7 +55,9 @@ test.describe('X3. a withdrawal that fails after it was signed', () => {
     await withdraw.waitFor(WITHDRAW_PROGRESS.awaitingTx);
     world.withdrawals.confirmRequest('dropped');
     await withdraw.waitFor(/^The withdrawal transaction was replaced or dropped/);
-    await expect(app.page.getByRole('heading', { name: 'Withdrawal in progress' })).toBeVisible();
+    await expect(
+      app.page.getByRole('heading', { name: 'Withdrawal transaction replaced' })
+    ).toBeVisible();
     await expect(app.page.getByText(/No sBTC moved|start a new withdrawal/)).toHaveCount(0);
     await expect(app.page.getByRole('button', { name: 'Hide' })).toBeVisible();
     const reads = world.requestsTo('hiro', { caller: 'page' }).length;

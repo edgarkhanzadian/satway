@@ -68,7 +68,7 @@ function stacksStatuses(o: WithdrawalObservation): Pick<Statuses, 'confirmed' | 
     case 'mismatch':
       if (stacks.requestId === null) return { confirmed: 'failed', accepted: 'pending' };
       return o.progress.stage === 'rechecking'
-        ? { confirmed: 'done', accepted: 'current' }
+        ? { confirmed: 'done', accepted: 'pending' }
         : { confirmed: 'done', accepted: 'failed' };
     case 'requested':
       return { confirmed: 'done', accepted: 'current' };
@@ -159,6 +159,8 @@ const HEADINGS: Readonly<Partial<Record<WithdrawalStage, string>>> = Object.free
   refunded: 'Swap refunded',
   'swap-failed': 'Swap failed',
   mismatch: 'Withdrawal needs attention',
+  'tx-replaced': 'Withdrawal transaction replaced',
+  rechecking: 'Checking the withdrawal again',
   'needs-support': 'Withdrawal needs attention',
 });
 

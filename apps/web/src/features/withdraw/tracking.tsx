@@ -344,7 +344,7 @@ function Following(props: {
         </p>
       )}
 
-      <p className={notice({ tone: 'status' })} role="status">
+      <p className={notice({ tone: progress?.warning ? 'warn' : 'status' })} role="status">
         {progress?.message ?? 'Checking…'}
       </p>
       {stage !== null && <p className={advice}>{withdrawalAdvice(stage, receipt)}</p>}

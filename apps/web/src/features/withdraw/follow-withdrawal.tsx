@@ -122,7 +122,7 @@ export function FollowWithdrawal(props: {
 
       {receipt && (
         <>
-          <p className={notice({ tone: 'status' })} role="status">
+          <p className={notice({ tone: progress?.warning ? 'warn' : 'status' })} role="status">
             {receipt.stacksTxid === null
               ? 'This browser never got a transaction ID from the wallet for this withdrawal.'
               : (progress?.message ?? 'Checking…')}

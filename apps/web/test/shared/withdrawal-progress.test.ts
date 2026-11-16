@@ -142,7 +142,8 @@ describe('withdrawalMilestones', () => {
   it('marks no step failed while a registry lag is being rechecked', () => {
     const lag = observationOf({ stacks: STACKS.registryLag, softMismatches: 1 });
     expect(lag.progress).toMatchObject({ stage: 'rechecking', terminal: false });
-    expect(statuses(lag)).toEqual(['done', 'done', 'current', 'pending', 'pending', 'pending']);
+    expect(statuses(lag)).toEqual(['done', 'done', 'pending', 'pending', 'pending', 'pending']);
+    expect(lag.progress.warning).toBe(true);
     const settled = observationOf({ stacks: STACKS.registryLag, softMismatches: 3 });
     expect(settled.progress.stage).toBe('mismatch');
     expect(statuses(settled)).toEqual(['done', 'done', 'failed', 'pending', 'pending', 'pending']);
@@ -213,8 +214,10 @@ describe('withdrawalHeading and withdrawalAdvice', () => {
     const stages: WithdrawalStage[] = ['tx-replaced', 'rechecking'];
     for (const stage of stages) {
       expect(withdrawalAdvice(stage, r)).not.toMatch(/new withdrawal|did not leave/);
-      expect(withdrawalHeading(stage)).toBe('Withdrawal in progress');
+      expect(withdrawalHeading(stage)).not.toMatch(/failed|complete/);
     }
+    expect(withdrawalHeading('tx-replaced')).toBe('Withdrawal transaction replaced');
+    expect(withdrawalHeading('rechecking')).toBe('Checking the withdrawal again');
   });
 });
 
