@@ -22,7 +22,13 @@ import {
   runNotifier,
   swapsFinal,
 } from '../src/notifier/index.js';
-import { INDEX_KEY, getIndex, registrationKey, registrationKeyParts } from '../src/store/index.js';
+import {
+  INDEX_KEY,
+  emptyIndex,
+  getIndex,
+  registrationKey,
+  registrationKeyParts,
+} from '../src/store/index.js';
 import {
   CHAIN,
   D,
@@ -727,6 +733,25 @@ describe('runNotifier', () => {
     const report = await runNotifier(kv, endpoints, w.fetchFn, run);
     expect(kv.data.has(registrationKey('bc1pbroken', '0xbroken'))).toBe(false);
     expect(report.notified).toHaveLength(1);
+  });
+
+  it('a failing list still folds what is pending and drops a cursor it could not use', async () => {
+    const w = world({ txs: [payoutTx(0)] });
+    const kv = await watching(w);
+    const index = {
+      ...emptyIndex(),
+      pending: [registrationKey(D.address, '0xswap0')],
+      listCursor: 'bogus',
+    };
+    kv.data.set(INDEX_KEY, JSON.stringify(index));
+    const failing: typeof kv = {
+      ...kv,
+      list: () => Promise.reject(new Error('KV list failed')),
+    };
+    const report = await runNotifier(failing, endpoints, w.fetchFn, run);
+    expect(report.errors.map(e => e.message)).toContain('KV list failed');
+    expect(report.notified).toHaveLength(1);
+    expect((await getIndex(kv)).index?.listCursor).toBeNull();
   });
 
   it('rebuilds a broken index from the registration keys', async () => {

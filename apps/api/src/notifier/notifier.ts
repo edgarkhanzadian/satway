@@ -657,6 +657,14 @@ export async function runNotifier(
   const folded: Watch[] = [];
   try {
     if (await listDue(ctx)) await list(ctx);
+  } catch (err) {
+    report.errors.push({ address: '*', message: message(err) });
+    if (index.listCursor !== null) {
+      index.listCursor = null;
+      ctx.dirty = true;
+    }
+  }
+  try {
     folded.push(...(await fold(ctx)));
   } catch (err) {
     report.errors.push({ address: '*', message: message(err) });
