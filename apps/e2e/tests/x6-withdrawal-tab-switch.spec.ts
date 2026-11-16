@@ -1,7 +1,13 @@
-import type { SatwayApp } from '../src/app/satway-app.js';
-import { WITHDRAW_PROGRESS, withdrawalFileSchema } from '../src/app/withdraw-app.js';
+import { PROGRESS, type SatwayApp } from '../src/app/satway-app.js';
+import { WITHDRAW_PROGRESS, WithdrawPage, withdrawalFileSchema } from '../src/app/withdraw-app.js';
 import { expect, test } from '../src/fixtures.js';
-import { openWithdraw, quoteWithdrawal, toDelivered } from '../src/scenario/withdrawal.js';
+import { savedLabel, startAwaitingFunds } from '../src/scenario/journeys.js';
+import {
+  FUNDED_SATS,
+  openWithdraw,
+  quoteWithdrawal,
+  toDelivered,
+} from '../src/scenario/withdrawal.js';
 import { USER_REJECTED } from '../src/wallets/behaviour.js';
 
 const WAITING = 'Waiting for your wallet';
@@ -150,5 +156,90 @@ test.describe('X6. switching tabs while a withdrawal is in flight', () => {
     expect(saved.map(r => r.stacksTxid)).toEqual([txid]);
     expect(storage[ACTIVE]).toBe(saved[0]?.depositAddress);
     await toDelivered(withdraw, world);
+  });
+
+  test('an active deposit and an active withdrawal both survive tab switches, each with its own route map', async ({
+    app,
+    world,
+    wallets,
+  }) => {
+    const deposit = await startAwaitingFunds(app);
+    world.withdrawals.fundSbtc(wallets.stacks.account.stacksAddress, FUNDED_SATS);
+    const withdraw = new WithdrawPage(app);
+    await withdraw.open();
+    await expect(app.page.getByRole('list', { name: 'Route of a withdrawal' })).toBeVisible();
+    await expect(app.route).toHaveCount(0);
+    await quoteWithdrawal(withdraw);
+    await withdraw.continueToConfirm();
+    await withdraw.sign();
+    await withdraw.waitFor(WITHDRAW_PROGRESS.awaitingTx);
+    await expect(withdraw.route).toBeVisible();
+
+    await app.openTab('Deposit');
+    await expect(app.page.getByRole('heading', { name: 'Deposit in progress' })).toBeVisible();
+    await expect(app.progress(PROGRESS.awaitingFunds)).toBeVisible();
+    await expect(app.route).toBeVisible();
+    await expect(withdraw.route).toHaveCount(0);
+
+    await app.openTab('Withdraw');
+    await expect(app.page.getByRole('heading', { name: 'Withdrawal in progress' })).toBeVisible();
+    await expect(app.progress(WITHDRAW_PROGRESS.awaitingTx)).toBeVisible();
+    await expect(withdraw.route).toBeVisible();
+    await app.page.getByRole('button', { name: 'Hide' }).click();
+    await expect(withdraw.savedWithdrawal('50,000 sats to USDC on base')).toHaveCount(1);
+    await expect(app.page.getByRole('list', { name: 'Route of a withdrawal' })).toBeVisible();
+
+    await app.openTab('Deposit');
+    await expect(app.page.getByRole('heading', { name: 'Deposit in progress' })).toBeVisible();
+    await expect(app.progress(PROGRESS.awaitingFunds)).toBeVisible();
+    await expect(app.route).toBeVisible();
+    await app.page.getByRole('button', { name: 'Hide' }).click();
+    await expect(app.yourDepositsHeading).toBeVisible();
+    await expect(app.savedEntry(savedLabel(deposit))).toHaveCount(1);
+    await expect(app.page.getByRole('list', { name: 'Route of a deposit' })).toBeVisible();
+
+    await app.openTab('Withdraw');
+    await expect(app.page.getByRole('heading', { name: 'Withdrawal in progress' })).toHaveCount(0);
+    await expect(withdraw.savedWithdrawal('50,000 sats to USDC on base')).toHaveCount(1);
+  });
+
+  test('without a Stacks wallet both lists are reachable, each loader points to the other tab, and both are followed', async ({
+    app,
+    world,
+    wallets,
+  }) => {
+    const deposit = await startAwaitingFunds(app);
+    world.withdrawals.fundSbtc(wallets.stacks.account.stacksAddress, FUNDED_SATS);
+    const withdraw = new WithdrawPage(app);
+    await withdraw.open();
+    await quoteWithdrawal(withdraw);
+    await withdraw.continueToConfirm();
+    const started = await withdraw.sign();
+    await withdraw.waitFor(WITHDRAW_PROGRESS.awaitingTx);
+    await app.page.reload();
+    await expect(app.page.getByRole('button', { name: 'Connect Stacks wallet' })).toBeVisible();
+
+    await app.openTab('Withdraw');
+    await expect(app.page.getByRole('heading', { name: 'Withdrawal in progress' })).toBeVisible();
+    await app.page.getByRole('button', { name: 'Hide' }).click();
+    await withdraw.openWithdrawals();
+    await withdraw.uploadReceipt(deposit.receiptPath);
+    await expect(app.page.getByRole('alert')).toHaveText(
+      'This is not a withdrawal receipt. Deposit receipts are loaded on the Deposit tab.'
+    );
+    await app.openYourDeposits();
+    await app.uploadReceipt(started.receiptPath);
+    await expect(app.page.getByRole('alert')).toHaveText(
+      'This is a withdrawal receipt. Load it on the Withdraw tab, under “Your withdrawals”.'
+    );
+
+    await app.resumeSaved(savedLabel(deposit));
+    await expect(app.progress(PROGRESS.awaitingFunds)).toBeVisible();
+    await withdraw.openWithdrawals();
+    await withdraw.followSaved('50,000 sats to USDC on base');
+    await expect(app.page.getByRole('heading', { name: 'Withdrawal in progress' })).toBeVisible();
+    await expect(app.progress(WITHDRAW_PROGRESS.awaitingTx)).toBeVisible();
+    await app.openTab('Deposit');
+    await expect(app.page.getByRole('heading', { name: 'Deposit in progress' })).toBeVisible();
   });
 });
