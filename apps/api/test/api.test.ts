@@ -20,7 +20,7 @@ import {
   WORKER_REQUEST_TIMEOUT_MS,
   runNotifier,
 } from '../src/notifier/index.js';
-import { listWatched } from '../src/store/index.js';
+import { listWatchedAddresses, loadWatched } from '../src/store/index.js';
 import {
   CHAIN,
   D,
@@ -256,7 +256,7 @@ describe('HTTP handler', () => {
     const res = await handle(post('/deposits', goodBody()), e, w.fetchFn, handleOptions());
     expect(res.status).toBe(201);
     expect(await res.json()).toEqual({ address: D.address, deadline: '2026-11-14T14:00:00.000Z' });
-    expect(await listWatched(e.DEPOSITS)).toHaveLength(1);
+    expect((await listWatchedAddresses(e.DEPOSITS)).addresses).toEqual([D.address]);
   });
 
   it('404s unknown routes', async () => {
@@ -616,9 +616,18 @@ describe('runNotifier', () => {
     expect(report.errors).toHaveLength(1);
     expect(report.notified).toHaveLength(1);
   });
+
+  it('deletes a record it cannot read and still handles the others', async () => {
+    const w = world({ txs: [payoutTx(0)] });
+    const kv = await watching(w);
+    kv.data.set('dep:bc1pbroken', '{oops');
+    const report = await runNotifier(kv, endpoints, w.fetchFn, run);
+    expect(kv.data.has('dep:bc1pbroken')).toBe(false);
+    expect(report.notified).toHaveLength(1);
+  });
 });
 
-describe('listWatched', () => {
+describe('listWatchedAddresses and loadWatched', () => {
   const good = {
     depositScript: D.depositScript,
     reclaimScript: D.reclaimScript,
@@ -628,9 +637,11 @@ describe('listWatched', () => {
   it('returns stored records with any extra fields intact', async () => {
     const kv = memoryKv();
     kv.data.set(`dep:${D.address}`, JSON.stringify({ ...good, note: 'kept' }));
-    expect(await listWatched(kv)).toEqual([
-      { address: D.address, deposit: { ...good, note: 'kept' } },
-    ]);
+    expect((await listWatchedAddresses(kv)).addresses).toEqual([D.address]);
+    expect(await loadWatched(kv, D.address)).toEqual({
+      deposit: { ...good, note: 'kept' },
+      broken: false,
+    });
   });
 
   it.each([
@@ -640,11 +651,13 @@ describe('listWatched', () => {
       JSON.stringify({ depositScript: 42, reclaimScript: D.reclaimScript }),
     ],
     ['a JSON string', JSON.stringify('dep')],
-  ])('drops a record that is %s and keeps the rest', async (_name, raw) => {
+  ])('marks a record that is %s as broken and keeps the rest readable', async (_name, raw) => {
     const kv = memoryKv();
     kv.data.set(`dep:${D.address}`, JSON.stringify(good));
     kv.data.set('dep:bc1pbroken', raw);
-    expect(await listWatched(kv)).toEqual([{ address: D.address, deposit: good }]);
-    expect([...kv.data.keys()]).toEqual([`dep:${D.address}`]);
+    expect((await listWatchedAddresses(kv)).addresses).toEqual(['bc1pbroken', D.address].sort());
+    expect(await loadWatched(kv, 'bc1pbroken')).toEqual({ deposit: null, broken: true });
+    expect(await loadWatched(kv, D.address)).toEqual({ deposit: good, broken: false });
+    expect(await loadWatched(kv, 'bc1pmissing')).toEqual({ deposit: null, broken: false });
   });
 });

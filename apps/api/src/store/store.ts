@@ -164,27 +164,6 @@ export async function countRegistrations(kv: KV, maxPages = MAX_LIST_PAGES): Pro
   return truncated ? Number.MAX_SAFE_INTEGER : registrations;
 }
 
-export async function listWatched(
-  kv: KV,
-  max = 500
-): Promise<{ address: string; deposit: WatchedDeposit }[]> {
-  const out: { address: string; deposit: WatchedDeposit }[] = [];
-  let cursor: string | undefined;
-  do {
-    const page = await kv.list({ prefix: PREFIX, cursor });
-    for (const { name } of page.keys) {
-      if (out.length >= max) return out;
-      const raw = await kv.get(name);
-      if (!raw) continue;
-      const deposit = parseWatched(raw, name);
-      if (deposit) out.push({ address: name.slice(PREFIX.length), deposit });
-      else await kv.delete(name);
-    }
-    cursor = page.list_complete ? undefined : page.cursor;
-  } while (cursor);
-  return out;
-}
-
 export interface CachedSignerKey {
   key: string;
   fetchedAt: number;
