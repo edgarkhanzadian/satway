@@ -9,16 +9,14 @@ import {
 import {
   type ActiveWithdrawal,
   type Backend,
-  type WithdrawalReceiptFile,
   checkWithdrawal,
   downloadWithdrawalReceipt,
   forgetWithdrawalDraft,
-  loadWithdrawals,
   rememberWithdrawal,
   setActiveWithdrawal,
   useFlow,
-  withdrawalId,
 } from '../../shared/index.js';
+import { storedWithdrawal } from './stored-withdrawal.js';
 import {
   type TrackingEffect,
   type TrackingEvent,
@@ -38,11 +36,6 @@ export interface Tracking {
   view: TrackingView;
   dispatch(event: TrackingEvent): void;
   discard(): void;
-}
-
-function storedWithdrawal(receipt: WithdrawalReceiptFile): WithdrawalReceiptFile | null {
-  const id = withdrawalId(receipt);
-  return loadWithdrawals(config).find(r => withdrawalId(r) === id) ?? null;
 }
 
 export function useTracking(deps: TrackingDeps): Tracking {

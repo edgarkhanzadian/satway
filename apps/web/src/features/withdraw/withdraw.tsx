@@ -16,12 +16,11 @@ import {
   type WithdrawalBackend,
   type WithdrawalReceiptFile,
   activeWithdrawal,
-  loadWithdrawals,
   rememberWithdrawal,
   setActiveWithdrawal,
-  withdrawalId,
 } from '../../shared/index.js';
 import type { WithdrawalRouteUpdate } from '../../ui/index.js';
+import { storedWithdrawal } from './stored-withdrawal.js';
 import { WithdrawalTracking } from './tracking.js';
 import { WithdrawForm } from './withdraw-form.js';
 import { receiptToFollow } from './withdrawal-list-state.js';
@@ -75,11 +74,6 @@ function WithdrawIntro() {
       </styled.ul>
     </section>
   );
-}
-
-function storedWithdrawal(receipt: WithdrawalReceiptFile): WithdrawalReceiptFile | null {
-  const id = withdrawalId(receipt);
-  return loadWithdrawals(config).find(r => withdrawalId(r) === id) ?? null;
 }
 
 export function Withdraw(props: WithdrawProps) {
