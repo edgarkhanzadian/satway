@@ -1,7 +1,6 @@
 import { useEffect } from 'react';
 
 import {
-  type FetchLike,
   checkPastedWithdrawalTransaction,
   MAINNET_WITHDRAWAL_FLOW_CONFIG as config,
 } from '@satway/core';
@@ -18,6 +17,7 @@ import {
   useFlow,
   withdrawalId,
 } from '../../shared/index.js';
+import { abortableFetch, abortableStatus } from './abortable.js';
 import { storedWithdrawal } from './stored-withdrawal.js';
 import { type TrackingIo, trackingRunner } from './tracking-effects.js';
 import {
@@ -39,23 +39,6 @@ export interface Tracking {
   view: TrackingView;
   dispatch(event: TrackingEvent): void;
   discard(): void;
-}
-
-export function abortableFetch(signal: AbortSignal): FetchLike {
-  return (input, init) =>
-    fetch(input, {
-      ...init,
-      signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal,
-    });
-}
-
-export function abortableStatus(backend: Pick<Backend, 'status'>, signal: AbortSignal) {
-  return {
-    status(depositAddress: string) {
-      if (signal.aborted) return Promise.reject(new Error('This check was stopped.'));
-      return backend.status(depositAddress);
-    },
-  };
 }
 
 export function trackingIo(deps: Omit<TrackingDeps, 'active'>): TrackingIo {

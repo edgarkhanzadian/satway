@@ -108,6 +108,15 @@ function sameInstant(a: string, b: string): boolean {
   return Number.isFinite(x) && Number.isFinite(y) && Math.abs(x - y) < 1000;
 }
 
+export function formattedMatchesUnits(formatted: string, units: string, decimals: number): boolean {
+  const match = /^(\d+)(?:\.(\d+))?$/.exec(formatted.trim());
+  if (!match || !/^\d+$/.test(units)) return false;
+  const whole = match[1] ?? '';
+  const fraction = (match[2] ?? '').replace(/0+$/, '');
+  if (fraction.length > decimals) return false;
+  return BigInt(`${whole}${fraction.padEnd(decimals, '0')}`) === BigInt(units);
+}
+
 function addsUp(config: WithdrawalReceiptConfig, r: WithdrawalReceiptFile): void {
   assertMainnetSender(r.sender);
   assertWithdrawalInvariants(r.amountSats, r.maxFeeSats);
@@ -145,6 +154,19 @@ export function verifyWithdrawalReceipt(
       { cause: err }
     );
   }
+  return receipt;
+}
+
+export function verifyLoadedWithdrawalReceipt(
+  config: WithdrawalReceiptConfig,
+  value: unknown
+): WithdrawalReceiptFile {
+  const receipt = verifyWithdrawalReceipt(config, value);
+  const quote = receipt.quoteResponse.quote;
+  check(
+    formattedMatchesUnits(quote.amountOutFormatted, quote.amountOut, receipt.destination.decimals),
+    'its destination decimals do not match the quote'
+  );
   return receipt;
 }
 
@@ -299,6 +321,27 @@ export function forgetWithdrawalDraft(
     if (kept.length !== items.length) s.setItem(WITHDRAWALS_KEY, JSON.stringify(kept));
   } catch {
     return;
+  }
+}
+
+export function forgetWithdrawal(
+  config: WithdrawalReceiptConfig,
+  receipt: WithdrawalReceiptFile
+): boolean {
+  try {
+    const s = store();
+    const items = s ? storedItems(s) : null;
+    if (!s || items === null) return false;
+    const id = withdrawalId(receipt);
+    const kept = items.filter(item => {
+      const known = verifiedOrNull(config, item);
+      return known === null || withdrawalId(known) !== id;
+    });
+    const json = JSON.stringify(kept);
+    s.setItem(WITHDRAWALS_KEY, json);
+    return s.getItem(WITHDRAWALS_KEY) === json;
+  } catch {
+    return false;
   }
 }
 

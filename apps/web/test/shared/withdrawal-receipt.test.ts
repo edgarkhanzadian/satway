@@ -14,11 +14,14 @@ import {
   UNREADABLE_WITHDRAWALS_PREFIX,
   WITHDRAWALS_KEY,
   activeWithdrawal,
+  forgetWithdrawal,
   forgetWithdrawalDraft,
+  formattedMatchesUnits,
   loadWithdrawals,
   looksLikeWithdrawalReceipt,
   rememberWithdrawal,
   setActiveWithdrawal,
+  verifyLoadedWithdrawalReceipt,
   verifyWithdrawalReceipt,
   watchedWithdrawalOf,
   withStacksTxid,
@@ -278,6 +281,15 @@ describe('withdrawal storage', () => {
     expect(loadWithdrawals(W)).toEqual([receiptFixture()]);
   });
 
+  it('removes a withdrawal on request, sent or not, and keeps the others', () => {
+    stubStorage();
+    const other = receiptFixture({ stacksTxid: null, depositAddress: 'elsewhere' });
+    rememberWithdrawal(W, receiptFixture());
+    expect(forgetWithdrawal(W, receiptFixture())).toBe(true);
+    expect(loadWithdrawals(W)).toEqual([]);
+    expect(forgetWithdrawal(W, other)).toBe(true);
+  });
+
   it('points at the active withdrawal and clears it', () => {
     const store = stubStorage();
     rememberWithdrawal(W, receiptFixture());
@@ -304,5 +316,27 @@ describe('withdrawal storage', () => {
     } finally {
       Reflect.deleteProperty(globalThis, 'localStorage');
     }
+  });
+});
+
+describe('a loaded receipt’s destination', () => {
+  it('compares the quote’s formatted output with its base units at the receipt’s decimals', () => {
+    expect(formattedMatchesUnits('6.515571', '6515571', 6)).toBe(true);
+    expect(formattedMatchesUnits('6.5155710', '6515571', 6)).toBe(true);
+    expect(formattedMatchesUnits('1', '1000000', 6)).toBe(true);
+    expect(formattedMatchesUnits('6.515571', '6515571', 18)).toBe(false);
+    expect(formattedMatchesUnits('6.515571', '6515571', 2)).toBe(false);
+    expect(formattedMatchesUnits('n/a', '6515571', 6)).toBe(false);
+  });
+
+  it('refuses a loaded file whose decimals disagree with its quote, but storage still loads it', () => {
+    const wrong = receiptFixture({
+      destination: { ...receiptFixture().destination, decimals: 18 },
+    });
+    expect(() => verifyLoadedWithdrawalReceipt(W, json(wrong))).toThrow(
+      'Receipt does not add up: its destination decimals do not match the quote'
+    );
+    expect(verifyWithdrawalReceipt(W, json(wrong))).toEqual(wrong);
+    expect(verifyLoadedWithdrawalReceipt(W, json(receiptFixture()))).toEqual(receiptFixture());
   });
 });

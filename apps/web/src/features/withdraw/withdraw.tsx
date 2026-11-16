@@ -23,7 +23,6 @@ import type { WithdrawalRouteUpdate } from '../../ui/index.js';
 import { storedWithdrawal } from './stored-withdrawal.js';
 import { WithdrawalTracking } from './tracking.js';
 import { WithdrawForm } from './withdraw-form.js';
-import { receiptToFollow } from './withdrawal-list-state.js';
 import { WithdrawalList } from './withdrawal-list.js';
 
 export interface WithdrawProps {
@@ -117,9 +116,8 @@ export function Withdraw(props: WithdrawProps) {
         <styled.div marginTop="space.10">
           <WithdrawalList
             backend={props.backend}
-            onFollow={receipt => follow(receiptToFollow(receipt, storedWithdrawal(receipt)))}
-            onLoaded={loaded => {
-              const receipt = receiptToFollow(loaded, storedWithdrawal(loaded));
+            onFollow={receipt => follow(storedWithdrawal(receipt) ?? receipt)}
+            onLoaded={receipt => {
               rememberWithdrawal(config, receipt);
               follow(receipt);
             }}

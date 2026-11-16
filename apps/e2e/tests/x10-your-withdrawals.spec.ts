@@ -87,4 +87,43 @@ test.describe('X10. your withdrawals on the Withdraw tab', () => {
     await app.page.getByRole('button', { name: 'Hide' }).click();
     await expect(withdraw.savedWithdrawal(ENTRY)).toHaveCount(1);
   });
+
+  test('a file naming an older txid does not replace the one this browser follows', async ({
+    app,
+    world,
+    wallets,
+  }, testInfo) => {
+    const { withdraw, started } = await startWithdrawal(app, world, wallets);
+    await withdraw.waitFor(WITHDRAW_PROGRESS.awaitingTx);
+    await app.page.getByRole('button', { name: 'Hide' }).click();
+    const older = testInfo.outputPath('older.json');
+    await writeFile(older, JSON.stringify({ ...started.receipt, stacksTxid: 'ab'.repeat(32) }));
+    await withdraw.uploadReceipt(older);
+    await expect(app.page.getByRole('alert')).toHaveText(
+      `This browser already has this withdrawal with Stacks transaction 0x${started.receipt.stacksTxid ?? ''}. The file names 0x${'ab'.repeat(32)}, so the browser’s copy was kept. Follow it from the list above.`
+    );
+    const storage = await app.storage();
+    expect(storage['satway.withdrawals.v1']).toContain(started.receipt.stacksTxid ?? 'missing');
+  });
+
+  test('removing an unfinished withdrawal asks twice and reminds to keep the file', async ({
+    app,
+    world,
+    wallets,
+  }) => {
+    const { withdraw } = await startWithdrawal(app, world, wallets);
+    await withdraw.waitFor(WITHDRAW_PROGRESS.awaitingTx);
+    await app.page.getByRole('button', { name: 'Hide' }).click();
+    const entry = withdraw.savedWithdrawal(ENTRY);
+    await entry.getByRole('button', { name: 'Remove' }).click();
+    await expect(entry.getByText(/keep the receipt file to follow it later/)).toBeFocused();
+    await entry.getByRole('button', { name: 'Keep it' }).click();
+    await entry.getByRole('button', { name: 'Remove' }).click();
+    await entry.getByRole('button', { name: 'Remove anyway' }).click();
+    await expect(entry.getByText(/Only the receipt file can bring it back here/)).toBeVisible();
+    await entry.getByRole('button', { name: 'Remove it' }).click();
+    await expect(withdraw.savedWithdrawals).toHaveCount(0);
+    const storage = await app.storage();
+    expect(JSON.parse(storage['satway.withdrawals.v1'] ?? '[]')).toEqual([]);
+  });
 });
