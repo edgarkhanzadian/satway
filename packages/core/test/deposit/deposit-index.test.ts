@@ -5,6 +5,7 @@ import {
   DEPOSIT_INDEX_WINDOW,
   MAINNET_CONFIG,
   MAX_DEPOSIT_INDEX_DRAWS,
+  buildDepositAddress,
   buildIndexedDepositAddress,
   chooseDepositIndex,
   drawDepositIndex,
@@ -129,13 +130,27 @@ describe('usedDepositIndices', () => {
     expect(usedDepositIndices(deposits, owner, config)).toEqual([6]);
   });
 
-  it('ignores fee caps outside the index range and scripts that do not match their fee', () => {
-    const tooHigh = {
+  it('takes the index from the deposit script, as recovery does, not from Emily’s maxFee field', () => {
+    const mislabelled = { ...emilyEntry(9), maxFee: config.baseSignerFeeSats + 10 };
+    const outOfRangeField = {
       ...emilyEntry(0),
       maxFee: config.baseSignerFeeSats + DEPOSIT_INDEX_LIMIT,
     };
-    const lies = { ...emilyEntry(9), maxFee: config.baseSignerFeeSats + 10 };
-    expect(usedDepositIndices([tooHigh, lies], owner, config)).toEqual([]);
+    expect(usedDepositIndices([mislabelled, outOfRangeField], owner, config)).toEqual([0, 9]);
+  });
+
+  it('ignores a script whose fee cap is outside the index range', () => {
+    const outside = buildDepositAddress({
+      ...owner,
+      maxSignerFeeSats: config.baseSignerFeeSats + DEPOSIT_INDEX_LIMIT,
+      reclaimLockBlocks: config.reclaimLockBlocks,
+    });
+    const entry = {
+      maxFee: config.baseSignerFeeSats,
+      depositScript: outside.depositScript,
+      reclaimScript: outside.reclaimScript,
+    };
+    expect(usedDepositIndices([entry], owner, config)).toEqual([]);
   });
 });
 

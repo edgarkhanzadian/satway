@@ -6,6 +6,7 @@ import {
   type IndexedDepositAddressInput,
   buildIndexedDepositAddress,
   depositIndexOfFeeCap,
+  depositParametersOf,
   fetchDepositsByReclaimKey,
 } from '../sbtc/index.js';
 import {
@@ -24,11 +25,13 @@ export type DepositIndexEndpoints = DepositIndexConfig &
 export const MAX_DEPOSIT_INDEX_DRAWS = 8;
 
 export function emilyDepositIndexOf(
-  deposit: Pick<EmilyReclaimKeyDeposit, 'maxFee' | 'depositScript' | 'reclaimScript'>,
+  deposit: Pick<EmilyReclaimKeyDeposit, 'depositScript' | 'reclaimScript'>,
   owner: DepositIndexOwner,
   config: DepositIndexConfig
 ): number | null {
-  const n = depositIndexOfFeeCap(deposit.maxFee, config.baseSignerFeeSats);
+  const parameters = depositParametersOf(deposit.depositScript, deposit.reclaimScript);
+  if (!parameters) return null;
+  const n = depositIndexOfFeeCap(parameters.maxSignerFeeSats, config.baseSignerFeeSats);
   if (n === null) return null;
   const built = buildIndexedDepositAddress({ ...owner, depositIndex: n }, config);
   return built.depositScript === deposit.depositScript.toLowerCase() &&
@@ -38,7 +41,7 @@ export function emilyDepositIndexOf(
 }
 
 export function usedDepositIndices(
-  deposits: readonly Pick<EmilyReclaimKeyDeposit, 'maxFee' | 'depositScript' | 'reclaimScript'>[],
+  deposits: readonly Pick<EmilyReclaimKeyDeposit, 'depositScript' | 'reclaimScript'>[],
   owner: DepositIndexOwner,
   config: DepositIndexConfig
 ): number[] {
