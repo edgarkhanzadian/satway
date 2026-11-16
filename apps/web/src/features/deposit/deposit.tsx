@@ -20,6 +20,21 @@ import { Tracking } from './tracking.js';
 import { useDepositForm } from './use-deposit-form.js';
 import { YourDeposits, entryLabelOf } from './your-deposits.js';
 
+export const REPLACE_UNSAVED =
+  'This browser could not keep a copy of the hidden deposit’s receipt. If you follow another deposit, only the receipt file that was downloaded can bring this one back. Keep that file.';
+
+export function replacesUnsaved(active: ActiveDeposit | null, next: ActiveDeposit): boolean {
+  return (
+    active !== null &&
+    active.receiptUnsaved &&
+    receiptId(active.receipt) !== receiptId(next.receipt)
+  );
+}
+
+function ignoreRoute() {
+  return undefined;
+}
+
 function BeforeYouStart() {
   return (
     <section className={sheet()}>
@@ -86,9 +101,20 @@ export function Deposit(props: {
     void loadTokens();
   }, [backend, tokenAttempt, wanted]);
 
-  function follow(next: ActiveDeposit) {
+  const [replacing, setReplacing] = useState<ActiveDeposit | null>(null);
+
+  function show(next: ActiveDeposit) {
+    setReplacing(null);
     setHidden(false);
     onActive(next);
+  }
+
+  function follow(next: ActiveDeposit) {
+    if (replacesUnsaved(active, next)) {
+      setReplacing(next);
+      return;
+    }
+    show(next);
   }
 
   const form = useDepositForm({ backend, account, source, tokens, onActive: follow });
@@ -117,31 +143,48 @@ export function Deposit(props: {
 
   return (
     <>
-      {tracked && (
-        <Tracking
-          key={receiptId(tracked.receipt)}
-          backend={backend}
-          receipt={tracked.receipt}
-          receiptUnsaved={tracked.receiptUnsaved}
-          firstRegistration={tracked.firstRegistration}
-          source={source}
-          token={tokens.find(t => t.assetId === tracked.receipt.origin.assetId)}
-          onRoute={onRoute}
-          onHide={() => setHidden(true)}
-          onDone={() => onActive(null)}
-        />
+      {active && (
+        <div hidden={tracked === null}>
+          <Tracking
+            key={receiptId(active.receipt)}
+            backend={backend}
+            receipt={active.receipt}
+            receiptUnsaved={active.receiptUnsaved}
+            firstRegistration={active.firstRegistration}
+            source={source}
+            token={tokens.find(t => t.assetId === active.receipt.origin.assetId)}
+            onRoute={tracked ? onRoute : ignoreRoute}
+            onHide={() => setHidden(true)}
+            onDone={() => onActive(null)}
+          />
+        </div>
       )}
       {!tracked && active && (
         <styled.div marginBottom="space.10">
           <p className={notice()}>
-            The deposit of {entryLabelOf(active.receipt)} is hidden. This page checks on it again
-            when you show it.
+            The deposit of {entryLabelOf(active.receipt)} is hidden. This page keeps checking on it
+            and registering it while it is open.
           </p>
           <div className={actions()}>
             <button className={button({ variant: 'primary' })} onClick={() => setHidden(false)}>
               Show progress
             </button>
           </div>
+          {replacing && (
+            <>
+              <p className={notice({ tone: 'warn' })} role="alert">
+                {REPLACE_UNSAVED}
+              </p>
+              <div className={actions()}>
+                <button className={button()} onClick={() => show(replacing)}>
+                  Follow the other deposit
+                </button>
+                <button className={button()} onClick={() => setReplacing(null)}>
+                  Keep following this one
+                </button>
+              </div>
+            </>
+          )}
         </styled.div>
       )}
       {!tracked && account && (

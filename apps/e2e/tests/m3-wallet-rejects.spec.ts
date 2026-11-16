@@ -31,4 +31,23 @@ test.describe('M3. the user rejects the payment in the wallet', () => {
     ]);
     await app.waitForProgress(PROGRESS.swapping);
   });
+
+  test('Hide and Show while the wallet prompt is open keep the rejection, and ask the wallet once', async ({
+    app,
+    wallets,
+  }) => {
+    await startAwaitingFunds(app);
+    const late = wallets.evm.behaviour.late('eth_sendTransaction', {
+      reject: { code: USER_REJECTED },
+    });
+    await app.clickSend();
+    await expect.poll(() => wallets.evm.behaviour.calls('eth_sendTransaction').length).toBe(1);
+    await app.page.getByRole('button', { name: 'Hide', exact: true }).click();
+    late.release();
+    await app.harnessIdle();
+    await app.page.getByRole('button', { name: 'Show progress', exact: true }).click();
+    await expect(app.sendError).toHaveText(SEND_COPY.rejected);
+    expect(wallets.evm.behaviour.calls('eth_sendTransaction')).toHaveLength(1);
+    expect(await app.sendRecords()).toEqual([]);
+  });
 });

@@ -102,7 +102,7 @@ export class SatwayApp {
   }
 
   definition(term: string): Locator {
-    return this.page.locator(`dt:text-is("${term}") + dd`);
+    return this.page.locator(`dt:text-is("${term}") + dd`).filter({ visible: true });
   }
 
   async open(): Promise<void> {

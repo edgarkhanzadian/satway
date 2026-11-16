@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { Deposit } from '../../../src/features/deposit/deposit.js';
+import { Deposit, replacesUnsaved } from '../../../src/features/deposit/deposit.js';
 import type { Backend } from '../../../src/shared/index.js';
 import { RECEIPT } from './deposit-fixtures.js';
 
@@ -32,6 +32,19 @@ function render(active: boolean): string {
     />
   );
 }
+
+describe('replacing a hidden deposit', () => {
+  it('asks first only when the hidden deposit has no saved receipt and another is followed', () => {
+    const other = { ...receipt, createdAt: '2026-11-15T12:00:00.000Z' };
+    const unsaved = { receipt, receiptUnsaved: true };
+    expect(replacesUnsaved(unsaved, { receipt: other, receiptUnsaved: false })).toBe(true);
+    expect(replacesUnsaved(unsaved, { receipt, receiptUnsaved: false })).toBe(false);
+    expect(
+      replacesUnsaved({ receipt, receiptUnsaved: false }, { receipt: other, receiptUnsaved: false })
+    ).toBe(false);
+    expect(replacesUnsaved(null, unsaved)).toBe(false);
+  });
+});
 
 describe('Deposit without a connected Stacks wallet', () => {
   it('tracks an active deposit from its receipt alone', () => {

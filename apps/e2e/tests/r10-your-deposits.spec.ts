@@ -87,6 +87,26 @@ test.describe('R10. Your deposits, on the Deposit tab', () => {
     expect(wallets.evm.behaviour.calls('eth_sendTransaction')).toHaveLength(1);
   });
 
+  test('a hidden deposit keeps being checked, so Show has its latest progress', async ({
+    app,
+    world,
+  }) => {
+    await startAwaitingFunds(app);
+    await app.page.getByRole('button', { name: 'Hide', exact: true }).click();
+    await app.harnessIdle();
+    world.reportDeposit();
+    const before = world.log.length;
+    await app.tick();
+    expect(world.log.slice(before).some(e => e.caller === 'page' && e.service !== 'unknown')).toBe(
+      true
+    );
+    await expect(
+      app.page.getByText(/This page keeps checking on it and registering it while it is open\.$/)
+    ).toBeVisible();
+    await app.page.getByRole('button', { name: 'Show progress', exact: true }).click();
+    await expect(app.progress(PROGRESS.swapping)).toBeVisible();
+  });
+
   test('a finished deposit keeps its last stage and is not checked again on the next visit', async ({
     app,
     world,

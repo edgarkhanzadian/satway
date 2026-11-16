@@ -127,6 +127,41 @@ test.describe('S3. browser storage is unavailable or full', () => {
     await payManuallyToDone(app, world, started);
   });
 
+  test('a hidden deposit whose receipt could not be kept is not replaced by a new one without a warning', async ({
+    app,
+  }) => {
+    await failEveryWrite(app);
+    await app.open();
+    await app.connectStacksWallet();
+    await app.connectEvmWallet();
+    await app.fillDeposit({ amount: '100' });
+    await app.getQuote();
+    await quotaFull(app);
+    const first = await app.continue();
+    await expect(app.page.getByText(ONLY_COPY)).toBeVisible();
+    await app.page.getByRole('button', { name: 'Hide', exact: true }).click();
+    async function continueWhileHidden(): Promise<void> {
+      await app.fillDeposit({ amount: '60' });
+      await app.getQuote();
+      const downloaded = app.page.waitForEvent('download');
+      await app.page.getByRole('button', { name: 'Continue' }).click();
+      await downloaded;
+    }
+    await continueWhileHidden();
+    await expect(app.page.getByRole('alert')).toHaveText(
+      'This browser could not keep a copy of the hidden deposit’s receipt. If you follow another deposit, only the receipt file that was downloaded can bring this one back. Keep that file.'
+    );
+    await expect(app.page.getByRole('heading', { name: 'Deposit in progress' })).toHaveCount(0);
+    await app.page.getByRole('button', { name: 'Keep following this one' }).click();
+    await app.page.getByRole('button', { name: 'Show progress', exact: true }).click();
+    await expect(app.page.getByText(first.receipt.depositAddress, { exact: true })).toBeVisible();
+    await app.page.getByRole('button', { name: 'Hide', exact: true }).click();
+    await continueWhileHidden();
+    await app.page.getByRole('button', { name: 'Follow the other deposit' }).click();
+    await expect(app.page.getByRole('heading', { name: 'Deposit in progress' })).toBeVisible();
+    await expect(app.page.getByText(first.receipt.depositAddress, { exact: true })).toHaveCount(0);
+  });
+
   test('sessionStorage blocked: nothing depends on it, the wallet send and the whole deposit work', async ({
     app,
     world,
