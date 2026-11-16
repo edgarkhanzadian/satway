@@ -8,7 +8,9 @@ import {
 import {
   type OneClickStatusResponse,
   type OneClickSwapStatus,
+  type StatusQuoteEcho,
   destinationTxHashesOf,
+  statusQuoteEchoOf,
 } from '../oneclick/index.js';
 import {
   DepositCheckError,
@@ -58,6 +60,9 @@ export interface DepositObservation {
   mints: Map<string, MintStatus>;
   spenders: Map<string, PayoutSpender | null>;
   toRegister: AddressOutput[];
+  swapStartedAt: number | null;
+  swapDeadline: number | null;
+  now: number;
   progress: Progress;
   requests: number;
 }
@@ -104,7 +109,17 @@ export function classifyRegistrationError(err: unknown, sbtcApiUrl: string): Reg
 function progressFor(
   o: Pick<
     DepositObservation,
-    'swap' | 'swapless' | 'payoutTxids' | 'payouts' | 'mints' | 'tipHeight' | 'spenders'
+    | 'swap'
+    | 'swapless'
+    | 'payoutTxids'
+    | 'payouts'
+    | 'belowMinimum'
+    | 'mints'
+    | 'tipHeight'
+    | 'spenders'
+    | 'swapStartedAt'
+    | 'swapDeadline'
+    | 'now'
   >,
   reclaimLockBlocks: number
 ): Progress {
@@ -121,10 +136,36 @@ function progressFor(
     swap: o.swap,
     payouts,
     payoutTxids: o.payoutTxids,
+    belowMinimum: o.belowMinimum,
     swapless: o.swapless,
+    swapStartedAt: o.swapStartedAt,
+    swapDeadline: o.swapDeadline,
+    now: o.now,
     tipHeight: o.tipHeight,
     reclaimLockBlocks,
   });
+}
+
+function instantOf(text: string | undefined): number | null {
+  if (text === undefined) return null;
+  const ms = Date.parse(text);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function swapTimesOf(
+  status: OneClickStatusResponse | null,
+  fallbackDeadline: string | undefined
+): { swapStartedAt: number | null; swapDeadline: number | null } {
+  let echo: StatusQuoteEcho | null = null;
+  try {
+    echo = status ? statusQuoteEchoOf(status) : null;
+  } catch {
+    echo = null;
+  }
+  return {
+    swapStartedAt: instantOf(echo?.timestamp),
+    swapDeadline: instantOf(echo?.quoteRequest.deadline) ?? instantOf(fallbackDeadline),
+  };
 }
 
 async function optional<T>(load: () => Promise<T>): Promise<T | null> {
@@ -195,6 +236,8 @@ export async function observeDeposit(
     maxPages?: DepositOutputsOptions['maxPages'];
     known?: ReadonlyMap<string, MintStatus>;
     swapless?: boolean;
+    swapDeadline?: string;
+    now?: Date;
   } = {}
 ): Promise<DepositObservation> {
   const fetchFn = options.fetchFn;
@@ -262,11 +305,21 @@ export async function observeDeposit(
 
   const swap = status?.status ?? null;
   const swapless = options.swapless === true && status === null;
-  const observed = { swap, swapless, payoutTxids, payouts, mints, tipHeight, spenders };
+  const observed = {
+    swap,
+    swapless,
+    payoutTxids,
+    payouts,
+    belowMinimum,
+    mints,
+    tipHeight,
+    spenders,
+    ...swapTimesOf(status, options.swapDeadline),
+    now: (options.now ?? new Date()).getTime(),
+  };
   return {
     ...observed,
     outputs,
-    belowMinimum,
     foreignTxids: fetched.foreignTxids,
     truncated: fetched.truncated,
     perDepositMinimum,

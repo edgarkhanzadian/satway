@@ -193,6 +193,64 @@ describe('observeDeposit: an output that only looks spent', () => {
   });
 });
 
+describe('observeDeposit: what the swap status tells the progress', () => {
+  const T = 'ab'.repeat(32);
+  function smallWorld(value: number, blockTime: number) {
+    const status = { confirmed: true, block_height: TIP, block_time: blockTime };
+    const tx = { txid: T, vout: [{ scriptpubkey: dep.scriptPubKey, value }], status };
+    function route(url: string): Response {
+      if (url.endsWith('/limits'))
+        return json({ pegCap: null, perDepositMinimum: 10_000, perDepositCap: null });
+      if (url.endsWith('/blocks/tip/height')) return new Response(String(TIP));
+      if (url.endsWith('/txs/mempool')) return json([]);
+      if (url.endsWith('/txs/chain')) return json([tx]);
+      if (url.endsWith('/utxo')) return json([{ txid: T, vout: 0, value, status }]);
+      if (url.includes('/deposit/'))
+        return json({
+          bitcoinTxid: T,
+          bitcoinTxOutputIndex: 0,
+          recipient: 'x',
+          amount: 1,
+          status: 'confirmed',
+          reclaimScript: dep.reclaimScript,
+          depositScript: dep.depositScript,
+        });
+      return json({ message: 'not found' }, 404);
+    }
+    return (url: string) => Promise.resolve(route(url));
+  }
+  function success(hashes: string[], timestamp: string) {
+    return {
+      status: 'SUCCESS' as const,
+      updatedAt: '',
+      swapDetails: {
+        originChainTxHashes: [],
+        destinationChainTxHashes: hashes.map(hash => ({ hash })),
+      },
+      quoteResponse: {
+        timestamp,
+        quoteRequest: { deadline: '2026-11-14T14:00:00.000Z' },
+        quote: {},
+      },
+    };
+  }
+
+  it('says a named payout below the sBTC minimum cannot be minted', async () => {
+    const obs = await observeDeposit(config, ctx, success([T], '2026-11-14T12:00:00.000Z'), {
+      fetchFn: smallWorld(5_000, Date.parse('2026-11-14T13:00:00.000Z') / 1000),
+    });
+    expect(obs.progress).toMatchObject({ condition: 'payout-below-minimum', terminal: true });
+  });
+
+  it('waits for 1Click to name the payout when the only payment predates the swap', async () => {
+    const obs = await observeDeposit(config, ctx, success([], '2026-11-14T12:00:00.000Z'), {
+      fetchFn: smallWorld(50_000, Date.parse('2026-11-13T12:00:00.000Z') / 1000),
+    });
+    expect(obs.swapStartedAt).toBe(Date.parse('2026-11-14T12:00:00.000Z'));
+    expect(obs.progress).toMatchObject({ condition: 'awaiting-payout-hash', terminal: false });
+  });
+});
+
 describe('observeDeposit: payouts past the mint-read cap', () => {
   it('are not taken as never registered, so the deposit is not called reclaimed', async () => {
     const payments = Array.from({ length: 14 }, (_, i) => ({

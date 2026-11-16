@@ -319,7 +319,7 @@ describe('deriveProgress: more than one payment to the deposit address', () => {
         ],
       })
     );
-    expect(p.stage).toBe('mint-failed');
+    expect(p.stage).toBe('minting');
     expect(p.terminal).toBe(false);
   });
 
@@ -455,4 +455,143 @@ describe('deriveProgress: a payment before the swap pays out', () => {
       }
     }
   );
+});
+
+describe('deriveProgress: SUCCESS without a named payout', () => {
+  const STARTED = 1_700_000_000_000;
+  const before = { ...payout({ txid: 'e5'.repeat(32) }), blockTime: STARTED / 1000 - 10 * 3600 };
+  const earlier = { payout: before, mint: 'confirmed' as const };
+
+  it('does not let a payment that predates the swap end it; it waits for 1Click to name the payout', () => {
+    const p = deriveProgress({
+      ...obs({ swap: 'SUCCESS', payouts: [earlier] }),
+      swapStartedAt: STARTED,
+    });
+    expect(p).toMatchObject({
+      stage: 'awaiting-payout',
+      terminal: false,
+      condition: 'awaiting-payout-hash',
+    });
+    expect(p.message).toMatch(/1Click has not named/);
+  });
+
+  it('still ends a single swap whose payout arrived after it began, though 1Click names no hash', () => {
+    const later = { ...before, txid: 'f6'.repeat(32), blockTime: STARTED / 1000 + 600 };
+    const p = deriveProgress({
+      ...obs({ swap: 'SUCCESS', payouts: [{ payout: later, mint: 'confirmed' }] }),
+      swapStartedAt: STARTED,
+    });
+    expect(p).toMatchObject({ stage: 'done', terminal: true });
+  });
+
+  it('counts an unconfirmed payment as this swap’s payout', () => {
+    const p = deriveProgress({
+      ...obs({
+        swap: 'SUCCESS',
+        payouts: [{ payout: payout({ confirmed: false, blockHeight: null }), mint: null }],
+      }),
+      swapStartedAt: STARTED,
+    });
+    expect(p.stage).toBe('payout-unconfirmed');
+    expect(p.condition).toBeUndefined();
+  });
+});
+
+describe('deriveProgress: the headline with several payments', () => {
+  const stranger = payout({ txid: 'a7'.repeat(32), blockHeight: 1_000 });
+  const ours = payout({ txid: 'b8'.repeat(32), blockHeight: 1_001 });
+
+  it('headlines the payout 1Click names, not an earlier stranger', () => {
+    const p = deriveProgress(
+      obs({
+        swap: 'SUCCESS',
+        payoutTxids: [ours.txid],
+        tipHeight: 9_999,
+        payouts: [
+          { payout: stranger, mint: null, spent: true, spender: 'reclaim' },
+          { payout: ours, mint: 'confirmed' },
+        ],
+      })
+    );
+    expect(p.stage).toBe('done');
+    expect(p.terminal).toBe(true);
+    expect(p.message).toMatch(/^2 payments arrived/);
+  });
+
+  it('without a named payout, headlines the earliest payment that is not settled', () => {
+    const p = deriveProgress(
+      obs({
+        swap: 'SUCCESS',
+        tipHeight: 9_999,
+        payouts: [
+          { payout: stranger, mint: null, spent: true, spender: 'reclaim' },
+          { payout: ours, mint: 'pending' },
+        ],
+      })
+    );
+    expect(p.stage).toBe('reclaimable');
+    expect(p.terminal).toBe(false);
+  });
+});
+
+describe('deriveProgress: states that used to never end', () => {
+  const DEADLINE = 1_700_000_000_000;
+  const small = payout({ txid: 'c9'.repeat(32), amountSats: 5_000 });
+
+  it('a named payout below the sBTC minimum says it cannot be minted and can be reclaimed', () => {
+    const p = deriveProgress({
+      ...obs({ swap: 'SUCCESS', payoutTxids: [small.txid] }),
+      belowMinimum: [small],
+    });
+    expect(p).toMatchObject({
+      stage: 'mint-failed',
+      terminal: true,
+      condition: 'payout-below-minimum',
+    });
+    expect(p.message).toMatch(/below the sBTC minimum/);
+    expect(p.message).toMatch(/reclaim/);
+    const late = deriveProgress({
+      ...obs({ swap: 'SUCCESS', payoutTxids: [small.txid], tipHeight: 9_999 }),
+      belowMinimum: [small],
+    });
+    expect(late).toMatchObject({ stage: 'reclaimable', condition: 'payout-below-minimum' });
+  });
+
+  it('a found deposit with only below-minimum outputs gets the below-minimum copy', () => {
+    const p = deriveProgress({
+      ...obs({ swap: null }),
+      swapless: true,
+      belowMinimum: [small],
+    });
+    expect(p).toMatchObject({ terminal: true, condition: 'payout-below-minimum' });
+    expect(p.message).toMatch(/below the sBTC minimum/);
+  });
+
+  it('a named payout that is not at this address is a distinct state once the deadline is well past', () => {
+    const named = { ...obs({ swap: 'SUCCESS', payoutTxids: ['dd'.repeat(32)] }) };
+    const soon = deriveProgress({ ...named, swapDeadline: DEADLINE, now: DEADLINE + 3_600_000 });
+    expect(soon).toMatchObject({ stage: 'awaiting-payout', terminal: false });
+    expect(soon.condition).toBeUndefined();
+    const late = deriveProgress({
+      ...named,
+      swapDeadline: DEADLINE,
+      now: DEADLINE + 25 * 3_600_000,
+    });
+    expect(late).toMatchObject({ condition: 'payout-not-found', terminal: true });
+    expect(late.message).toMatch(/1Click reports a payout/);
+  });
+
+  it('an unreadable swap status no longer blocks the end once the deadline is a day past', () => {
+    const minted = obs({ swap: null, payout: payout(), mint: 'confirmed' });
+    expect(deriveProgress(minted).terminal).toBe(false);
+    expect(
+      deriveProgress({ ...minted, swapDeadline: DEADLINE, now: DEADLINE + 3_600_000 }).terminal
+    ).toBe(false);
+    const old = deriveProgress({
+      ...minted,
+      swapDeadline: DEADLINE,
+      now: DEADLINE + 25 * 3_600_000,
+    });
+    expect(old).toMatchObject({ stage: 'done', terminal: true });
+  });
 });

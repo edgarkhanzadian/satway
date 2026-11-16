@@ -24,8 +24,10 @@ export const MINT_UNKNOWN = 'unknown';
 
 export type MintStatus = EmilyDepositStatus | typeof MINT_UNKNOWN | null;
 
+export type ObservedPayout = Payout & { blockTime?: number | null };
+
 export interface PayoutObservation {
-  payout: Payout;
+  payout: ObservedPayout;
   spent?: boolean;
   spender?: PayoutSpender | null;
   mint: MintStatus;
@@ -35,12 +37,21 @@ export interface Observations {
   swap: OneClickSwapStatus | null;
   payouts: readonly PayoutObservation[];
   payoutTxids?: readonly string[];
+  belowMinimum?: readonly ObservedPayout[];
   swapless?: boolean;
+  swapStartedAt?: number | null;
+  swapDeadline?: number | null;
+  now?: number;
   tipHeight: number | null;
   reclaimLockBlocks: number;
 }
 
 type PayoutContext = Pick<Observations, 'tipHeight' | 'reclaimLockBlocks'>;
+
+export type ProgressCondition =
+  | 'awaiting-payout-hash'
+  | 'payout-below-minimum'
+  | 'payout-not-found';
 
 export interface Progress {
   stage: Stage;
@@ -48,6 +59,71 @@ export interface Progress {
   terminal: boolean;
   needsNotification: boolean;
   blocksUntilReclaim: number | null;
+  condition?: ProgressCondition;
+}
+
+export const PAYOUT_SEARCH_GRACE_MS = 24 * 60 * 60 * 1000;
+export const BLOCK_TIME_SLACK_MS = 2 * 60 * 60 * 1000;
+
+function arrivedAfterStart(o: Observations, payout: ObservedPayout): boolean {
+  const started = o.swapStartedAt;
+  if (started === undefined || started === null || !payout.confirmed) return true;
+  const time = payout.blockTime;
+  if (time === undefined || time === null) return true;
+  return time * 1000 >= started - BLOCK_TIME_SLACK_MS;
+}
+
+function deadlineLongPast(o: Observations): boolean {
+  const deadline = o.swapDeadline;
+  if (deadline === undefined || deadline === null || o.now === undefined) return false;
+  return o.now > deadline + PAYOUT_SEARCH_GRACE_MS;
+}
+
+function belowMinimumProgress(ctx: PayoutContext, payout: Payout, found: boolean): Progress {
+  const untilReclaim = blocksUntilReclaimFor(payout, ctx.tipHeight, ctx.reclaimLockBlocks);
+  const what = found
+    ? 'The BTC at this deposit address is below the sBTC minimum, so it cannot be minted.'
+    : 'The BTC payout arrived but is below the sBTC minimum, so it cannot be minted.';
+  return {
+    needsNotification: false,
+    blocksUntilReclaim: untilReclaim,
+    stage: untilReclaim === 0 ? 'reclaimable' : 'mint-failed',
+    terminal: true,
+    condition: 'payout-below-minimum',
+    message: `${what} ${reclaimWhen(untilReclaim)}`,
+  };
+}
+
+function reclaimWhen(untilReclaim: number | null): string {
+  if (untilReclaim === 0) return 'You can reclaim it now from the recovery page.';
+  if (untilReclaim === null) return 'You can reclaim it after the timelock.';
+  return `You can reclaim it in about ${untilReclaim} blocks, once the timelock passes.`;
+}
+
+const PAYOUT_NOT_FOUND: Progress = {
+  needsNotification: false,
+  blocksUntilReclaim: null,
+  stage: 'awaiting-payout',
+  terminal: true,
+  condition: 'payout-not-found',
+  message:
+    '1Click reports a payout in a Bitcoin transaction that does not pay your deposit address, or that the Bitcoin network does not show. Do not rely on it: check the transaction in a block explorer and contact 1Click with your swap deposit address.',
+};
+
+const AWAITING_PAYOUT_HASH: Progress = {
+  needsNotification: false,
+  blocksUntilReclaim: null,
+  stage: 'awaiting-payout',
+  terminal: false,
+  condition: 'awaiting-payout-hash',
+  message:
+    'Swap complete. 1Click has not named the Bitcoin payout yet, and the payments already at your deposit address arrived before this swap began, so this page waits for 1Click to name it.',
+};
+
+function othersNote(count: number): string {
+  return count === 1
+    ? 'Another payment at your deposit address is listed below.'
+    : `${count} other payments at your deposit address are listed below.`;
 }
 
 function payoutProgress(ctx: PayoutContext, o: PayoutObservation): Progress {
@@ -225,7 +301,26 @@ function alongside(swap: Progress, each: readonly Progress[], note: string): Pro
   };
 }
 
-function combined(each: readonly Progress[]): Progress | null {
+interface Assessed {
+  observed: PayoutObservation;
+  progress: Progress;
+}
+
+function headlineOf(o: Observations, assessed: readonly Assessed[]): Progress | undefined {
+  const named = o.payoutTxids ?? [];
+  const ours = assessed.find(a => named.includes(a.observed.payout.txid));
+  if (ours) return ours.progress;
+  const relevant = assessed.filter(a => arrivedAfterStart(o, a.observed.payout));
+  return (
+    relevant.find(a => !a.progress.terminal)?.progress ??
+    assessed.find(a => !a.progress.terminal)?.progress ??
+    assessed.find(a => a.progress.stage !== 'done')?.progress ??
+    assessed[0]?.progress
+  );
+}
+
+function combined(o: Observations, assessed: readonly Assessed[]): Progress | null {
+  const each = assessed.map(a => a.progress);
   const [only] = each;
   if (only && each.length === 1) return only;
   if (each.every(p => p.stage === 'done')) {
@@ -237,7 +332,7 @@ function combined(each: readonly Progress[]): Progress | null {
       message: `sBTC has been minted for each of the ${each.length} payments that arrived at your deposit address.`,
     };
   }
-  const primary = each.find(p => p.stage !== 'done') ?? only;
+  const primary = headlineOf(o, assessed);
   if (!primary) return null;
   return {
     ...primary,
@@ -249,14 +344,44 @@ function combined(each: readonly Progress[]): Progress | null {
 
 function swapPaidOut(o: Observations): boolean {
   const named = o.payoutTxids ?? [];
-  return named.length === 0 || o.payouts.some(p => named.includes(p.payout.txid));
+  if (named.length > 0) return o.payouts.some(p => named.includes(p.payout.txid));
+  return o.payouts.some(p => arrivedAfterStart(o, p.payout));
+}
+
+function withOthers(base: Progress, o: Observations): Progress {
+  if (o.payouts.length === 0) return base;
+  return alongside(
+    base,
+    o.payouts.map(p => payoutProgress(o, p)),
+    othersNote(o.payouts.length)
+  );
+}
+
+function namedPayoutMissing(o: Observations): Progress | null {
+  const named = o.payoutTxids ?? [];
+  if (o.swap !== 'SUCCESS' || named.length === 0) return null;
+  if (o.payouts.some(p => named.includes(p.payout.txid))) return null;
+  const small = (o.belowMinimum ?? []).find(p => named.includes(p.txid));
+  if (small) return withOthers(belowMinimumProgress(o, small, false), o);
+  return deadlineLongPast(o) ? withOthers(PAYOUT_NOT_FOUND, o) : null;
 }
 
 const STATUS_UNKNOWN_NOTE = 'The swap status could not be read, so this page keeps checking.';
+const STATUS_GONE_NOTE =
+  'The swap status can no longer be read and its deadline passed more than a day ago, so these results are final.';
 
 export function deriveProgress(o: Observations): Progress {
-  if (o.payouts.length === 0) return swapProgress(o.swap);
-  const each = o.payouts.map(p => payoutProgress(o, p));
+  const missing = namedPayoutMissing(o);
+  if (missing) return missing;
+  if (o.payouts.length === 0) {
+    const [small] = o.belowMinimum ?? [];
+    if (small && o.swap === null && o.swapless === true) {
+      return belowMinimumProgress(o, small, true);
+    }
+    return swapProgress(o.swap);
+  }
+  const assessed = o.payouts.map(p => ({ observed: p, progress: payoutProgress(o, p) }));
+  const each = assessed.map(a => a.progress);
   if (o.swap === 'REFUNDED' || o.swap === 'FAILED') {
     return alongside(swapProgress(o.swap), each, arrivedAnywayNote(each));
   }
@@ -269,11 +394,13 @@ export function deriveProgress(o: Observations): Progress {
     return { ...waiting, message: `${mintedEarlyNote(each.length)} ${waiting.message}` };
   }
   if (o.swap === 'SUCCESS' && !swapPaidOut(o)) {
-    return alongside(swapProgress(o.swap), each, arrivedEarlyNote(each.length));
+    const waiting = (o.payoutTxids ?? []).length > 0 ? swapProgress(o.swap) : AWAITING_PAYOUT_HASH;
+    return alongside(waiting, each, arrivedEarlyNote(each.length));
   }
-  const all = combined(each) ?? swapProgress(o.swap);
+  const all = combined(o, assessed) ?? swapProgress(o.swap);
   if (o.swap === 'SUCCESS' || (o.swap === null && o.swapless === true)) return all;
   if (o.swap === null && all.terminal) {
+    if (deadlineLongPast(o)) return { ...all, message: `${all.message} ${STATUS_GONE_NOTE}` };
     return { ...all, terminal: false, message: `${all.message} ${STATUS_UNKNOWN_NOTE}` };
   }
   return { ...all, terminal: false };
