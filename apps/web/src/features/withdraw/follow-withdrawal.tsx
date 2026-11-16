@@ -128,6 +128,12 @@ export function FollowWithdrawal(props: {
               : (progress?.message ?? 'Checking…')}
           </p>
           {progress && <p>{withdrawalAdvice(progress.stage, receipt)}</p>}
+          {progress && !progress.terminal && (
+            <p className={notice()}>
+              This was a single check and is not refreshed here. Select Follow this withdrawal to
+              keep checking.
+            </p>
+          )}
           <dl className={details()}>
             <dt>You withdraw</dt>
             <dd>{sats(receipt.amountSats)} of sBTC</dd>

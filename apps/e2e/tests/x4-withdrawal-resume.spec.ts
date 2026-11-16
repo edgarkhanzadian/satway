@@ -64,6 +64,11 @@ test.describe('X4. resuming a withdrawal, and slow or lost answers', () => {
     await withdraw.openFollow();
     await withdraw.pickSaved('50,000 sats to USDC on base');
     await expect(app.progress(WITHDRAW_PROGRESS.awaitingSigners)).toBeVisible();
+    await expect(
+      app.page.getByText(
+        'This was a single check and is not refreshed here. Select Follow this withdrawal to keep checking.'
+      )
+    ).toBeVisible();
     await app.uploadReceipt(started.receiptPath);
     await expect(app.page.getByRole('alert')).toHaveText(
       'This is a withdrawal receipt. Load it under “Follow a withdrawal” below.'
