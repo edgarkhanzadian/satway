@@ -858,6 +858,16 @@ describe('checkProgress: payments to the deposit address', () => {
     expect(done.progress).toMatchObject({ stage: 'done', terminal: true });
   });
 
+  it('does not ask the signers again about a payout the last check saw minted', async () => {
+    const w = world({ swap: 'SUCCESS', payoutVout: 0, mint: 'confirmed' });
+    const receipt = await receiptFor(w);
+    const first = await checkProgress(config, w.backend, receipt, w.fetchFn);
+    const start = w.urls.length;
+    const again = await checkProgress(config, w.backend, receipt, w.fetchFn, first.mints);
+    expect(w.urls.slice(start).some(u => u.includes(`/deposit/${D.txid}/0`))).toBe(false);
+    expect(again.progress).toMatchObject({ stage: 'done', terminal: true });
+  });
+
   it('a minted output with the swap status unreadable keeps the page checking', async () => {
     const w = world({ payoutVout: 0, mint: 'confirmed' });
     const snap = await checkProgress(config, w.backend, await receiptFor(w), w.fetchFn);

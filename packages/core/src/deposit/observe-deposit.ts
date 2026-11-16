@@ -20,7 +20,12 @@ import {
   notifyDeposit,
 } from '../sbtc/index.js';
 import { type FetchLike, HttpError, type NetworkConfig, errorMessage } from '../shared/index.js';
-import { MAX_REGISTRATIONS_PER_CHECK, depositPayouts, outputsToRegister } from './payouts.js';
+import {
+  MAX_REGISTRATIONS_PER_CHECK,
+  byArrival,
+  depositPayouts,
+  outputsToRegister,
+} from './payouts.js';
 import {
   MINT_UNKNOWN,
   type MintStatus,
@@ -136,6 +141,40 @@ async function readMint(
   }
 }
 
+export const MAX_MINT_READS_PER_CHECK = 12;
+
+function newestFirst(a: AddressOutput, b: AddressOutput): number {
+  return byArrival(b, a);
+}
+
+export function mintReadOrder(
+  candidates: readonly AddressOutput[],
+  payouts: readonly AddressOutput[],
+  known: ReadonlyMap<string, MintStatus>
+): AddressOutput[] {
+  const seen = new Set<string>();
+  function unread(o: AddressOutput): boolean {
+    const before = known.get(outpointOf(o));
+    return before === undefined || before === MINT_UNKNOWN;
+  }
+  const groups = [
+    candidates.filter(unread),
+    candidates.filter(o => !unread(o)),
+    payouts.filter(o => !o.spent && unread(o)),
+    payouts.filter(o => o.spent && unread(o)),
+    payouts.filter(o => !unread(o)),
+  ];
+  const order: AddressOutput[] = [];
+  for (const group of groups) {
+    for (const o of [...group].sort(newestFirst)) {
+      if (seen.has(outpointOf(o))) continue;
+      seen.add(outpointOf(o));
+      order.push(o);
+    }
+  }
+  return order;
+}
+
 export function mintStatusUnknown(mints: ReadonlyMap<string, MintStatus>): boolean {
   return [...mints.values()].some(m => m === MINT_UNKNOWN);
 }
@@ -144,7 +183,11 @@ export async function observeDeposit(
   config: DepositEndpointsConfig,
   ctx: WatchedDepositContext,
   status: OneClickStatusResponse | null,
-  options: { fetchFn?: FetchLike; maxPages?: DepositOutputsOptions['maxPages'] } = {}
+  options: {
+    fetchFn?: FetchLike;
+    maxPages?: DepositOutputsOptions['maxPages'];
+    known?: ReadonlyMap<string, MintStatus>;
+  } = {}
 ): Promise<DepositObservation> {
   const fetchFn = options.fetchFn;
   const [limits, tipHeight] = await Promise.all([
@@ -160,18 +203,32 @@ export async function observeDeposit(
     { txids: payoutTxids, maxPages: options.maxPages, fetchFn }
   );
   const { payouts, belowMinimum } = depositPayouts(fetched.outputs, perDepositMinimum);
-  const toRegister = outputsToRegister(fetched.outputs, {
+  const candidates = outputsToRegister(fetched.outputs, {
     minimumSats: perDepositMinimum,
     tipHeight,
     reclaimLockBlocks: ctx.reclaimLockBlocks,
+    limit: Number.POSITIVE_INFINITY,
   });
 
-  const lookups = new Map<string, AddressOutput>();
-  for (const o of [...payouts, ...toRegister]) lookups.set(outpointOf(o), o);
+  const known = options.known ?? new Map<string, MintStatus>();
   const mints = new Map<string, MintStatus>();
-  for (const [key, o] of [...lookups].slice(0, MAX_REGISTRATIONS_PER_CHECK + 1)) {
-    mints.set(key, await readMint(config.sbtcApiUrl, o, fetchFn));
+  for (const o of [...candidates, ...payouts]) {
+    const before = known.get(outpointOf(o));
+    if (before === 'confirmed' || before === 'failed') mints.set(outpointOf(o), before);
   }
+  const reads = mintReadOrder(candidates, payouts, known).filter(o => !mints.has(outpointOf(o)));
+  let mintReads = 0;
+  for (const o of reads.slice(0, MAX_MINT_READS_PER_CHECK)) {
+    mints.set(outpointOf(o), await readMint(config.sbtcApiUrl, o, fetchFn));
+    mintReads += 1;
+  }
+  for (const o of reads.slice(MAX_MINT_READS_PER_CHECK)) {
+    const before = known.get(outpointOf(o));
+    if (before !== undefined && before !== MINT_UNKNOWN) mints.set(outpointOf(o), before);
+  }
+  const toRegister = candidates
+    .filter(o => mints.has(outpointOf(o)) && mints.get(outpointOf(o)) === null)
+    .slice(0, MAX_REGISTRATIONS_PER_CHECK);
 
   const spenders = new Map<string, PayoutSpender | null>();
   for (const payout of payouts) {
@@ -192,11 +249,9 @@ export async function observeDeposit(
     foreignTxids: fetched.foreignTxids,
     truncated: fetched.truncated,
     perDepositMinimum,
-    toRegister: toRegister.filter(
-      o => mints.has(outpointOf(o)) && mints.get(outpointOf(o)) === null
-    ),
+    toRegister,
     progress: progressFor(observed, ctx.reclaimLockBlocks),
-    requests: fetched.requests + 2 + mints.size + spenders.size * 2,
+    requests: fetched.requests + 2 + mintReads + spenders.size * 2,
   };
 }
 

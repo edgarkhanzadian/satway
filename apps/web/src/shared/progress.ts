@@ -90,7 +90,8 @@ export async function checkProgress(
   config: NetworkConfig,
   backend: Backend,
   receipt: Receipt,
-  fetchFn?: FetchLike
+  fetchFn?: FetchLike,
+  known?: ReadonlyMap<string, MintStatus>
 ): Promise<Snapshot> {
   let status: OneClickStatusResponse | null = null;
   const swapAddress = receipt.quoteResponse.quote.depositAddress;
@@ -104,7 +105,10 @@ export async function checkProgress(
 
   let observed: DepositObservation;
   try {
-    observed = await observeDeposit(config, depositContextOf(receipt), status, { fetchFn });
+    observed = await observeDeposit(config, depositContextOf(receipt), status, {
+      fetchFn,
+      ...(known ? { known } : {}),
+    });
   } catch (err) {
     throw new ProgressReadError(
       {

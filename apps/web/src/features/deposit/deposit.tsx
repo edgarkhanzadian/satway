@@ -601,10 +601,12 @@ function Tracking(props: {
     setReading(undefined);
     setStale(false);
     setProblem(null);
+    let known: Snapshot['mints'] | undefined;
     async function tick() {
       try {
-        const next = await checkProgress(config, backend, receipt);
+        const next = await checkProgress(config, backend, receipt, undefined, known);
         if (!live) return;
+        known = next.mints;
         setSnapshot(next);
         setReading({ swap: next.swap, remaining: next.remaining });
         setStale(false);
