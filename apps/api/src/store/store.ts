@@ -38,6 +38,14 @@ export interface Watch {
   registered: string[];
 }
 
+export interface QueueEntry {
+  address: string;
+  outpoint: string;
+  attempts: number;
+  nextAt: number;
+  refused: boolean;
+}
+
 export interface Rotation {
   at: number;
   run: number;
@@ -46,7 +54,7 @@ export interface Rotation {
 export interface WatchIndex {
   watches: Watch[];
   rotation: Rotation;
-  queue: string[];
+  queue: QueueEntry[];
   pending: string[];
   ended: Record<string, number>;
   listedAt: number | null;
@@ -94,10 +102,18 @@ const watchSchema: z.ZodType<Watch> = z.looseObject({
   registered: z.array(z.string().regex(OUTPOINT)),
 });
 
+const queueEntrySchema: z.ZodType<QueueEntry> = z.looseObject({
+  address: z.string(),
+  outpoint: z.string().regex(OUTPOINT),
+  attempts: z.number(),
+  nextAt: z.number(),
+  refused: z.boolean(),
+});
+
 const watchIndexSchema: z.ZodType<WatchIndex> = z.looseObject({
   watches: z.array(watchSchema),
   rotation: z.looseObject({ at: z.number(), run: z.number() }),
-  queue: z.array(z.string()),
+  queue: z.array(queueEntrySchema),
   pending: z.array(z.string()),
   ended: z.record(z.string(), z.number()),
   listedAt: z.number().nullable(),

@@ -4,6 +4,7 @@ import {
   type NetworkConfig,
   OneClickClient,
   type OneClickStatusResponse,
+  classifyRegistrationError,
   depositAddressFromScripts,
   destinationTxHashesOf,
   errorMessage,
@@ -34,9 +35,12 @@ import {
   PAYOUT_GRACE_HOURS,
   PERSIST_COST,
   REGISTRATION_COST,
+  RETRY_FIRST_MINUTES,
+  RETRY_MAX_MINUTES,
   RUN_SUBREQUEST_BUDGET,
   type Rotation,
   SHARED_LOOKUP_COST,
+  STUCK_OUTPUT_GRACE_HOURS,
   SWAP_STATUS_COST,
   VISIT_COST,
   type Watch,
@@ -72,6 +76,7 @@ type Endpoints = Pick<
 const MINUTE_MS = 60 * 1000;
 const HOUR_MS = 60 * MINUTE_MS;
 export const PAYOUT_GRACE_MS = PAYOUT_GRACE_HOURS * HOUR_MS;
+export const STUCK_OUTPUT_GRACE_MS = STUCK_OUTPUT_GRACE_HOURS * HOUR_MS;
 export const CRON_PERIOD_MS = CRON_PERIOD_MINUTES * MINUTE_MS;
 export const LIST_MIN_GAP_MS = LIST_MIN_GAP_MINUTES * MINUTE_MS;
 export const LIST_SETTLE_MS = LIST_SETTLE_MINUTES * MINUTE_MS;
@@ -185,20 +190,20 @@ function message(err: unknown): string {
   return errorMessage(err) ?? String(err);
 }
 
-function queueEntry(address: string, outpoint: string): string {
-  return `${address}|${outpoint}`;
+function blockingFor(index: WatchIndex, address: string): string[] {
+  return index.queue.filter(e => e.address === address && !e.refused).map(e => e.outpoint);
 }
 
-function queueParts(entry: string): { address: string; outpoint: string } | null {
-  const split = entry.indexOf('|');
-  if (split <= 0) return null;
-  return { address: entry.slice(0, split), outpoint: entry.slice(split + 1) };
+export function retryDelayMs(attempts: number): number {
+  if (attempts <= 1) return 0;
+  const minutes = RETRY_FIRST_MINUTES * 2 ** (attempts - 2);
+  return Math.min(RETRY_MAX_MINUTES, minutes) * MINUTE_MS;
 }
 
-function queuedFor(index: WatchIndex, address: string): string[] {
-  return index.queue.flatMap(e => {
-    const parts = queueParts(e);
-    return parts?.address === address ? [parts.outpoint] : [];
+function pastStuckBound(watch: Watch, now: Date): boolean {
+  return watch.swaps.every(s => {
+    const ms = Date.parse(s.deadline);
+    return !Number.isFinite(ms) || ms + PAYOUT_GRACE_MS + STUCK_OUTPUT_GRACE_MS < now.getTime();
   });
 }
 
@@ -310,9 +315,12 @@ async function refreshQueue(ctx: RunContext, visits: Visit[]): Promise<void> {
 
 function setQueued(ctx: RunContext, address: string, eligible: readonly string[]): void {
   const { index } = ctx;
-  const wanted = new Set(eligible.map(op => queueEntry(address, op)));
-  const kept = index.queue.filter(e => queueParts(e)?.address !== address || wanted.has(e));
-  const added = [...wanted].filter(e => !kept.includes(e));
+  const wanted = new Set(eligible);
+  const kept = index.queue.filter(e => e.address !== address || wanted.has(e.outpoint));
+  const have = new Set(kept.filter(e => e.address === address).map(e => e.outpoint));
+  const added = eligible
+    .filter(op => !have.has(op))
+    .map(outpoint => ({ address, outpoint, attempts: 0, nextAt: 0, refused: false }));
   if (kept.length !== index.queue.length || added.length > 0) {
     index.queue = [...kept, ...added];
     ctx.dirty = true;
@@ -321,18 +329,20 @@ function setQueued(ctx: RunContext, address: string, eligible: readonly string[]
 
 async function registerQueued(ctx: RunContext): Promise<void> {
   const { index, report, config } = ctx;
+  const nowMs = ctx.now.getTime();
   for (const entry of [...index.queue]) {
-    const parts = queueParts(entry);
-    const watch = parts ? index.watches.find(w => w.address === parts.address) : undefined;
-    if (!parts || !watch) {
+    const watch = index.watches.find(w => w.address === entry.address);
+    if (!watch) {
       index.queue = index.queue.filter(e => e !== entry);
       ctx.dirty = true;
       continue;
     }
+    if (entry.nextAt > nowMs) continue;
     if (ctx.budget.remaining() < REGISTRATION_COST + ctx.reserve) {
       if (!report.deferred.includes(watch.address)) report.deferred.push(watch.address);
       return;
     }
+    const parts = entry;
     const [txid = '', vout = ''] = parts.outpoint.split(':');
     try {
       const known = await fetchDeposit(config.sbtcApiUrl, txid, Number(vout), ctx.fetchFn);
@@ -358,7 +368,12 @@ async function registerQueued(ctx: RunContext): Promise<void> {
         outpoint: parts.outpoint,
         message: `Registering ${parts.outpoint} with the sBTC API failed: ${message(err)}`,
       });
-      index.queue = [...index.queue.filter(e => e !== entry), entry];
+      const attempts = entry.attempts + 1;
+      const refused = classifyRegistrationError(err, config.sbtcApiUrl).kind === 'rejected';
+      index.queue = [
+        ...index.queue.filter(e => e !== entry),
+        { ...entry, attempts, nextAt: nowMs + retryDelayMs(attempts), refused },
+      ];
     }
     ctx.dirty = true;
   }
@@ -408,13 +423,15 @@ async function endWatch(ctx: RunContext, watch: Watch): Promise<void> {
     }
   }
   index.watches = index.watches.filter(w => w.address !== watch.address);
-  index.queue = index.queue.filter(e => queueParts(e)?.address !== watch.address);
+  index.queue = index.queue.filter(e => e.address !== watch.address);
   ctx.dirty = true;
 }
 
 async function endWatches(ctx: RunContext, visits: readonly Visit[]): Promise<void> {
   const candidates = visits.filter(
-    v => !v.pending && queuedFor(ctx.index, v.watch.address).length === 0
+    v =>
+      pastStuckBound(v.watch, ctx.now) ||
+      (!v.pending && blockingFor(ctx.index, v.watch.address).length === 0)
   );
   const offset = candidates.length === 0 ? 0 : mod(ctx.runIndex, candidates.length);
   const ordered = [...candidates.slice(offset), ...candidates.slice(0, offset)];

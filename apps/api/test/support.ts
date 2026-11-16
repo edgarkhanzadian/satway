@@ -251,6 +251,7 @@ export interface WorldOptions {
   knownOutpoints?: string[];
   notifyStatus?: number;
   failPostFor?: string;
+  rejectPostFor?: string;
   txHex?: string;
   limitsDown?: boolean;
   tooManyUtxos?: boolean;
@@ -333,6 +334,7 @@ export function world(opts: WorldOptions = {}) {
           ? `${String(body.bitcoinTxid)}:${String(body.bitcoinTxOutputIndex)}`
           : 'unknown';
       if (key === opts.failPostFor) return jsonRes({ message: 'Emily is down' }, 500);
+      if (key === opts.rejectPostFor) return jsonRes({ message: 'Invalid deposit' }, 400);
       if (!opts.notifyStatus || opts.notifyStatus < 300) emily.add(key);
       return jsonRes(emilyDeposit('pending'), opts.notifyStatus ?? 201);
     }

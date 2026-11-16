@@ -30,6 +30,9 @@ export const FULL_CYCLE_RUNS = 20;
 export const MAX_ACTIVE_WATCHES = MAX_ADDRESSES_PER_RUN * FULL_CYCLE_RUNS;
 
 export const PAYOUT_GRACE_HOURS = 24;
+export const STUCK_OUTPUT_GRACE_HOURS = 24;
+export const RETRY_FIRST_MINUTES = 2;
+export const RETRY_MAX_MINUTES = 60;
 
 export const LIST_MIN_GAP_MINUTES = 6;
 export const LIST_SETTLE_MINUTES = 12;

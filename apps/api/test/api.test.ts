@@ -17,8 +17,10 @@ import {
 import { handle } from '../src/index.js';
 import {
   CRON_PERIOD_MS,
+  PAYOUT_GRACE_MS,
   RUN_TIME_BUDGET_MS,
   WORKER_REQUEST_TIMEOUT_MS,
+  retryDelayMs,
   runNotifier,
   swapsFinal,
 } from '../src/notifier/index.js';
@@ -599,7 +601,7 @@ describe('runNotifier', () => {
     expect(report.errors).toMatchObject([{ address: D.address, outpoint: `${D.txid}:0` }]);
   });
 
-  it('keeps watching while an eligible output failed to register, and retries it next run', async () => {
+  it('keeps watching while an eligible output failed to register, and retries it after a backoff', async () => {
     const opts = {
       txs: [payoutTx(0, { value: 60_000 }), payoutTx(3)],
       failPostFor: `${D.txid}:0`,
@@ -614,7 +616,9 @@ describe('runNotifier', () => {
 
     const healthy = world({ txs: opts.txs, knownOutpoints: [`${CHAIN[3]?.txid}:3`] });
     healthy.arrive();
-    const second = await runNotifier(kv, endpoints, healthy.fetchFn, run);
+    const second = await runNotifier(kv, endpoints, healthy.fetchFn, {
+      now: new Date(NOW.getTime() + 3 * 60_000),
+    });
     expect(outpointsPosted(healthy)).toEqual([`${D.txid}:0`]);
     expect(second.finished).toEqual([D.address]);
     expect(watchKeys(kv).length).toBe(0);
@@ -914,5 +918,55 @@ describe('runNotifier: several swaps paying one address', () => {
     }
     expect(finished).toBe(true);
     expect(new Set(w.hits(`${EMILY}/deposit/`).map(c => c.url)).size).toBe(7);
+  });
+});
+
+describe('runNotifier: a registration that keeps failing', () => {
+  function day(r: number) {
+    return {
+      now: new Date(NOW.getTime() + (r + 1) * CRON_PERIOD_MS),
+      runIndex: 50_000 + r,
+      clock: { now: () => 0, deadline: 1e12 },
+    };
+  }
+
+  it('backs off, writes the index only when it retries, and ends the watch a day after the grace', async () => {
+    const w = world({
+      txs: [payoutTx(0)],
+      failPostFor: `${D.txid}:0`,
+      swaps: { '0xswap0': { hashes: [D.txid] } },
+    });
+    const kv = await watching(w);
+    function indexWrites(): number {
+      return kv.ops.filter(o => o.op === 'put' && o.key === INDEX_KEY).length;
+    }
+    const runsPerDay = (24 * 60 * 60_000) / CRON_PERIOD_MS;
+    let endedAt: number | null = null;
+    const firstDayWrites: number[] = [];
+    for (let r = 0; r < 3 * runsPerDay && endedAt === null; r++) {
+      const report = await runNotifier(kv, endpoints, w.fetchFn, day(r));
+      if (r === runsPerDay - 1) firstDayWrites.push(indexWrites(), w.posts().length);
+      if (report.finished.length > 0 || report.expired.length > 0) endedAt = r;
+    }
+    const [writes = 0, posts = 0] = firstDayWrites;
+    expect(writes).toBeLessThanOrEqual(40);
+    expect(posts).toBeLessThanOrEqual(40);
+    const deadlineRun = (2 * 3_600_000 + 2 * PAYOUT_GRACE_MS) / CRON_PERIOD_MS;
+    expect(endedAt !== null && endedAt <= deadlineRun + 25).toBe(true);
+    expect([1, 2, 3, 10].map(retryDelayMs)).toEqual([0, 2 * 60_000, 4 * 60_000, 60 * 60_000]);
+  });
+
+  it('an output Emily refuses no longer blocks the end of the watch', async () => {
+    const w = world({
+      txs: [payoutTx(0), payoutTx(3)],
+      rejectPostFor: `${CHAIN[3]?.txid}:3`,
+      swaps: { '0xswap0': { hashes: [D.txid] } },
+    });
+    const kv = await watching(w);
+    const report = await runNotifier(kv, endpoints, w.fetchFn, run);
+    expect(report.finished).toEqual([D.address]);
+    const again = await runNotifier(kv, endpoints, w.fetchFn, day(5));
+    expect(again.notified).toEqual([]);
+    expect(outpointsPosted(w).filter(o => o === `${CHAIN[3]?.txid}:3`)).toHaveLength(1);
   });
 });
