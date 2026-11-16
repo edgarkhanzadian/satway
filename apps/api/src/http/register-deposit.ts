@@ -4,19 +4,15 @@ import {
   depositAddressFromScripts,
   fetchSignersPublicKey,
   signerKeyOfDepositScript,
-  snapshotOutpoints,
 } from '@satway/core';
 
 import {
   type KV,
   MAX_ACTIVE_WATCHES,
-  MAX_REGISTRATIONS_PER_ADDRESS,
-  type WatchRegistration,
   type WatchedDeposit,
-  countRegistrations,
+  countWatches,
   getWatched,
   putWatched,
-  registrationsOf,
 } from '../store/index.js';
 import { ApiError, BadRequest } from './errors.js';
 import { type ScriptConfig, checkScriptShape } from './script-shape.js';
@@ -25,13 +21,12 @@ import { type SwapConfig, swapDeadlineFor } from './swap-check.js';
 
 const HEX = /^[0-9a-f]+$/;
 const SWAP_ADDRESS = /^[\x21-\x7e]{1,200}$/;
-const SNAPSHOT_PAGES = 4;
 
 export const CAPACITY_RETRY_AFTER_SECONDS = 15 * 60;
 
 export type RegisterConfig = ScriptConfig &
   SwapConfig &
-  Pick<NetworkConfig, 'btcApiUrl' | 'stxApiUrl' | 'sbtcContract'>;
+  Pick<NetworkConfig, 'stxApiUrl' | 'sbtcContract'>;
 
 export interface RegisterDeps {
   config: RegisterConfig;
@@ -64,7 +59,7 @@ function swapAddressOf(value: unknown): string {
 
 export class AlreadyRegistered extends ApiError {
   constructor(address: string) {
-    super('This swap is already registered', 409, {}, { address });
+    super('This deposit is already registered', 409, {}, { address });
     this.name = 'AlreadyRegistered';
   }
 }
@@ -107,12 +102,7 @@ export async function registerDeposit(
   if (!current) throw new BadRequest('"depositScript" is not locked to the current sBTC signers');
 
   const existing = await getWatched(kv, derived.address);
-  const known =
-    existing && existing.depositScript === deposit && existing.reclaimScript === reclaim
-      ? existing
-      : null;
-  const previous = known ? registrationsOf(known) : [];
-  if (previous.some(r => r.swapDepositAddress === swap)) {
+  if (existing && existing.depositScript === deposit && existing.reclaimScript === reclaim) {
     throw new AlreadyRegistered(derived.address);
   }
 
@@ -123,7 +113,7 @@ export async function registerDeposit(
     now,
   });
 
-  const active = await countRegistrations(kv);
+  const active = await countWatches(kv);
   if (active >= (deps.maxWatches ?? MAX_ACTIVE_WATCHES)) {
     throw new ApiError(
       'Background tracking is at capacity. The open tab still registers the payout.',
@@ -132,32 +122,13 @@ export async function registerDeposit(
     );
   }
 
-  let snapshot: { outpoints: string[]; truncated: boolean } | null = null;
-  try {
-    snapshot = await snapshotOutpoints(config.btcApiUrl, derived.address, derived.scriptPubKey, {
-      maxPages: SNAPSHOT_PAGES,
-      fetchFn,
-    });
-  } catch {
-    snapshot = null;
-  }
-  const alreadyRegistered = (known?.registered ?? []).map(r => r.outpoint);
-  const registration: WatchRegistration = {
-    createdAt: now.toISOString(),
-    priorOutpoints: snapshot
-      ? [...new Set([...snapshot.outpoints, ...alreadyRegistered])].sort()
-      : null,
-    ...(snapshot?.truncated ? { priorTruncated: true } : {}),
-    swapDepositAddress: swap,
-    deadline,
-  };
-
   const record: WatchedDeposit = {
     depositScript: deposit,
     reclaimScript: reclaim,
-    createdAt: known?.createdAt ?? registration.createdAt,
-    registrations: [...previous, registration].slice(-MAX_REGISTRATIONS_PER_ADDRESS),
-    registered: known?.registered ?? [],
+    createdAt: now.toISOString(),
+    swapDepositAddress: swap,
+    deadline,
+    registered: [],
   };
   await putWatched(kv, derived.address, record, now);
   return { address: derived.address, deadline };

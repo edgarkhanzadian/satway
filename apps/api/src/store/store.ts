@@ -15,26 +15,17 @@ export interface KV {
   }>;
 }
 
-export interface WatchRegistration {
-  createdAt: string;
-  priorOutpoints: string[] | null;
-  priorTruncated?: boolean;
-  swapDepositAddress?: string;
-  deadline?: string;
-}
-
 export interface RegisteredOutput {
   outpoint: string;
-  confirmed: boolean;
-  blockTime: number | null;
 }
 
 export interface WatchedDeposit {
   depositScript: string;
   reclaimScript: string;
   createdAt: string;
-  registrations?: WatchRegistration[];
-  registered?: RegisteredOutput[];
+  swapDepositAddress: string;
+  deadline: string;
+  registered: RegisteredOutput[];
 }
 
 const OUTPOINT = /^[0-9a-f]{64}:\d+$/;
@@ -43,48 +34,20 @@ const watchedDepositSchema: z.ZodType<WatchedDeposit> = z.looseObject({
   depositScript: z.string(),
   reclaimScript: z.string(),
   createdAt: z.string(),
-  registrations: z
-    .array(
-      z.looseObject({
-        createdAt: z.string(),
-        priorOutpoints: z.array(z.string().regex(OUTPOINT)).nullable(),
-        priorTruncated: z.boolean().optional(),
-        swapDepositAddress: z.string().optional(),
-        deadline: z.string().optional(),
-      })
-    )
-    .optional(),
-  registered: z
-    .array(
-      z.looseObject({
-        outpoint: z.string().regex(OUTPOINT),
-        confirmed: z.boolean(),
-        blockTime: z.number().nullable(),
-      })
-    )
-    .optional(),
+  swapDepositAddress: z.string(),
+  deadline: z.string(),
+  registered: z.array(z.looseObject({ outpoint: z.string().regex(OUTPOINT) })),
 });
 
 const PREFIX = 'dep:';
 const SIGNER_KEY_CACHE = 'meta:signer-key';
 export const WATCH_TTL_SECONDS = 14 * 24 * 60 * 60;
-export const MAX_REGISTRATIONS_PER_ADDRESS = 8;
 export const MAX_LIST_PAGES = 2;
 const MIN_TTL_SECONDS = 60;
 
-export function registrationsOf(deposit: WatchedDeposit): WatchRegistration[] {
-  if (deposit.registrations && deposit.registrations.length > 0) return deposit.registrations;
-  return [{ createdAt: deposit.createdAt, priorOutpoints: null }];
-}
-
 function remainingTtl(deposit: WatchedDeposit, now: Date): number {
-  const newest = Math.max(
-    ...registrationsOf(deposit)
-      .map(r => Date.parse(r.createdAt))
-      .filter(Number.isFinite),
-    0
-  );
-  const age = newest > 0 ? Math.floor((now.getTime() - newest) / 1000) : 0;
+  const created = Date.parse(deposit.createdAt);
+  const age = Number.isFinite(created) ? Math.floor((now.getTime() - created) / 1000) : 0;
   return Math.max(MIN_TTL_SECONDS, WATCH_TTL_SECONDS - Math.max(0, age));
 }
 
@@ -96,16 +59,7 @@ export async function putWatched(
 ): Promise<void> {
   await kv.put(PREFIX + address, JSON.stringify(deposit), {
     expirationTtl: remainingTtl(deposit, now),
-    metadata: { registrations: registrationsOf(deposit).length },
   });
-}
-
-function registrationsInMetadata(metadata: unknown): number {
-  const count: unknown =
-    typeof metadata === 'object' && metadata !== null
-      ? Reflect.get(metadata, 'registrations')
-      : undefined;
-  return typeof count === 'number' && Number.isSafeInteger(count) && count > 0 ? count : 1;
 }
 
 function parseWatched(raw: string, key: string): WatchedDeposit | null {
@@ -139,29 +93,22 @@ export async function deleteWatched(kv: KV, address: string): Promise<void> {
 export async function listWatchedAddresses(
   kv: KV,
   maxPages = MAX_LIST_PAGES
-): Promise<{ addresses: string[]; registrations: number; truncated: boolean; pages: number }> {
-  const found = new Map<string, number>();
+): Promise<{ addresses: string[]; truncated: boolean; pages: number }> {
+  const found = new Set<string>();
   let cursor: string | undefined;
   let pages = 0;
   do {
     const page = await kv.list({ prefix: PREFIX, cursor });
     pages += 1;
-    for (const k of page.keys) {
-      found.set(k.name.slice(PREFIX.length), registrationsInMetadata(k.metadata));
-    }
+    for (const k of page.keys) found.add(k.name.slice(PREFIX.length));
     cursor = page.list_complete ? undefined : page.cursor;
   } while (cursor && pages < maxPages);
-  return {
-    addresses: [...found.keys()].sort(),
-    registrations: [...found.values()].reduce((sum, n) => sum + n, 0),
-    truncated: cursor !== undefined,
-    pages,
-  };
+  return { addresses: [...found].sort(), truncated: cursor !== undefined, pages };
 }
 
-export async function countRegistrations(kv: KV, maxPages = MAX_LIST_PAGES): Promise<number> {
-  const { registrations, truncated } = await listWatchedAddresses(kv, maxPages);
-  return truncated ? Number.MAX_SAFE_INTEGER : registrations;
+export async function countWatches(kv: KV, maxPages = MAX_LIST_PAGES): Promise<number> {
+  const { addresses, truncated } = await listWatchedAddresses(kv, maxPages);
+  return truncated ? Number.MAX_SAFE_INTEGER : addresses.length;
 }
 
 export interface CachedSignerKey {

@@ -1,4 +1,4 @@
-import type { NetworkConfig } from '@satway/core';
+import { DEPOSIT_INDEX_LIMIT, type NetworkConfig } from '@satway/core';
 
 import { BadRequest } from './errors.js';
 
@@ -40,8 +40,10 @@ export function checkScriptShape(
   if (feeHex === undefined || signerKey === undefined) {
     throw new BadRequest('"depositScript" is not an sBTC deposit script this app creates');
   }
-  if (BigInt(`0x${feeHex}`) !== BigInt(config.baseSignerFeeSats)) {
-    throw new BadRequest('"depositScript" does not use the fee cap this app sets');
+  const fee = BigInt(`0x${feeHex}`);
+  const base = BigInt(config.baseSignerFeeSats);
+  if (fee < base || fee >= base + BigInt(DEPOSIT_INDEX_LIMIT)) {
+    throw new BadRequest('"depositScript" does not use a fee cap this app sets');
   }
   const lock = lockPushHex(config.reclaimLockBlocks);
   const reclaimKey = reclaimScript.startsWith(lock)

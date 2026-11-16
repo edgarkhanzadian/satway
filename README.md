@@ -409,16 +409,19 @@ What `POST /deposits` accepts, and what it costs:
 - Body: `{ depositScript, reclaimScript, swapDepositAddress }`, at most 2 KiB
   (413 above). `swapDepositAddress` (the 1Click deposit address) is required.
 - Checked in this order, cheapest first: script shape (the deposit script
-  carries `maxSignerFeeSats` and a standard principal, the reclaim script
-  carries `reclaimLockBlocks`), then the per-IP rate limit (429 with
+  carries a per-deposit fee cap from `baseSignerFeeSats` up to, not including,
+  `baseSignerFeeSats + DEPOSIT_INDEX_LIMIT`, and a standard principal; the
+  reclaim script carries `reclaimLockBlocks`), then the per-IP rate limit (429 with
   `Retry-After`), then the signer key (it must be the current aggregate key
   from the sBTC registry; cached 10 minutes in memory and in KV), then
-  duplicates (409), then `GET /v0/status` at 1Click with the Worker's key
+  duplicates (409: the deposit address already has a record, whichever swap
+  registered it), then `GET /v0/status` at 1Click with the Worker's key
   (the swap must pay the derived address in native BTC, not be refunded or
   failed, and its deadline must not have passed), then the cap on watched
-  swaps (`MAX_ACTIVE_WATCHES`, counted per swap from KV key metadata in one
-  list call; 503 with `Retry-After` when full), then the mempool.space snapshot
-  and one KV write. Invalid requests make no outbound call; 503 means an
+  deposits (`MAX_ACTIVE_WATCHES`, one KV key per deposit address, counted in
+  one list call; 503 with `Retry-After` when full), then one KV write. That
+  record is written once here and afterwards changed only by the scheduled run,
+  so the request handler and the cron never rewrite each other's data. Invalid requests make no outbound call; 503 means an
   upstream (Hiro, 1Click) could not be read. When 1Click does not know the swap
   the 400 body carries `code: "unknown-swap"`; the web app retries that one
   answer five times in the background, after 5 s, 20 s, 1 min, 2 min and 4 min
@@ -427,9 +430,13 @@ What `POST /deposits` accepts, and what it costs:
 - The scheduled run visits at most `MAX_ADDRESSES_PER_RUN` watches, in a window
   that rotates over the sorted keys each run, and makes at most
   `RUN_SUBREQUEST_BUDGET` fetch and KV calls (under the Workers Free limit of
-  50 subrequests). A watch ends when its payout is registered, or when every
-  swap on it is 24 hours past its deadline with no eligible payout unregistered,
-  and in any case after 14 days (the KV TTL). The constants live in
+  50 subrequests). Every deposit has its own address, so any unspent output at
+  the address of at least the sBTC minimum is registered with Emily. A watch
+  ends once at least one such output is registered and none is left
+  unregistered, or when its swap is 24 hours past its deadline with no eligible
+  output unregistered, and in any case after 14 days (the KV TTL). A second
+  payment to the same address after the watch ended is left to the open page or
+  a later receipt load. The constants live in
   `apps/api/src/store/limits.ts`.
 
 ## Notes

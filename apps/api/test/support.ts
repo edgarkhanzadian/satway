@@ -1,4 +1,4 @@
-import { MAINNET_CONFIG as config } from '@satway/core';
+import { buildIndexedDepositAddress, MAINNET_CONFIG as config } from '@satway/core';
 
 import {
   DEPOSIT_RATE,
@@ -38,22 +38,50 @@ export const EMILY = 'https://emily.example';
 export const HIRO_KEY_URL = `${config.stxApiUrl}/v2/contracts/call-read/${config.sbtcContract}/sbtc-registry/get-current-aggregate-pubkey`;
 export const STATUS_URL = `${config.oneClickBaseUrl}/v0/status`;
 export const endpoints = { btcApiUrl: BTC, sbtcApiUrl: EMILY, reclaimLockBlocks: 950 };
-export const registerConfig = { ...config, btcApiUrl: BTC };
+export const registerConfig = config;
+export const STACKS = 'SP1Q6W6VADA7V12SEVH6VNDNN4N7RX1PQ949EQPQ';
+export const RECLAIM_KEY = '51b397d3ad5ab4f803565c0243d3c1fa9d5a8124b33547bb993ee1ebeb729ff2';
+
+const swapRecipients = new Map<string, string>();
+
+export function indexedDeposit(depositIndex: number) {
+  return buildIndexedDepositAddress(
+    {
+      stacksAddress: STACKS,
+      reclaimPublicKey: RECLAIM_KEY,
+      signersPublicKey: D.signerKey,
+      depositIndex,
+    },
+    config
+  );
+}
+
+export function indexedBody(depositIndex: number, swapDepositAddress = `0xswapn${depositIndex}`) {
+  const built = indexedDeposit(depositIndex);
+  swapRecipients.set(swapDepositAddress, built.address);
+  return {
+    depositScript: built.depositScript,
+    reclaimScript: built.reclaimScript,
+    swapDepositAddress,
+  };
+}
 export const OTHER_SPK = '0014' + '11'.repeat(20);
 export const TIP = 976_000;
 
 export interface MemoryKv extends KV {
   data: Map<string, string>;
+  ttls: Map<string, number | null>;
   ops: { op: 'get' | 'put' | 'delete' | 'list'; key: string }[];
   writes(): string[];
 }
 
 export function memoryKv(pageSize = 1000): MemoryKv {
   const data = new Map<string, string>();
-  const metadata = new Map<string, Record<string, number>>();
   const ops: MemoryKv['ops'] = [];
+  const ttls = new Map<string, number | null>();
   return {
     data,
+    ttls,
     ops,
     writes: () => ops.filter(o => o.op === 'put').map(o => o.key),
     get(key) {
@@ -63,23 +91,19 @@ export function memoryKv(pageSize = 1000): MemoryKv {
     put(key, value, options) {
       ops.push({ op: 'put', key });
       data.set(key, value);
-      if (options?.metadata) metadata.set(key, options.metadata);
-      else metadata.delete(key);
+      ttls.set(key, options?.expirationTtl ?? null);
       return Promise.resolve();
     },
     delete(key) {
       ops.push({ op: 'delete', key });
       data.delete(key);
-      metadata.delete(key);
       return Promise.resolve();
     },
     list({ prefix, cursor }) {
       ops.push({ op: 'list', key: prefix });
       const all = [...data.keys()].filter(k => k.startsWith(prefix)).sort();
       const start = cursor ? Number(cursor) : 0;
-      const keys = all
-        .slice(start, start + pageSize)
-        .map(name => ({ name, metadata: metadata.get(name) }));
+      const keys = all.slice(start, start + pageSize).map(name => ({ name }));
       const end = start + keys.length;
       return Promise.resolve(
         end < all.length
@@ -141,14 +165,6 @@ export function payoutTx(
   };
 }
 
-export function oldTx(): Tx {
-  return {
-    txid: 'cc'.repeat(32),
-    vout: [{ scriptpubkey: D.scriptPubKey, value: 50_000 }],
-    status: { confirmed: true, block_height: TIP - 5_000, block_time: NOW_S - 86_400 },
-  };
-}
-
 export interface SwapFake {
   recipient?: string;
   destinationAsset?: string;
@@ -193,7 +209,7 @@ export function swapStatus(swapAddress: string, swap: SwapFake = {}) {
             timestamp: NOW.toISOString(),
             signature: 's',
             quoteRequest: {
-              recipient: swap.recipient ?? D.address,
+              recipient: swap.recipient ?? swapRecipients.get(swapAddress) ?? D.address,
               destinationAsset: swap.destinationAsset ?? config.btcAssetId,
               deadline: swap.deadline ?? new Date(NOW.getTime() + 2 * 3_600_000).toISOString(),
             },
@@ -210,7 +226,6 @@ export function aggregateKeyResult(xOnly: string) {
 export interface WorldOptions {
   btc?: string;
   txs?: Tx[];
-  prior?: Tx[];
   known?: boolean;
   knownOutpoints?: string[];
   notifyStatus?: number;
@@ -237,7 +252,7 @@ export function world(opts: WorldOptions = {}) {
     oneClickDown: opts.oneClickDown ?? false,
   };
   function visible(): Tx[] {
-    return [...(state.arrived ? state.txs : []), ...(opts.prior ?? [])];
+    return state.arrived ? state.txs : [];
   }
   function respond(url: string, init?: RequestInit): Response {
     calls.push({

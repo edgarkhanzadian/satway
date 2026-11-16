@@ -30,9 +30,10 @@ import {
   endpoints,
   goodBody,
   handleOptions,
+  indexedBody,
+  indexedDeposit,
   jsonRes,
   memoryKv,
-  oldTx,
   outpointsPosted,
   payoutTx,
   postJson,
@@ -318,35 +319,74 @@ describe('registerDeposit', () => {
     await expect(registerDeposit(memoryKv(), body, deps())).rejects.toThrow(BadRequest);
   });
 
-  it('snapshots the outputs already on the address as prior', async () => {
-    const w = world({ prior: [oldTx()] });
-    const kv = await watching(w, memoryKv(), '0xswapA');
-    expect(record(kv)).toMatchObject({
-      registrations: [
-        {
-          createdAt: NOW.toISOString(),
-          priorOutpoints: [`${'cc'.repeat(32)}:0`],
-          swapDepositAddress: '0xswapA',
-          deadline: '2026-11-14T14:00:00.000Z',
-        },
-      ],
-      registered: [],
-    });
-  });
-
-  it('records an unknown prior set when the Bitcoin API is down, and still watches', async () => {
-    const kv = memoryKv();
-    await registerDeposit(kv, goodBody(), registerDeps(world({ btcDown: true })));
-    expect(record(kv)).toMatchObject({ registrations: [{ priorOutpoints: null }] });
-  });
-
-  it('keeps both deposits when the same address is registered twice, and refuses a repeat', async () => {
+  it('writes one record per deposit address, once, with no snapshot of the address', async () => {
     const w = world({});
     const kv = await watching(w, memoryKv(), '0xswapA');
-    await watching(w, kv, '0xswapB');
+    expect(kv.writes().filter(k => k.startsWith('dep:'))).toEqual([`dep:${D.address}`]);
+    expect(record(kv)).toEqual({
+      depositScript: D.depositScript,
+      reclaimScript: D.reclaimScript,
+      createdAt: NOW.toISOString(),
+      swapDepositAddress: '0xswapA',
+      deadline: '2026-11-14T14:00:00.000Z',
+      registered: [],
+    });
+    expect(w.calls.some(c => c.url.includes('/address/'))).toBe(false);
+    expect(kv.ttls.get(`dep:${D.address}`)).toBe(14 * 24 * 60 * 60);
+  });
+
+  it('is idempotent: a second registration of the address is refused as already registered', async () => {
+    const w = world({});
+    const kv = await watching(w, memoryKv(), '0xswapA');
+    const stored = kv.data.get(`dep:${D.address}`);
     await expect(watching(w, kv, '0xswapA')).rejects.toThrow(AlreadyRegistered);
-    expect(record(kv)).toMatchObject({
-      registrations: [{ swapDepositAddress: '0xswapA' }, { swapDepositAddress: '0xswapB' }],
+    await expect(watching(w, kv, '0xswapB')).rejects.toThrow(AlreadyRegistered);
+    expect(kv.data.get(`dep:${D.address}`)).toBe(stored);
+  });
+
+  it('keeps two deposits from one wallet apart, one record each', async () => {
+    const w = world({});
+    const kv = memoryKv();
+    for (const n of [0, 7]) {
+      await registerDeposit(kv, indexedBody(n), registerDeps(w));
+    }
+    expect(watchKeys(kv).sort()).toEqual(
+      [`dep:${indexedDeposit(0).address}`, `dep:${indexedDeposit(7).address}`].sort()
+    );
+  });
+
+  it('a registration while the notifier is mid-run cannot lose either deposit', async () => {
+    const w = world({ txs: [payoutTx(0)] });
+    const kv = await watching(w);
+    const gate = { open: () => undefined };
+    const held = new Promise<undefined>(resolve => {
+      gate.open = () => {
+        resolve(undefined);
+        return undefined;
+      };
+    });
+    let paused = false;
+    async function slowFetch(url: string, init?: RequestInit): Promise<Response> {
+      if (!paused && url.endsWith('/utxo')) {
+        paused = true;
+        await held;
+      }
+      return w.fetchFn(url, init);
+    }
+    const running = runNotifier(kv, endpoints, slowFetch, run);
+    await vi.waitFor(() => expect(paused).toBe(true));
+    const other = indexedBody(3);
+    await registerDeposit(kv, other, registerDeps(w));
+    await expect(registerDeposit(kv, goodBody('0xswapLate'), registerDeps(w))).rejects.toThrow(
+      AlreadyRegistered
+    );
+    gate.open();
+    const report = await running;
+    expect(report.finished).toEqual([D.address]);
+    expect(watchKeys(kv)).toEqual([`dep:${indexedDeposit(3).address}`]);
+    expect(JSON.parse(kv.data.get(`dep:${indexedDeposit(3).address}`) ?? '{}')).toMatchObject({
+      swapDepositAddress: other.swapDepositAddress,
+      registered: [],
     });
   });
 });
@@ -454,30 +494,20 @@ describe('runNotifier', () => {
     expect(watchKeys(kv).length).toBe(0);
   });
 
-  it('a second deposit does not end on the first deposit’s old, already-registered payout', async () => {
-    const old = oldTx();
-    const w = world({ prior: [old], knownOutpoints: [`${old.txid}:0`] });
+  it('ends the watch once a payout is registered, even one the page registered first', async () => {
+    const w = world({ txs: [payoutTx(0)], knownOutpoints: [`${D.txid}:0`] });
     const kv = await watching(w);
     const report = await runNotifier(kv, endpoints, w.fetchFn, run);
-    expect(report).toMatchObject({ finished: [], notified: [], errors: [] });
-    expect(watchKeys(kv).length).toBe(1);
-    w.arrive(payoutTx(0));
-    expect((await runNotifier(kv, endpoints, w.fetchFn, run)).finished).toEqual([D.address]);
+    expect(report).toMatchObject({ finished: [D.address], notified: [], errors: [] });
+    expect(w.posts()).toEqual([]);
   });
 
-  it('two deposits registered on one address need two payouts before the watch ends', async () => {
-    const w = world({});
-    const kv = await watching(w, memoryKv(), '0xswapA');
-    await watching(w, kv, '0xswapB');
-    w.arrive(payoutTx(0));
-    const first = await runNotifier(kv, endpoints, w.fetchFn, run);
-    expect(first.notified).toHaveLength(1);
-    expect(first.finished).toEqual([]);
-    expect(record(kv)).toMatchObject({ registered: [{ outpoint: `${D.txid}:0` }] });
-    w.arrive(payoutTx(3));
-    const second = await runNotifier(kv, endpoints, w.fetchFn, run);
-    expect(second.notified).toEqual([{ address: D.address, txid: CHAIN[3]?.txid, vout: 3 }]);
-    expect(second.finished).toEqual([D.address]);
+  it('registers every eligible payment at the address in one run, then ends the watch', async () => {
+    const w = world({ txs: [payoutTx(0), payoutTx(3)] });
+    const kv = await watching(w);
+    const report = await runNotifier(kv, endpoints, w.fetchFn, run);
+    expect(outpointsPosted(w).sort()).toEqual([`${D.txid}:0`, `${CHAIN[3]?.txid}:3`].sort());
+    expect(report.finished).toEqual([D.address]);
   });
 
   it('a failure on one output does not stop the next, and names the outpoint', async () => {
@@ -577,7 +607,7 @@ describe('runNotifier', () => {
     expect(watchKeys(kv).length).toBe(1);
   });
 
-  it('tolerates an old-shaped record: old payouts are prior by time, new ones are registered', async () => {
+  it('drops a record of another shape as unreadable', async () => {
     const kv = memoryKv();
     kv.data.set(
       `dep:${D.address}`,
@@ -585,15 +615,14 @@ describe('runNotifier', () => {
         depositScript: D.depositScript,
         reclaimScript: D.reclaimScript,
         createdAt: NOW.toISOString(),
+        registrations: [],
       })
     );
-    const w = world({ prior: [oldTx()] });
-    const first = await runNotifier(kv, endpoints, w.fetchFn, run);
-    expect(first).toMatchObject({ watched: 1, notified: [], finished: [], errors: [] });
-    w.arrive(payoutTx(0));
-    const second = await runNotifier(kv, endpoints, w.fetchFn, run);
-    expect(outpointsPosted(w)).toEqual([`${D.txid}:0`]);
-    expect(second.finished).toEqual([D.address]);
+    const w = world({ txs: [payoutTx(0)] });
+    w.arrive();
+    const report = await runNotifier(kv, endpoints, w.fetchFn, run);
+    expect(report.notified).toEqual([]);
+    expect(watchKeys(kv)).toEqual([]);
   });
 
   it('drops a record whose stored scripts do not match its address', async () => {
@@ -604,6 +633,9 @@ describe('runNotifier', () => {
         depositScript: D.depositScript,
         reclaimScript: D.reclaimScript,
         createdAt: '',
+        swapDepositAddress: '0xforged',
+        deadline: '',
+        registered: [],
       })
     );
     const w = world({ txs: [payoutTx(0)] });
@@ -622,6 +654,9 @@ describe('runNotifier', () => {
         depositScript: D.depositScript,
         reclaimScript: D.reclaimScript,
         createdAt: '',
+        swapDepositAddress: '0xforged',
+        deadline: '',
+        registered: [],
       })
     );
     const report = await runNotifier(kv, endpoints, w.fetchFn, run);
@@ -644,6 +679,9 @@ describe('listWatchedAddresses and loadWatched', () => {
     depositScript: D.depositScript,
     reclaimScript: D.reclaimScript,
     createdAt: '2026-11-14T12:00:00.000Z',
+    swapDepositAddress: '0xswap0',
+    deadline: '2026-11-14T14:00:00.000Z',
+    registered: [],
   };
 
   it('returns stored records with any extra fields intact', async () => {

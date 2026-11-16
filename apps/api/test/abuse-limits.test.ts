@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildDepositAddress, MAINNET_CONFIG as config } from '@satway/core';
+import { DEPOSIT_INDEX_LIMIT, buildDepositAddress, MAINNET_CONFIG as config } from '@satway/core';
 
 import {
   CAPACITY_RETRY_AFTER_SECONDS,
@@ -39,6 +39,8 @@ import {
   endpoints,
   goodBody,
   handleOptions,
+  indexedBody,
+  indexedDeposit,
   memoryKv,
   payoutTx,
   postJson,
@@ -98,12 +100,17 @@ function swapWorld(swap: SwapFake | 'unknown', extra: WorldOptions = {}) {
 }
 
 describe('POST /deposits: script shape is checked before anything else', () => {
-  const tamperedFee = D.depositScript.replace('0000000000013880', '0000000000013881');
+  const belowBase = D.depositScript.replace('0000000000013880', '000000000001387f');
+  const pastLimit = D.depositScript.replace(
+    '0000000000013880',
+    (config.baseSignerFeeSats + DEPOSIT_INDEX_LIMIT).toString(16).padStart(16, '0')
+  );
   const contractPrincipal = D.depositScript.replace('0516', '0616');
   const otherLock = D.reclaimScript.replace('02b603', '02b703');
   const selfReclaim = `02b603b27520${D.signerKey}ac`;
   it.each([
-    ['a fee cap this app does not set', { ...goodBody(), depositScript: tamperedFee }],
+    ['a fee cap below the base', { ...goodBody(), depositScript: belowBase }],
+    ['a fee cap past the last deposit index', { ...goodBody(), depositScript: pastLimit }],
     ['a contract principal', { ...goodBody(), depositScript: contractPrincipal }],
     ['a reclaim lock this app does not set', { ...goodBody(), reclaimScript: otherLock }],
     ['the signers key as the reclaim key', { ...goodBody(), reclaimScript: selfReclaim }],
@@ -131,6 +138,29 @@ describe('POST /deposits: script shape is checked before anything else', () => {
       reclaimKey: OTHER_KEY,
     });
     expect(checkScriptShape(D.depositScript, D.reclaimScript, config).signerKey).toBe(D.signerKey);
+  });
+
+  it.each([0, 1, 255, 4_096, DEPOSIT_INDEX_LIMIT - 1])(
+    'accepts the per-deposit fee cap of deposit index %i',
+    n => {
+      const built = indexedDeposit(n);
+      expect(checkScriptShape(built.depositScript, built.reclaimScript, config).signerKey).toBe(
+        D.signerKey
+      );
+    }
+  );
+
+  it('still refuses a per-deposit fee cap with a lock this app does not set', () => {
+    const built = buildDepositAddress({
+      stacksAddress: ZERO_STACKS,
+      reclaimPublicKey: OTHER_KEY,
+      signersPublicKey: D.signerKey,
+      maxSignerFeeSats: config.baseSignerFeeSats + 7,
+      reclaimLockBlocks: 951,
+    });
+    expect(() => checkScriptShape(built.depositScript, built.reclaimScript, config)).toThrow(
+      /lock this app sets/
+    );
   });
 
   it.each([1, 16, 17, 127, 128, 255, 256, 950, 32_767, 32_768, 65_535])(
@@ -175,17 +205,17 @@ describe('POST /deposits: signer key', () => {
     const w = liveWorld();
     const kv = memoryKv();
     const signerState = newSignerKeyState();
-    expect((await attempt(goodBody('0xswap1'), { w, kv, signerState })).res.status).toBe(201);
+    expect((await attempt(indexedBody(1), { w, kv, signerState })).res.status).toBe(201);
     kv.data.delete('meta:signer-key');
-    expect((await attempt(goodBody('0xswap2'), { w, kv, signerState })).res.status).toBe(201);
+    expect((await attempt(indexedBody(2), { w, kv, signerState })).res.status).toBe(201);
     expect(w.hits(HIRO_KEY_URL)).toHaveLength(1);
   });
 
   it('a fresh isolate uses the key cached in KV instead of reading the registry', async () => {
     const w = liveWorld();
     const kv = memoryKv();
-    await attempt(goodBody('0xswap1'), { w, kv });
-    await attempt(goodBody('0xswap2'), { w, kv });
+    await attempt(indexedBody(1), { w, kv });
+    await attempt(indexedBody(2), { w, kv });
     expect(w.hits(HIRO_KEY_URL)).toHaveLength(1);
     expect(kv.writes().filter(k => k === 'meta:signer-key')).toHaveLength(1);
   });
@@ -326,23 +356,39 @@ describe('POST /deposits: the swap must be a live 1Click swap that pays this add
     expect(text).not.toContain('worker-key');
     expect(w.hits(STATUS_URL).map(c => c.auth)).toEqual(['Bearer worker-key']);
     expect(w.hits(STATUS_URL).map(c => c.url)).toEqual([`${STATUS_URL}?depositAddress=0xswap0`]);
-    expect(record(kv)).toMatchObject({
-      registrations: [{ swapDepositAddress: '0xswap0', deadline: '2026-11-14T14:00:00.000Z' }],
+    expect(record(kv)).toEqual({
+      depositScript: D.depositScript,
+      reclaimScript: D.reclaimScript,
+      createdAt: NOW.toISOString(),
+      swapDepositAddress: '0xswap0',
+      deadline: '2026-11-14T14:00:00.000Z',
+      registered: [],
     });
   });
 
-  it('answers 409 to a swap that is already registered, without calling 1Click again', async () => {
-    const w = liveWorld();
-    const kv = memoryKv();
-    await attempt(goodBody(), { w, kv });
-    const before = expensive(w);
-    const writes = depositWrites(kv).length;
-    const again = await attempt(goodBody(), { w, kv });
-    expect(again.res.status).toBe(409);
-    expect(again.body).toEqual({ message: 'This swap is already registered', address: D.address });
-    expect(expensive(w)).toEqual(before);
-    expect(depositWrites(kv)).toHaveLength(writes);
-  });
+  it.each([
+    ['the same swap', '0xswap0'],
+    ['another swap', '0xswapOther'],
+  ])(
+    'answers 409 when %s re-registers a deposit address, without calling 1Click or writing',
+    async (_name, swap) => {
+      const w = liveWorld();
+      const kv = memoryKv();
+      await attempt(goodBody(), { w, kv });
+      const stored = kv.data.get(`dep:${D.address}`);
+      const before = expensive(w);
+      const writes = depositWrites(kv).length;
+      const again = await attempt(goodBody(swap), { w, kv });
+      expect(again.res.status).toBe(409);
+      expect(again.body).toEqual({
+        message: 'This deposit is already registered',
+        address: D.address,
+      });
+      expect(expensive(w)).toEqual(before);
+      expect(depositWrites(kv)).toHaveLength(writes);
+      expect(kv.data.get(`dep:${D.address}`)).toBe(stored);
+    }
+  );
 });
 
 describe('POST /deposits: body size', () => {
@@ -388,12 +434,12 @@ describe('POST /deposits: rate limit', () => {
     const w = liveWorld();
     const ip = from('203.0.113.7');
     for (let i = 0; i < DEPOSIT_RATE.limit; i += 1) {
-      const ok = await attempt(goodBody(`0xswap${i}`), { w, env, kv, headers: ip });
+      const ok = await attempt(indexedBody(i), { w, env, kv, headers: ip });
       expect(ok.res.status).toBe(201);
     }
     const calls = w.calls.length;
     const writes = depositWrites(kv).length;
-    const blocked = await attempt(goodBody('0xswapX'), { w, env, kv, headers: ip });
+    const blocked = await attempt(indexedBody(100), { w, env, kv, headers: ip });
     expect(blocked.res.status).toBe(429);
     expect(blocked.res.headers.get('retry-after')).toBe(String(DEPOSIT_RATE.periodSeconds));
     expect(blocked.res.headers.get('access-control-expose-headers')).toBe('retry-after');
@@ -402,7 +448,7 @@ describe('POST /deposits: rate limit', () => {
     expect(depositWrites(kv)).toHaveLength(writes);
 
     clock.now += DEPOSIT_RATE.periodSeconds * 1000;
-    const reset = await attempt(goodBody('0xswapX'), { w, env, kv, headers: ip });
+    const reset = await attempt(indexedBody(100), { w, env, kv, headers: ip });
     expect(reset.res.status).toBe(201);
   });
 
@@ -506,15 +552,16 @@ describe('POST /deposits: global cap on active watches', () => {
     expect(depositWrites(kv)).toEqual([]);
   });
 
-  it('counts every swap on an address against the cap, so one address cannot take 8 writes past it', async () => {
+  it('counts deposits against the cap: each new deposit address takes one slot', async () => {
     const kv = fullKv(MAX_ACTIVE_WATCHES - 2);
-    expect((await attempt(goodBody('0xswapA'), { kv })).res.status).toBe(201);
-    expect((await attempt(goodBody('0xswapB'), { kv })).res.status).toBe(201);
-    const full = await attempt(goodBody('0xswapC'), { kv });
+    expect((await attempt(indexedBody(1), { kv })).res.status).toBe(201);
+    expect((await attempt(indexedBody(2), { kv })).res.status).toBe(201);
+    const full = await attempt(indexedBody(3), { kv });
     expect(full.res.status).toBe(503);
+    expect((await attempt(indexedBody(1), { kv })).res.status).toBe(409);
     expect(depositWrites(kv)).toHaveLength(2);
     kv.data.delete('dep:bc1pfill0000');
-    expect((await attempt(goodBody('0xswapC'), { kv })).res.status).toBe(201);
+    expect((await attempt(indexedBody(3), { kv })).res.status).toBe(201);
   });
 
   it('treats a key listing it could not finish as full', async () => {
@@ -538,20 +585,14 @@ function storeWatch(
   kv: ReturnType<typeof memoryKv>,
   address: string,
   scripts: { depositScript: string; reclaimScript: string },
-  deadline: string | undefined = new Date(NOW.getTime() + 2 * 3_600_000).toISOString()
+  deadline = new Date(NOW.getTime() + 2 * 3_600_000).toISOString()
 ) {
   const deposit: WatchedDeposit = {
     depositScript: scripts.depositScript,
     reclaimScript: scripts.reclaimScript,
     createdAt: NOW.toISOString(),
-    registrations: [
-      {
-        createdAt: NOW.toISOString(),
-        priorOutpoints: [],
-        swapDepositAddress: `0x${address.slice(-8)}`,
-        ...(deadline === undefined ? {} : { deadline }),
-      },
-    ],
+    swapDepositAddress: `0x${address.slice(-8)}`,
+    deadline,
     registered: [],
   };
   kv.data.set(`dep:${address}`, JSON.stringify(deposit));
@@ -698,71 +739,14 @@ describe('runNotifier: deadline-based expiry', () => {
     expect(report.expired).toEqual([D.address]);
   });
 
-  it('needs every registration on the address to be past its deadline', async () => {
+  it('a refused re-registration does not move the deadline', async () => {
     const later = new Date(NOW.getTime() + 20 * 3_600_000);
     const w = world({
       swaps: { '0xswapB': { deadline: new Date(later.getTime() + 2 * 3_600_000).toISOString() } },
     });
     const kv = await watching(w, memoryKv(), '0xswapA');
-    await watching(w, kv, '0xswapB', { now: later });
+    await expect(watching(w, kv, '0xswapB', { now: later })).rejects.toThrow(/already registered/);
     const report = await runNotifier(kv, endpoints, w.fetchFn, pastGrace);
-    expect(report.expired).toEqual([]);
-    expect(watchKeys(kv)).toHaveLength(1);
-  });
-});
-
-describe('old-shaped records', () => {
-  it('a record without deadlines is never expired by deadline, only by the KV TTL', async () => {
-    const kv = memoryKv();
-    kv.data.set(
-      `dep:${D.address}`,
-      JSON.stringify({
-        depositScript: D.depositScript,
-        reclaimScript: D.reclaimScript,
-        createdAt: NOW.toISOString(),
-        registrations: [{ createdAt: NOW.toISOString(), priorOutpoints: [] }],
-      })
-    );
-    const w = world({});
-    const report = await runNotifier(kv, endpoints, w.fetchFn, {
-      now: new Date(NOW.getTime() + 10 * 24 * 3_600_000),
-    });
-    expect(report.expired).toEqual([]);
-    expect(watchKeys(kv)).toHaveLength(1);
-  });
-
-  it('a new swap can be added to an old record, which keeps its old registration', async () => {
-    const kv = memoryKv();
-    kv.data.set(
-      `dep:${D.address}`,
-      JSON.stringify({
-        depositScript: D.depositScript,
-        reclaimScript: D.reclaimScript,
-        createdAt: NOW.toISOString(),
-      })
-    );
-    const { res } = await attempt(goodBody('0xswapNew'), { kv });
-    expect(res.status).toBe(201);
-    expect(record(kv)).toMatchObject({
-      registrations: [
-        { createdAt: NOW.toISOString(), priorOutpoints: null },
-        { swapDepositAddress: '0xswapNew', deadline: '2026-11-14T14:00:00.000Z' },
-      ],
-    });
-  });
-
-  it('an old registration without a swap address never blocks a new swap as a duplicate', async () => {
-    const kv = memoryKv();
-    kv.data.set(
-      `dep:${D.address}`,
-      JSON.stringify({
-        depositScript: D.depositScript,
-        reclaimScript: D.reclaimScript,
-        createdAt: NOW.toISOString(),
-        registrations: [{ createdAt: NOW.toISOString(), priorOutpoints: [] }],
-      })
-    );
-    const { res } = await attempt(goodBody(), { kv });
-    expect(res.status).toBe(201);
+    expect(report.expired).toEqual([D.address]);
   });
 });

@@ -1,5 +1,4 @@
 import {
-  type AddressOutput,
   type FetchLike,
   type NetworkConfig,
   depositAddressFromScripts,
@@ -22,14 +21,12 @@ import {
   RECORD_WRITE_COST,
   REGISTRATION_COST,
   RUN_SUBREQUEST_BUDGET,
-  type RegisteredOutput,
   SHARED_LOOKUP_COST,
   type WatchedDeposit,
   deleteWatched,
   listWatchedAddresses,
   loadWatched,
   putWatched,
-  registrationsOf,
 } from '../store/index.js';
 import {
   Budget,
@@ -81,15 +78,12 @@ function once<T>(load: () => Promise<T>): () => Promise<T> {
 }
 
 export function watchSatisfied(deposit: WatchedDeposit): boolean {
-  return (deposit.registered ?? []).length >= registrationsOf(deposit).length;
+  return deposit.registered.length > 0;
 }
 
 export function watchExpired(deposit: WatchedDeposit, now: Date): boolean {
-  return registrationsOf(deposit).every(r => {
-    if (r.deadline === undefined) return false;
-    const deadline = Date.parse(r.deadline);
-    return Number.isFinite(deadline) && deadline + PAYOUT_GRACE_MS < now.getTime();
-  });
+  const deadline = Date.parse(deposit.deadline);
+  return Number.isFinite(deadline) && deadline + PAYOUT_GRACE_MS < now.getTime();
 }
 
 export function rotationWindow<T>(items: readonly T[], runIndex: number, size: number): T[] {
@@ -98,10 +92,6 @@ export function rotationWindow<T>(items: readonly T[], runIndex: number, size: n
   return Array.from({ length: size }, (_, i) => items[(start + i) % items.length]).filter(
     item => item !== undefined
   );
-}
-
-function registeredFrom(o: AddressOutput): RegisteredOutput {
-  return { outpoint: outpointOf(o), confirmed: o.confirmed, blockTime: o.blockTime };
 }
 
 interface RunContext {
@@ -125,7 +115,7 @@ async function watchAddress(
     await deleteWatched(kv, address);
     throw new Error('Stored scripts do not match the stored address; record dropped');
   }
-  const registered = new Map((deposit.registered ?? []).map(r => [r.outpoint, r]));
+  const registered = new Set(deposit.registered.map(r => r.outpoint));
   const unspent = await fetchUnspentOutputs(config.btcApiUrl, derived.address, fetchFn);
 
   const fresh = unspent.filter(o => !registered.has(outpointOf(o)));
@@ -168,7 +158,7 @@ async function watchAddress(
           );
           report.notified.push({ address, txid: output.txid, vout: output.vout });
         }
-        registered.set(outpoint, registeredFrom(output));
+        registered.add(outpoint);
       } catch (err) {
         if (err instanceof BudgetExhausted) throw err;
         report.errors.push({
@@ -181,7 +171,10 @@ async function watchAddress(
     pending = all.some(o => !registered.has(outpointOf(o)));
   }
 
-  const next: WatchedDeposit = { ...deposit, registered: [...registered.values()] };
+  const next: WatchedDeposit = {
+    ...deposit,
+    registered: [...registered].sort().map(outpoint => ({ outpoint })),
+  };
   if (!pending && watchSatisfied(next)) {
     await deleteWatched(kv, address);
     report.finished.push(address);
@@ -192,7 +185,7 @@ async function watchAddress(
     report.expired.push(address);
     return;
   }
-  if (registered.size !== (deposit.registered ?? []).length) {
+  if (registered.size !== deposit.registered.length) {
     await putWatched(kv, address, next, ctx.now);
   }
 }
