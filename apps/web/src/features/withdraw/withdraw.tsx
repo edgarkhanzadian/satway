@@ -183,6 +183,7 @@ function WithdrawForm(
   const [signing, setSigning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [requests] = useState(latestRequests);
+  const liveQuoteAbort = useRef<AbortController | null>(null);
   const confirmRef = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
@@ -239,6 +240,7 @@ function WithdrawForm(
     if (next.value !== recipientRef.current) {
       setRecipient(next.value);
       requests.cancel();
+      liveQuoteAbort.current?.abort();
       setBusy(false);
       setPreview(null);
       setLive(null);
@@ -256,8 +258,11 @@ function WithdrawForm(
     if (live) confirmRef.current?.focus();
   }, [live]);
 
+  useEffect(() => () => liveQuoteAbort.current?.abort(), []);
+
   function inputsChanged() {
     requests.cancel();
+    liveQuoteAbort.current?.abort();
     setBusy(false);
     setPreview(null);
     setLive(null);
@@ -285,10 +290,19 @@ function WithdrawForm(
   async function getLiveQuote() {
     if (!form) return;
     const isLatest = requests.begin();
+    liveQuoteAbort.current?.abort();
+    const controller = new AbortController();
+    liveQuoteAbort.current = controller;
     setBusy(true);
     setError(null);
     try {
-      const next = await liveQuoteFor(deps, form, account.stacksAddress, preview);
+      const next = await liveQuoteFor(
+        deps,
+        form,
+        account.stacksAddress,
+        preview,
+        controller.signal
+      );
       if (!isLatest()) return;
       setBalance(next.balanceSats);
       setLive(next);

@@ -127,7 +127,8 @@ export async function liveQuoteFor(
   deps: FlowDeps,
   form: WithdrawalForm,
   sender: string,
-  preview: WithdrawalPreview | null
+  preview: WithdrawalPreview | null,
+  signal?: AbortSignal
 ): Promise<LiveQuote> {
   const recipient = checkedRecipient(form);
   const amountSats = parseSats(form.amount);
@@ -148,6 +149,7 @@ export async function liveQuoteFor(
       fetchFn: deps.fetchFn,
       requestQuote: request => deps.quotes.quote(request),
       fetchSwapStatus: address => deps.backend.status(address),
+      ...(signal === undefined ? {} : { signal }),
     }
   );
   if (!prepared.ok) throw amountProblem(prepared.amountCheck);

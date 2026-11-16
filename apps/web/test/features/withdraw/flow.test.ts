@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  HttpError,
   type OneClickQuoteRequest,
   type OneClickQuoteResponse,
   type OneClickStatusResponse,
@@ -216,6 +217,28 @@ describe('liveQuoteFor', () => {
       worse: true,
     });
     expect(w.requests.map(r => r.dry)).toEqual([true, false]);
+  });
+
+  it('stops waiting for 1Click to list the swap as soon as the request is aborted', async () => {
+    const w = world();
+    const controller = new AbortController();
+    let statusCalls = 0;
+    const deps: FlowDeps = {
+      ...w.deps,
+      backend: {
+        status() {
+          statusCalls += 1;
+          controller.abort();
+          return Promise.reject(new HttpError(404, 'status', 'not listed'));
+        },
+      },
+    };
+    const started = Date.now();
+    await expect(liveQuoteFor(deps, FORM, SENDER, null, controller.signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+    expect(statusCalls).toBe(1);
+    expect(Date.now() - started).toBeLessThan(900);
   });
 
   it('refuses when the balance does not cover the amount plus the fee cap', async () => {

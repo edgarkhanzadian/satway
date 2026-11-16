@@ -9,6 +9,7 @@ import {
   toAwaitingSigners,
   toDelivered,
 } from '../src/scenario/withdrawal.js';
+import { json } from '../src/world/http.js';
 
 const UNANSWERED = 'Did your wallet send the withdrawal?';
 
@@ -191,6 +192,34 @@ test.describe('X4. resuming a withdrawal, and slow or lost answers', () => {
     ).toHaveCount(0);
     await withdraw.getQuote();
     await withdraw.continueToConfirm();
+  });
+
+  test('editing the amount while waiting for 1Click to list the swap stops the status retries', async ({
+    app,
+    world,
+    wallets,
+    harness,
+  }) => {
+    harness.allowConsoleErrors(FAILED_TO_LOAD);
+    const withdraw = await openWithdraw(app, world, wallets, { destinationWallet: 'evm' });
+    await quoteWithdrawal(withdraw);
+    world.addFault({
+      service: 'oneclick',
+      path: /^\/v0\/status$/,
+      outcome: json({ message: 'Deposit address not found' }, 404),
+      times: 100,
+    });
+    function statusReads(): number {
+      return world.requestsTo('oneclick', { path: '/v0/status' }).length;
+    }
+    await app.page.getByRole('button', { name: 'Continue' }).click();
+    await expect.poll(statusReads).toBeGreaterThan(0);
+    await withdraw.fill({ amount: '60000' });
+    const reads = statusReads();
+    await app.fastForward(5_000);
+    await app.fastForward(5_000);
+    expect(statusReads()).toBe(reads);
+    await expect(app.page.getByRole('alert')).toHaveCount(0);
   });
 
   test('a hanging Stacks API read while tracking: the page says so and recovers', async ({
