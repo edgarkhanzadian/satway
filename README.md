@@ -88,7 +88,8 @@ The rules, in plain words:
 
 - Every address money is sent to is built locally from the user's own keys and
   can be recomputed by anyone from the receipt file.
-- Every deposit has its own Bitcoin deposit address. The standard sBTC deposit
+- Each deposit gets its own Bitcoin deposit address, with a small chance of
+  sharing one (see below). The standard sBTC deposit
   script is kept; only its signer fee cap differs: `baseSignerFeeSats + n`
   (80,000 + n sats) for a deposit index `0 ≤ n < DEPOSIT_INDEX_LIMIT` (65,536).
   Before the live quote the page collects the indices already used (Emily's
@@ -96,11 +97,19 @@ The rules, in plain words:
   draws `n` at random from the `DEPOSIT_INDEX_WINDOW` (256) values above the
   lowest unused one, and requires the address to have no transactions on
   mempool.space, drawing again (up to 8 times) if it has. If Emily cannot be
-  reached it goes on with what the browser knows; the emptiness check is the
-  guarantee. A preview (dry) quote uses index 0 and reserves nothing. Any
-  output of at least the sBTC minimum at the address is this deposit's payout;
-  each is registered and listed, and the deposit is done only when every one
-  is minted. Without a receipt, the Recover tab finds a wallet's registered
+  reached it goes on with what the browser knows. This makes a shared address
+  unlikely, not impossible: the emptiness check only catches an address that
+  has already been paid, and Emily only knows registered deposits, so a deposit
+  of the same wallet whose quote is live but still unpaid, started on another
+  device or in a browser without its receipt, is unknown to the draw, and each
+  such deposit has about a 1 in 256 chance of drawing the same index. An index
+  is reserved in this browser only when its live quote is activated, so a
+  failed, repriced or abandoned quote gives its index back. A preview (dry)
+  quote uses index 0 and reserves nothing. Any output of at least the sBTC
+  minimum at the address is registered and listed. The deposit is done only
+  when its swap has succeeded and the payout 1Click names (or, if it names
+  none, every output at the address) is minted; a refunded or failed swap shows
+  that outcome. Without a receipt, the Recover tab finds a wallet's registered
   deposits through Emily; when Emily knows none or cannot be reached (a payout
   that was never registered is known only to Bitcoin), it checks the wallet's
   addresses for index 0, 1, 2… until 256 in a row are unused.
@@ -453,7 +462,7 @@ What `POST /deposits` accepts, and what it costs:
 - The scheduled run visits at most `MAX_ADDRESSES_PER_RUN` watches, in a window
   that rotates over the sorted keys each run, and makes at most
   `RUN_SUBREQUEST_BUDGET` fetch and KV calls (under the Workers Free limit of
-  50 subrequests). Every deposit has its own address, so any unspent output at
+  50 subrequests). Each deposit normally has its own address, so any unspent output at
   the address of at least the sBTC minimum is registered with Emily. A watch
   ends when no eligible output is left unregistered and its swap is final by a
   live 1Click status read (one subrequest, made only once an output is
