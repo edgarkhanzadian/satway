@@ -37,6 +37,8 @@ export interface ContractCall {
 export interface StacksTx {
   txid: string;
   sender: string;
+  nonce: number;
+  txType: 'contract_call' | 'token_transfer';
   contract: string;
   functionName: string;
   functionArgs: string[];
@@ -87,6 +89,7 @@ export class StacksChain {
   readonly locked = new Map<string, number>();
   readonly calls: ContractCall[] = [];
   activeWithdrawalContract: string | null = WITHDRAWAL_CONTRACT;
+  private readonly nonces = new Map<string, number>();
   private nextRequestId = FIRST_REQUEST_ID;
   private height = 9_500_000;
   private readonly rng: Rng;
@@ -105,10 +108,18 @@ export class StacksChain {
     this.balances.set(address, this.balanceOf(address) + sats);
   }
 
-  submit(call: ContractCall): StacksTx {
+  private takeNonce(sender: string): number {
+    const nonce = this.nonces.get(sender) ?? 0;
+    this.nonces.set(sender, nonce + 1);
+    return nonce;
+  }
+
+  submit(call: ContractCall, nonce: number = this.takeNonce(call.sender)): StacksTx {
     this.calls.push(call);
     const tx: StacksTx = {
       txid: this.rng.hex(32),
+      nonce,
+      txType: 'contract_call',
       ...call,
       status: 'pending',
       blockHeight: null,
@@ -118,6 +129,37 @@ export class StacksChain {
     };
     this.txs.set(tx.txid, tx);
     return tx;
+  }
+
+  replaceByFee(txid: string, replacement: 'identical' | 'different-call' | 'cancel'): StacksTx {
+    const original = this.tx(txid);
+    if (original.status !== 'pending') throw new Error(`Transaction ${txid} is not pending`);
+    original.status = 'dropped_replace_by_fee';
+    const call: ContractCall = {
+      sender: original.sender,
+      contract: original.contract,
+      functionName: original.functionName,
+      functionArgs:
+        replacement === 'different-call'
+          ? [...original.functionArgs.slice(0, 2), hexCv(Cl.uint(1))]
+          : [...original.functionArgs],
+      postConditions: original.postConditions,
+      postConditionMode: original.postConditionMode,
+    };
+    const tx = this.submit(call, original.nonce);
+    if (replacement === 'cancel') {
+      tx.txType = 'token_transfer';
+      tx.contract = '';
+      tx.functionName = '';
+      tx.functionArgs = [];
+    }
+    return tx;
+  }
+
+  mineOther(txid: string): void {
+    const tx = this.tx(txid);
+    this.mineTx(tx);
+    tx.status = 'success';
   }
 
   latestCall(): StacksTx {
@@ -224,6 +266,8 @@ export class StacksChain {
     const acceptTx: StacksTx = {
       txid: this.rng.hex(32),
       sender: SIGNER_STACKS_ADDRESS,
+      nonce: this.takeNonce(SIGNER_STACKS_ADDRESS),
+      txType: 'contract_call',
       contract: WITHDRAWAL_CONTRACT,
       functionName: 'accept-withdrawal-request',
       functionArgs: [hexCv(Cl.uint(requestId))],
@@ -280,8 +324,9 @@ export class StacksChain {
     return {
       tx_id: `0x${tx.txid}`,
       tx_status: tx.status,
-      tx_type: 'contract_call',
+      tx_type: tx.txType,
       sender_address: tx.sender,
+      nonce: tx.nonce,
       ...(tx.blockHeight === null ? {} : { block_height: tx.blockHeight }),
       ...(tx.burnBlockHeight === null ? {} : { burn_block_height: tx.burnBlockHeight }),
       ...(tx.result === null
@@ -289,11 +334,17 @@ export class StacksChain {
         : {
             tx_result: { hex: hexCv(tx.result), repr: cvToString(tx.result) },
           }),
-      contract_call: {
-        contract_id: tx.contract,
-        function_name: tx.functionName,
-        function_args: tx.functionArgs.map(a => ({ hex: a.startsWith('0x') ? a : `0x${a}` })),
-      },
+      ...(tx.txType === 'contract_call'
+        ? {
+            contract_call: {
+              contract_id: tx.contract,
+              function_name: tx.functionName,
+              function_args: tx.functionArgs.map(a => ({
+                hex: a.startsWith('0x') ? a : `0x${a}`,
+              })),
+            },
+          }
+        : { token_transfer: { recipient_address: tx.sender, amount: '0', memo: '0x' } }),
       post_condition_mode: tx.postConditionMode,
       events: tx.prints.map((value, i) => ({
         event_index: i,
@@ -361,13 +412,36 @@ export class StacksChain {
     return json({ okay: false, cause: `unknown function ${fn}` }, 400);
   }
 
-  serve(method: string, path: string, body: string): Reply | null {
+  private listAtNonce(query: URLSearchParams): Reply {
+    const sender = query.get('from_address');
+    const nonce = Number(query.get('nonce'));
+    const results = [...this.txs.values()]
+      .filter(t => t.sender === sender && t.nonce === nonce && t.blockHeight !== null)
+      .reverse()
+      .map(t => this.txJson(t));
+    return json({ limit: 10, offset: 0, total: results.length, results });
+  }
+
+  private mempool(query: URLSearchParams): Reply {
+    const sender = query.get('sender_address');
+    const results = [...this.txs.values()]
+      .filter(t => t.sender === sender && t.status === 'pending')
+      .reverse()
+      .map(t => this.txJson(t));
+    return json({ limit: 50, offset: 0, total: results.length, results });
+  }
+
+  serve(method: string, path: string, body: string, query = new URLSearchParams()): Reply | null {
     if (method === 'POST' && path.startsWith(READ_PREFIX)) {
       const fn = path.slice(READ_PREFIX.length);
       if (fn === 'get-current-aggregate-pubkey') return null;
       return this.readOnly(fn, body);
     }
     if (method !== 'GET') return null;
+    if (path === '/extended/v1/tx' && query.has('from_address')) return this.listAtNonce(query);
+    if (path === '/extended/v1/tx/mempool' && query.has('sender_address')) {
+      return this.mempool(query);
+    }
     const tx = TX.exec(path);
     if (tx?.[1] !== undefined) {
       const found = this.txs.get(tx[1]);

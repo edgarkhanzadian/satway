@@ -73,7 +73,7 @@ export class WithdrawalWorld {
 
   route(service: Service, method: string, url: URL, body: string): Reply | null {
     const path = url.pathname;
-    if (service === 'hiro') return this.stacks.serve(method, path, body);
+    if (service === 'hiro') return this.stacks.serve(method, path, body, url.searchParams);
     if (service === 'mempool' && method === 'GET' && path === '/api/fee-estimates') {
       return json({ '1': this.feeEstimate, '3': this.feeEstimate, '6': 1.2, '144': 1 });
     }
