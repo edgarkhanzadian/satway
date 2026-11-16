@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   type OneClickStatusResponse,
@@ -193,6 +193,10 @@ describe('withdrawalHeading and withdrawalAdvice', () => {
 });
 
 describe('checkWithdrawal', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('observes the Stacks transaction and notes a swap status it could not read', async () => {
     const urls: string[] = [];
     function fetchFn(url: string): Promise<Response> {
@@ -204,6 +208,7 @@ describe('checkWithdrawal', () => {
         return Promise.reject(new Error('backend down'));
       },
     };
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-11-14T17:00:00.000Z') });
     const snapshot = await checkWithdrawal(W, backend, receiptFixture(), STACKS_TXID, fetchFn);
     expect(snapshot.swapError).toBe('backend down');
     expect(snapshot.observation.stacks).toEqual({ kind: 'unknown-tx' });
