@@ -205,4 +205,49 @@ test.describe('R9. one Bitcoin deposit address per deposit', () => {
     const first = addressAt(world, wallets, 0);
     expect(world.bitcoin.addressLookups.filter(a => a === first)).toHaveLength(1);
   });
+
+  test('an address read that keeps failing ends the scan with what it found, and it resumes there', async ({
+    app,
+    world,
+    wallets,
+    harness,
+  }) => {
+    harness.allowConsoleErrors(FAILED_TO_LOAD);
+    const near = addressAt(world, wallets, 2);
+    const later = addressAt(world, wallets, 20);
+    world.payTo(near, 20_000);
+    world.payTo(later, 20_000);
+    world.mine(1);
+    await app.open();
+    await reopenWithoutReceipts(app);
+    world.addFault({
+      service: 'emily',
+      path: /^\/deposit\/reclaim-pubkeys\//,
+      outcome: json({ message: 'Service unavailable' }, 503),
+    });
+    const stuck = addressAt(world, wallets, 9);
+    world.addFault({
+      service: 'mempool',
+      path: new RegExp(`^/api/address/${stuck}$`),
+      outcome: json({ message: 'Service unavailable' }, 503),
+      times: 4,
+    });
+    await app.page.getByRole('button', { name: 'Search with my wallet' }).click();
+    await expect(
+      app.page.getByText(/^Could not read every possible deposit address on Bitcoin/)
+    ).toBeVisible({
+      timeout: 60_000,
+    });
+    await expect(
+      app.progress(/^Found 1 deposit address for this wallet\. Checking was stopped early/)
+    ).toBeVisible();
+    await expect(foundButton(app, near)).toBeVisible();
+    const before = world.bitcoin.addressLookups.filter(a => a === near).length;
+    await app.page.getByRole('button', { name: 'Keep scanning' }).click();
+    await expect(app.progress(/^Found 2 deposit addresses for this wallet\./)).toBeVisible({
+      timeout: 60_000,
+    });
+    await expect(foundButton(app, later)).toBeVisible();
+    expect(world.bitcoin.addressLookups.filter(a => a === near)).toHaveLength(before);
+  });
 });

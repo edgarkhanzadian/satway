@@ -114,7 +114,9 @@ The rules, in plain words:
   deposits through Emily; when Emily knows none or cannot be reached (a payout
   that was never registered is known only to Bitcoin), it checks the wallet's
   addresses for index 0, 1, 2… until 256 in a row are unused, and "Keep
-  scanning" goes on from where that stopped for another 256.
+  scanning" goes on from where that stopped for another 256. Each address read
+  is retried with backoff on a 429, a 5xx or a network error; a scan that still
+  fails, or is stopped, keeps what it found and resumes from there.
 - The Bitcoin chain decides whether BTC arrived. The swap provider's status and
   our own backend records are never the source of truth.
 - The signer key is not trusted from one API: Hiro and a second Stacks node

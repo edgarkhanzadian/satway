@@ -10,6 +10,7 @@ import {
   afterEmily,
   foundText,
   mergeFound,
+  scanFailedText,
 } from '../../../src/features/recover/find-deposits.js';
 
 const ACCOUNT = {
@@ -96,5 +97,11 @@ describe('FindDeposits: keep scanning', () => {
   it('adds what a further scan finds to what was already found, once each', () => {
     const other = { ...ONE, depositIndex: 300, depositAddress: 'bc1pfar' };
     expect(mergeFound([ONE], [ONE, other])).toEqual([ONE, other]);
+  });
+
+  it('after a failed read it says what was kept and that the scan can go on', () => {
+    expect(scanFailedText('HTTP 429')).toBe(
+      'Could not read every possible deposit address on Bitcoin (HTTP 429). The deposits found so far are listed, and Keep scanning goes on from where it stopped.'
+    );
   });
 });

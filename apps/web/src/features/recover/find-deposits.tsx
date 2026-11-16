@@ -58,6 +58,10 @@ export function afterEmily(answer: EmilyAnswer): AfterEmily {
   return { found: deposits, scan: false, note: truncated ? EMILY_TRUNCATED_NOTE : null };
 }
 
+export function scanFailedText(reason: string): string {
+  return `Could not read every possible deposit address on Bitcoin (${reason}). The deposits found so far are listed, and Keep scanning goes on from where it stopped.`;
+}
+
 export function mergeFound(
   kept: readonly FoundDeposit[],
   more: readonly FoundDeposit[]
@@ -147,8 +151,9 @@ export function FindDeposits(props: {
       if (!isLatest()) return;
       setFound(mergeFound(kept, result.deposits));
       setSource('scan');
-      setCancelled(result.cancelled);
+      setCancelled(result.cancelled || result.error !== null);
       setResumeAt(result.exhausted ? null : result.nextIndex);
+      if (result.error !== null) setError(scanFailedText(result.error));
       setPhase('done');
     } catch (err) {
       if (!isLatest()) return;

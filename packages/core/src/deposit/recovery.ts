@@ -8,7 +8,15 @@ import {
   fetchDepositsByReclaimKey,
   toXOnly,
 } from '../sbtc/index.js';
-import { DEPOSIT_INDEX_LIMIT, DEPOSIT_INDEX_WINDOW, type FetchLike } from '../shared/index.js';
+import {
+  DEPOSIT_INDEX_LIMIT,
+  DEPOSIT_INDEX_WINDOW,
+  type FetchLike,
+  HttpError,
+  ResponseShapeError,
+  errorMessage,
+  sleep,
+} from '../shared/index.js';
 import type { DepositIndexEndpoints, DepositIndexOwner } from './deposit-index.js';
 
 export interface FoundDeposit extends DepositScriptParameters {
@@ -61,9 +69,11 @@ export interface ScanResult {
   nextIndex: number;
   cancelled: boolean;
   exhausted: boolean;
+  error: string | null;
 }
 
 export const SCAN_CONCURRENCY = 4;
+export const SCAN_RETRY_DELAYS_MS: readonly number[] = [1_000, 3_000, 8_000];
 
 export interface ScanInput {
   config: DepositIndexEndpoints;
@@ -73,7 +83,31 @@ export interface ScanInput {
   concurrency?: number;
   fetchFn?: FetchLike;
   signal?: AbortSignal;
+  retryDelaysMs?: readonly number[];
+  wait?(ms: number, signal?: AbortSignal): Promise<void>;
   onProgress?(progress: ScanProgress): void;
+}
+
+export function scanReadRetryable(err: unknown): boolean {
+  if (err instanceof HttpError) return err.status === 429 || err.status >= 500;
+  return !(err instanceof ResponseShapeError);
+}
+
+async function txCountWithRetry(input: ScanInput, address: string): Promise<number> {
+  const delays = input.retryDelaysMs ?? SCAN_RETRY_DELAYS_MS;
+  const wait = input.wait ?? sleep;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fetchAddressTxCount(input.config.btcApiUrl, address, {
+        fetchFn: input.fetchFn,
+        signal: input.signal,
+      });
+    } catch (err) {
+      const delay = delays[attempt];
+      if (input.signal?.aborted || delay === undefined || !scanReadRetryable(err)) throw err;
+      await wait(delay, input.signal);
+    }
+  }
 }
 
 function foundAt(input: ScanInput, n: number): FoundDeposit {
@@ -100,13 +134,14 @@ export async function scanDepositAddresses(input: ScanInput): Promise<ScanResult
   const deposits: FoundDeposit[] = [];
   let unusedRun = 0;
   let next = start;
-  function result(cancelled: boolean): ScanResult {
+  function result(cancelled: boolean, error: string | null = null): ScanResult {
     return {
       deposits,
       checked: next - start,
       nextIndex: next,
       cancelled,
       exhausted: next >= DEPOSIT_INDEX_LIMIT,
+      error,
     };
   }
   while (unusedRun < gap && next < DEPOSIT_INDEX_LIMIT) {
@@ -115,29 +150,24 @@ export async function scanDepositAddresses(input: ScanInput): Promise<ScanResult
       { length: Math.min(width, gap - unusedRun, DEPOSIT_INDEX_LIMIT - next) },
       (_, i) => foundAt(input, next + i)
     );
-    let counts: number[];
-    try {
-      counts = await Promise.all(
-        batch.map(d =>
-          fetchAddressTxCount(input.config.btcApiUrl, d.depositAddress, {
-            fetchFn: input.fetchFn,
-            signal: input.signal,
-          })
-        )
-      );
-    } catch (err) {
-      if (input.signal?.aborted) return result(true);
-      throw err;
-    }
-    batch.forEach((d, i) => {
-      if ((counts[i] ?? 0) > 0) {
+    const counts = await Promise.allSettled(
+      batch.map(d => txCountWithRetry(input, d.depositAddress))
+    );
+    for (const [i, d] of batch.entries()) {
+      const count = counts[i];
+      if (count?.status !== 'fulfilled') {
+        if (input.signal?.aborted) return result(true);
+        const reason: unknown = count?.reason;
+        return result(false, errorMessage(reason) ?? String(reason));
+      }
+      if (count.value > 0) {
         deposits.push(d);
         unusedRun = 0;
       } else {
         unusedRun += 1;
       }
-    });
-    next += batch.length;
+      next += 1;
+    }
     input.onProgress?.({ checked: next - start, found: deposits.length, nextIndex: next });
   }
   return result(false);

@@ -145,7 +145,11 @@ describe('findDepositsByReclaimKey', () => {
   });
 });
 
-function esplora(used: ReadonlySet<number>, opts: { failAt?: number } = {}) {
+function esplora(
+  used: ReadonlySet<number>,
+  opts: { failAt?: number; failTimes?: number; failStatus?: number } = {}
+) {
+  let failures = 0;
   const byAddress = new Map(Array.from({ length: 720 }, (_, n) => [addressOf(n), n]));
   const asked: number[] = [];
   let inFlight = 0;
@@ -163,7 +167,11 @@ function esplora(used: ReadonlySet<number>, opts: { failAt?: number } = {}) {
       peak = Math.max(peak, inFlight);
       await Promise.resolve();
       inFlight -= 1;
-      if (n === opts.failAt) return new Response('Too many requests', { status: 429 });
+      const failing = opts.failTimes === undefined || failures < opts.failTimes;
+      if (n === opts.failAt && failing) {
+        failures += 1;
+        return new Response('Too many requests', { status: opts.failStatus ?? 429 });
+      }
       return jsonResponse(used.has(n) ? REAL_USED_ADDRESS_STATS : REAL_UNUSED_ADDRESS_STATS);
     },
   };
@@ -254,10 +262,57 @@ describe('scanDepositAddresses', () => {
     expect(resumed.deposits.map(d => d.depositIndex)).toEqual([10]);
   });
 
-  it('surfaces an upstream failure', async () => {
-    const world = esplora(new Set(), { failAt: 6 });
-    await expect(scanDepositAddresses({ config, owner, fetchFn: world.fetchFn })).rejects.toThrow(
-      /429/
-    );
+  it('retries a busy or failing address read with backoff and carries on', async () => {
+    const waits: number[] = [];
+    for (const failStatus of [429, 503]) {
+      const world = esplora(new Set([9]), { failAt: 6, failTimes: 2, failStatus });
+      const result = await scanDepositAddresses({
+        config,
+        owner,
+        fetchFn: world.fetchFn,
+        gap: 10,
+        wait(ms) {
+          waits.push(ms);
+          return Promise.resolve();
+        },
+      });
+      expect(result).toMatchObject({ error: null, cancelled: false });
+      expect(result.deposits.map(d => d.depositIndex)).toEqual([9]);
+    }
+    expect(waits).toEqual([1_000, 3_000, 1_000, 3_000]);
+  });
+
+  it('keeps what it found and where it stopped when an address cannot be read', async () => {
+    const world = esplora(new Set([1]), { failAt: 6 });
+    const result = await scanDepositAddresses({
+      config,
+      owner,
+      fetchFn: world.fetchFn,
+      wait: () => Promise.resolve(),
+    });
+    expect(result.error).toMatch(/429/);
+    expect(result.deposits.map(d => d.depositIndex)).toEqual([1]);
+    expect(result.nextIndex).toBe(6);
+    expect(world.asked.filter(n => n === 6)).toHaveLength(1 + 3);
+    const resumed = await scanDepositAddresses({
+      config,
+      owner,
+      fetchFn: esplora(new Set([1, 7])).fetchFn,
+      start: result.nextIndex,
+      gap: 10,
+    });
+    expect(resumed.deposits.map(d => d.depositIndex)).toEqual([7]);
+  });
+
+  it('does not retry an answer that will not change', async () => {
+    const world = esplora(new Set(), { failAt: 2, failStatus: 400 });
+    const result = await scanDepositAddresses({
+      config,
+      owner,
+      fetchFn: world.fetchFn,
+      wait: () => Promise.resolve(),
+    });
+    expect(result.error).toMatch(/400/);
+    expect(world.asked.filter(n => n === 2)).toHaveLength(1);
   });
 });
