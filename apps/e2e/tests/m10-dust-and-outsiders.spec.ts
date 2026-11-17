@@ -158,8 +158,9 @@ test.describe('M10. dust and outsiders on the public Bitcoin deposit address', (
     world.oneClick.revealPayout(payout.swap);
     world.mine(1);
     world.signers.mint(payout.outpoint);
-    await app.waitForProgress(`${TWO_PAYMENTS} ${PROGRESS.minting}`);
+    await app.waitForProgress(`${TWO_PAYMENTS} ${PROGRESS.done}`);
     await expect(app.page.getByRole('heading', { name: 'Deposit complete' })).toHaveCount(0);
+    await expect(app.page.getByRole('button', { name: 'Hide', exact: true })).toBeVisible();
     await expect(listedPayouts(app).filter({ hasText: payout.outpoint.txid })).toContainText(
       'sBTC has been minted for it.'
     );
@@ -181,11 +182,12 @@ test.describe('M10. dust and outsiders on the public Bitcoin deposit address', (
     const outsider = world.payTo(receipt.depositAddress, world.swap().amountOut + 1_000);
     world.mine(1);
     const payout = world.completeSwap();
-    await app.waitForProgress(`${TWO_PAYMENTS} ${PROGRESS.minting}`);
+    await app.waitForProgress(`${TWO_PAYMENTS} ${PROGRESS.payoutUnconfirmed}`);
     await expect(listedPayouts(app)).toHaveCount(2);
     await expect(listedPayouts(app).first()).toContainText(outsider.outpoint.txid);
     await expect(app.page.getByText(/does not pay your deposit address/)).toHaveCount(0);
     world.mine(1);
+    await app.waitForProgress(`${TWO_PAYMENTS} ${PROGRESS.minting}`);
     expectRegisteredWithEmily(world, receipt, payout.outpoint, 'page');
     world.signers.mint(outsider.outpoint);
     world.signers.mint(payout.outpoint);

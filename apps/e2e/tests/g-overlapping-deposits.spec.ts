@@ -69,8 +69,10 @@ test('G. two overlapping deposits from one wallet get their own addresses and ne
   await app.waitForProgress(PROGRESS.minting);
   world.signers.mint(secondPayout.outpoint);
   await app.waitForProgress(PROGRESS.done);
-  await app.expectComplete();
+  await expect(app.page.getByRole('heading', { name: 'Deposit in progress' })).toBeVisible();
   world.clearFaults();
+  await app.tick();
+  await app.expectComplete();
 
   await app.openYourDeposits();
   await app.pickSavedReceipt(savedLabel(first));

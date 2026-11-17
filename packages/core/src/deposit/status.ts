@@ -311,11 +311,11 @@ interface Assessed {
 function headlineOf(o: Observations, assessed: readonly Assessed[]): Progress | undefined {
   const named = o.payoutTxids ?? [];
   const ours = assessed.find(a => named.includes(a.observed.payout.txid));
+  if (ours) return ours.progress;
   const relevant = assessed.filter(a => arrivedAfterStart(o, a.observed.payout));
   return (
     relevant.find(a => !a.progress.terminal)?.progress ??
     assessed.find(a => !a.progress.terminal)?.progress ??
-    ours?.progress ??
     assessed.find(a => a.progress.stage !== 'done')?.progress ??
     assessed[0]?.progress
   );

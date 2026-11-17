@@ -529,6 +529,23 @@ describe('deriveProgress: the headline with several payments', () => {
     expect(p.message).toMatch(/^2 payments arrived/);
   });
 
+  it('headlines the named payout even while a stranger’s payment is unsettled, and keeps checking', () => {
+    const p = deriveProgress(
+      obs({
+        swap: 'SUCCESS',
+        payoutTxids: [ours.txid],
+        tipHeight: 1_010,
+        payouts: [
+          { payout: stranger, mint: 'pending' },
+          { payout: ours, mint: 'confirmed' },
+        ],
+      })
+    );
+    expect(p.stage).toBe('done');
+    expect(p.terminal).toBe(false);
+    expect(p.message).toMatch(/^2 payments arrived/);
+  });
+
   it('without a named payout, headlines the earliest payment that is not settled', () => {
     const p = deriveProgress(
       obs({

@@ -149,7 +149,7 @@ export function trackingView(state: TrackingState, ctx: TrackingContext): Tracki
   const offered = payment === 'pay' && walletReady;
   const registration = state.registration.shown;
   return {
-    done: progress?.stage === 'done',
+    done: progress?.stage === 'done' && terminal,
     terminal,
     message: progress?.message ?? 'Checking…',
     problem: state.problem,
