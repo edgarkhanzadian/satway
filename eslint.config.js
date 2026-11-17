@@ -370,7 +370,7 @@ export default defineConfig([
   },
   {
     name: 'api-worker-entry-logs',
-    files: ['apps/api/src/index.ts'],
+    files: ['apps/api/src/worker.ts'],
     rules: {
       'no-console': 'off',
     },

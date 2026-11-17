@@ -82,7 +82,7 @@ The rules, in plain words:
 - The two apps never import each other, nothing imports `scripts/`, and `scripts/` uses only
   the `@satway/core` and `@satway/chains` entries.
 - `apps/e2e` imports `@satway/core` and `@satway/chains` through their entries and
-  `apps/api` only through its entry (`@satway/api`, `apps/api/src/index.ts`). It never imports
+  `apps/api` only through its entry (`@satway/api`, `apps/api/src/index.ts`; Wrangler runs `apps/api/src/worker.ts`). It never imports
   `apps/web` (it tests the built app in a browser), and nothing imports `apps/e2e`.
 
 ## Rules the code is built around
