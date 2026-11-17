@@ -14,6 +14,12 @@ import {
 } from '../../src/index.js';
 import { type FakeApiRoutes, fakeWithdrawalApis, routesFor } from '../fake-withdrawal-apis.js';
 import { defined, jsonResponse } from '../fixtures.js';
+import {
+  REAL_REPLACED_PAYOUT_WITHDRAWAL,
+  REPLACED_PAYOUT_PENDING_REQUEST,
+  REPLACED_PAYOUT_TIP_HEIGHT,
+  REPLACED_PAYOUT_TXID,
+} from '../real-replaced-payout.js';
 import { REAL_BTC_ORIGIN_QUOTE, REAL_BTC_ORIGIN_STATUS } from '../real-withdrawal-quotes.js';
 import { REAL_FAILED_REQUESTS, REAL_TIP_HEIGHT, REAL_WITHDRAWALS } from '../real-withdrawals.js';
 
@@ -397,5 +403,54 @@ describe('observeWithdrawal on other real outcomes', () => {
     const result = await observe(watchedFor(W), {}, null);
     expect(result.progress.stage).toBe('awaiting-stacks-tx');
     expect(result.facts.errors).toEqual([]);
+  });
+});
+
+describe('observeWithdrawal on the real withdrawal 5265, whose signer payout was replaced', () => {
+  const R = REAL_REPLACED_PAYOUT_WITHDRAWAL;
+  const watched = watchedFor(R);
+  const routes: FakeApiRoutes = { ...routesFor(R), tipHeight: REPLACED_PAYOUT_TIP_HEIGHT };
+  const pending = statusOf(watched.quoteResponse, 'PENDING_DEPOSIT');
+
+  it('follows the replacement the signers accepted, verified and confirmed, with no mismatch', async () => {
+    const result = await observe(watched, routes, pending);
+    expect(result.progress).toMatchObject({ stage: 'payout-confirmed', terminal: false });
+    expect(result.facts).toMatchObject({
+      requestId: 5265,
+      feeSats: 90,
+      payoutTxid: R.payoutTxid,
+      payoutVout: 2,
+      payoutConfirmations: REPLACED_PAYOUT_TIP_HEIGHT - 976_197 + 1,
+      payoutVerified: true,
+      mismatches: [],
+    });
+    expect(result.api.urls.some(u => u.includes(REPLACED_PAYOUT_TXID))).toBe(false);
+  });
+
+  it('while the replaced payout was in the mempool the request was pending: no payout is named', async () => {
+    const result = await observe(
+      watched,
+      {
+        ...routes,
+        readOnly: { ...routes.readOnly, 'get-withdrawal-request': REPLACED_PAYOUT_PENDING_REQUEST },
+      },
+      pending
+    );
+    expect(result.progress).toMatchObject({ stage: 'awaiting-signers', terminal: false });
+    expect(result.facts).toMatchObject({ payoutTxid: null, mismatches: [] });
+    expect(result.api.urls.some(u => u.includes(REPLACED_PAYOUT_TXID))).toBe(false);
+  });
+
+  it('ignores Emily naming the replaced transaction as the fulfillment', async () => {
+    const text = JSON.stringify(R.emily).replaceAll(defined(R.payoutTxid), REPLACED_PAYOUT_TXID);
+    const emily: unknown = JSON.parse(text);
+    expect(text).toContain(REPLACED_PAYOUT_TXID);
+    const result = await observe(
+      watched,
+      { ...routes, emilyWithdrawals: { [R.id]: emily } },
+      pending
+    );
+    expect(result.progress.stage).toBe('payout-confirmed');
+    expect(result.facts).toMatchObject({ payoutTxid: R.payoutTxid, mismatches: [] });
   });
 });
