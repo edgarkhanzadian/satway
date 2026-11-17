@@ -39,6 +39,6 @@ simple = { limit = 120, period = 60 }
 
 [vars]
 # Comma-separated origins allowed to call this API.
-ALLOWED_ORIGINS = "http://localhost:5173"
+ALLOWED_ORIGINS = "https://satway.pages.dev,http://localhost:5173"
 
 # Secret, set with: wrangler secret put ONECLICK_JWT
