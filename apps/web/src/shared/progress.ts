@@ -28,6 +28,7 @@ export interface Snapshot {
   swap: OneClickSwapStatus | null;
   payouts: AddressOutput[];
   belowMinimum: AddressOutput[];
+  perDepositMinimum?: number | null;
   foreignTxids: string[];
   outputs: AddressOutput[];
   mints: ReadonlyMap<string, MintStatus>;
@@ -151,6 +152,7 @@ async function registerObserved(
     swap: o.swap,
     payouts: o.payouts,
     belowMinimum: o.belowMinimum,
+    perDepositMinimum: o.perDepositMinimum,
     foreignTxids: o.foreignTxids,
     outputs: o.outputs,
     mints: o.mints,

@@ -1,4 +1,4 @@
-import { type Stage, z } from '@satway/core';
+import { type ProgressCondition, type Stage, z } from '@satway/core';
 
 export const DEPOSIT_STAGES_KEY = 'satway.deposit-stages.v1';
 
@@ -7,7 +7,14 @@ export interface KnownStage {
   terminal: boolean;
   final: boolean;
   reclaimable: boolean;
+  condition?: ProgressCondition;
 }
+
+const CONDITIONS = [
+  'awaiting-payout-hash',
+  'payout-below-minimum',
+  'payout-not-found',
+] as const satisfies readonly ProgressCondition[];
 
 const STAGES = [
   'awaiting-funds',
@@ -29,6 +36,7 @@ const knownSchema: z.ZodType<KnownStage> = z.object({
   terminal: z.boolean(),
   final: z.boolean(),
   reclaimable: z.boolean(),
+  condition: z.enum(CONDITIONS).optional(),
 });
 
 const storedSchema = z.record(z.string(), z.unknown());

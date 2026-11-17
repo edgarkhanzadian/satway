@@ -156,6 +156,7 @@ export function knownStageOf(snapshot: Snapshot, receipt: Receipt): KnownStage {
     terminal: snapshot.progress.terminal,
     final: isFinalSnapshot(snapshot),
     reclaimable: reclaimOffered(reclaimPlanOf(snapshot, receipt.reclaimLockBlocks), stage),
+    ...(snapshot.progress.condition ? { condition: snapshot.progress.condition } : {}),
   };
 }
 
@@ -433,6 +434,23 @@ export interface EntryView {
   checkLabel: 'Check' | 'Check again';
 }
 
+function labelOf(known: KnownStage): string {
+  switch (known.condition) {
+    case undefined:
+      return STAGE_LABELS[known.stage];
+    case 'awaiting-payout-hash':
+      return 'Waiting for 1Click to name the payout';
+    case 'payout-below-minimum':
+      return known.stage === 'reclaimable'
+        ? 'Too small to mint; reclaimable now'
+        : 'Too small to mint; reclaim after the timelock';
+    case 'payout-not-found':
+      return '1Click names a payout not found at your address';
+    default:
+      throw new Error(`Unknown condition ${String(known.condition satisfies never)}`);
+  }
+}
+
 export function expiredSummary(receipt: Receipt): string {
   const deadline = new Date(receipt.quoteResponse.quoteRequest.deadline).toLocaleString();
   return `Its quote expired on ${deadline}, so it is not checked automatically. Select Check if you sent a payment.`;
@@ -446,11 +464,9 @@ function summaryOf(status: EntryStatus | undefined, receipt: Receipt): string {
       return 'Checking…';
     case 'idle':
       if (status.expired) return expiredSummary(receipt);
-      return status.known === null
-        ? 'Not checked yet.'
-        : `Last seen: ${STAGE_LABELS[status.known.stage]}`;
+      return status.known === null ? 'Not checked yet.' : `Last seen: ${labelOf(status.known)}`;
     case 'known':
-      return STAGE_LABELS[status.known.stage];
+      return labelOf(status.known);
     case 'failed':
       return `Could not check it right now: ${status.message}`;
     default:

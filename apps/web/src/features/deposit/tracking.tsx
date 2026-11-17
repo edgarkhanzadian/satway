@@ -104,6 +104,11 @@ export function Tracking(props: {
         {view.message}
       </p>
       {view.problem && <p className={notice()}>{view.problem}</p>}
+      {view.condition && (
+        <p className={notice({ tone: view.condition.tone })}>
+          <strong>{view.condition.title}.</strong> {view.condition.text}
+        </p>
+      )}
       {snapshot?.swap === 'REFUNDED' && (
         <RefundNote
           refund={snapshot.refund}

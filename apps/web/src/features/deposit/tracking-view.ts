@@ -10,6 +10,7 @@ import type { OneClickToken } from '@satway/core';
 
 import {
   type PaymentView,
+  type Receipt,
   type SendAmount,
   type Snapshot,
   paymentView,
@@ -31,6 +32,7 @@ export interface TrackingView {
   terminal: boolean;
   message: string;
   problem: string | null;
+  condition: ConditionNote | null;
   snapshot: Snapshot | null;
   payment: PaymentView;
   expired: boolean;
@@ -48,6 +50,64 @@ export interface TrackingView {
   reclaim: string | null;
   closable: boolean;
   closingNote: string;
+}
+
+export interface ConditionNote {
+  tone: 'status' | 'warn';
+  title: string;
+  text: string;
+}
+
+function satsText(amount: number): string {
+  return `${amount.toLocaleString('en-US')} sats`;
+}
+
+function belowMinimumText(snapshot: Snapshot): string {
+  const largest = Math.max(0, ...snapshot.belowMinimum.map(o => o.amountSats));
+  const arrived = largest > 0 ? `${satsText(largest)} arrived` : 'The payout arrived';
+  const minimum = snapshot.perDepositMinimum;
+  const below =
+    minimum === undefined || minimum === null
+      ? 'below the sBTC minimum'
+      : `below the sBTC minimum of ${satsText(minimum)}`;
+  return `${arrived}, ${below}, so the signers will not mint it. You can reclaim it after the timelock, under “Your deposits” on the Deposit tab.`;
+}
+
+function notFoundText(snapshot: Snapshot, receipt: Receipt): string {
+  const named =
+    snapshot.foreignTxids.length === 0
+      ? 'a Bitcoin transaction'
+      : snapshot.foreignTxids.map(txid => `transaction ${txid}`).join(' and ');
+  const swap = receipt.quoteResponse.quote.depositAddress ?? receipt.depositAddress;
+  return `1Click says it paid you in ${named}, which does not pay your deposit address or is not on the Bitcoin network. Do not rely on it: check the transaction in a block explorer and contact 1Click with your swap deposit address ${swap}.`;
+}
+
+export function conditionNote(snapshot: Snapshot | null, receipt: Receipt): ConditionNote | null {
+  if (snapshot === null) return null;
+  switch (snapshot.progress.condition) {
+    case undefined:
+      return null;
+    case 'awaiting-payout-hash':
+      return {
+        tone: 'status',
+        title: 'Waiting for 1Click to name the payout',
+        text: 'The swap is complete, but 1Click has not said which Bitcoin transaction paid your deposit address. This page keeps checking.',
+      };
+    case 'payout-below-minimum':
+      return {
+        tone: 'warn',
+        title: 'This payout cannot be minted',
+        text: belowMinimumText(snapshot),
+      };
+    case 'payout-not-found':
+      return {
+        tone: 'warn',
+        title: '1Click reports a payout this page cannot find at your address',
+        text: notFoundText(snapshot, receipt),
+      };
+    default:
+      throw new Error(`Unknown condition ${String(snapshot.progress.condition satisfies never)}`);
+  }
 }
 
 function reclaimText(snapshot: Snapshot | null): string | null {
@@ -93,6 +153,7 @@ export function trackingView(state: TrackingState, ctx: TrackingContext): Tracki
     terminal,
     message: progress?.message ?? 'Checking…',
     problem: state.problem,
+    condition: conditionNote(snapshot, receipt),
     snapshot,
     payment,
     expired,
