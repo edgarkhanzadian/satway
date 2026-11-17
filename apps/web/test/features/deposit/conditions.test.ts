@@ -146,4 +146,15 @@ describe('Your deposits names a stuck deposit’s condition', () => {
     });
     expect(waiting[0]?.summary).toBe('Waiting for 1Click to name the payout');
   });
+
+  it('remembers the named payout hashes the check could not find, and none when all were found', () => {
+    const missing = ['ab'.repeat(32)];
+    const waiting = progress('awaiting-payout', false);
+    expect(knownStageOf(snapshot(waiting, { missingTxids: missing }), RECEIPT).missing).toEqual(
+      missing
+    );
+    expect(knownStageOf(snapshot(waiting, { missingTxids: [] }), RECEIPT)).not.toHaveProperty(
+      'missing'
+    );
+  });
 });

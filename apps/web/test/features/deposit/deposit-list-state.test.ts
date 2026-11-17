@@ -396,4 +396,13 @@ describe('remembered stages', () => {
     store.map.set(DEPOSIT_STAGES_KEY, 'not json');
     expect(loadStages(store)).toEqual({});
   });
+
+  it('keeps the payout hashes the last check could not find, so the next check can tell a vanished one', () => {
+    const store = memory();
+    const missing = ['ab'.repeat(32)];
+    const known = { stage: 'awaiting-payout', terminal: false, final: false, reclaimable: false };
+    rememberStage('a', { ...known, stage: 'awaiting-payout', missing }, store);
+    rememberStage('b', { ...known, stage: 'awaiting-payout', missing: ['not a txid'] }, store);
+    expect(loadStages(store)).toEqual({ a: { ...known, missing } });
+  });
 });

@@ -65,7 +65,9 @@ export function YourDeposits(props: {
         config,
         backend,
         effect.receipt,
-        abortableFetch(flow.signal(effect.request))
+        abortableFetch(flow.signal(effect.request)),
+        undefined,
+        loadStages()[receiptId(effect.receipt)]?.missing
       );
       if (effect.type === 'check-entry') {
         dispatch({ type: 'entry-checked', request: effect.request, id: effect.id, snapshot });

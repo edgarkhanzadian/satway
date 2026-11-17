@@ -8,6 +8,7 @@ export interface KnownStage {
   final: boolean;
   reclaimable: boolean;
   condition?: ProgressCondition;
+  missing?: string[];
 }
 
 const CONDITIONS = [
@@ -37,6 +38,10 @@ const knownSchema: z.ZodType<KnownStage> = z.object({
   final: z.boolean(),
   reclaimable: z.boolean(),
   condition: z.enum(CONDITIONS).optional(),
+  missing: z
+    .array(z.string().regex(/^[0-9a-f]{64}$/))
+    .max(4)
+    .optional(),
 });
 
 const storedSchema = z.record(z.string(), z.unknown());

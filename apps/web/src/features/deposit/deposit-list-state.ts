@@ -157,6 +157,7 @@ export function knownStageOf(snapshot: Snapshot, receipt: Receipt): KnownStage {
     final: isFinalSnapshot(snapshot),
     reclaimable: reclaimOffered(reclaimPlanOf(snapshot, receipt.reclaimLockBlocks), stage),
     ...(snapshot.progress.condition ? { condition: snapshot.progress.condition } : {}),
+    ...(snapshot.missingTxids?.length ? { missing: snapshot.missingTxids } : {}),
   };
 }
 
