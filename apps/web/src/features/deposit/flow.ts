@@ -5,6 +5,7 @@ import {
   type IndexedDepositAddress,
   type NetworkConfig,
   type OneClickToken,
+  type Stage,
   assertQuoteMatchesRequest,
   buildIndexedDepositAddress,
   buildQuoteRequest,
@@ -18,7 +19,18 @@ import {
   toXOnly,
 } from '@satway/core';
 
-import { type Backend, type Receipt, loadReceipts } from '../../shared/index.js';
+import { type Backend, type Receipt, loadReceipts, receiptId } from '../../shared/index.js';
+import { type KnownStage, loadStages } from './deposit-stages.js';
+
+const PAID_STAGES: ReadonlySet<Stage> = new Set<Stage>([
+  'payout-unconfirmed',
+  'awaiting-notification',
+  'minting',
+  'done',
+  'mint-failed',
+  'reclaimable',
+  'reclaimed',
+]);
 
 const POPULAR = ['USDC', 'USDT', 'ETH', 'BNB'];
 
@@ -114,6 +126,19 @@ export function localDepositIndices(
   return [...new Set([...saved, ...(reservedThisSession.get(key) ?? [])])].sort((a, b) => a - b);
 }
 
+export function paidDepositIndices(
+  owner: DepositIndexOwner,
+  receipts: readonly Receipt[] = loadReceipts(),
+  stages: Readonly<Record<string, KnownStage>> = loadStages()
+): number[] {
+  const key = ownerKey(owner);
+  const paid = receipts.filter(r => {
+    const stage = stages[receiptId(r)]?.stage;
+    return ownerKey(r) === key && stage !== undefined && PAID_STAGES.has(stage);
+  });
+  return [...new Set(paid.map(r => r.depositIndex))].sort((a, b) => a - b);
+}
+
 export function claimDepositIndex(
   receipt: Receipt,
   receipts: readonly Receipt[] = loadReceipts()
@@ -133,6 +158,7 @@ export interface PrepareOptions {
   now?: Date;
   randomInt?(maxExclusive: number): number;
   localIndices?: readonly number[];
+  paidLocalIndices?: readonly number[];
 }
 
 async function depositAddressFor(
@@ -145,6 +171,7 @@ async function depositAddressFor(
     config,
     owner,
     localIndices: options.localIndices ?? localDepositIndices(owner),
+    paidLocalIndices: options.paidLocalIndices ?? paidDepositIndices(owner),
     randomInt: options.randomInt ?? randomBelow,
     fetchFn: options.fetchFn,
   });

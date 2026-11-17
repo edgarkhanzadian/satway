@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  DEPOSIT_INDEX_WINDOW,
   type OneClickQuoteRequest,
   type OneClickQuoteResponse,
   type OneClickSwapStatus,
   type OneClickToken,
+  type Stage,
   buildIndexedDepositAddress,
   MAINNET_CONFIG as config,
   largestPayoutSats,
@@ -16,6 +18,7 @@ import {
   depositOrigins,
   liveQuoteWorse,
   localDepositIndices,
+  paidDepositIndices,
   prepareDeposit,
   randomBelow,
   toBaseUnits,
@@ -714,6 +717,47 @@ describe('prepareDeposit: one deposit address per deposit', () => {
     expect(local).not.toContain(9);
   });
 
+  it('counts as paid only remembered deposits whose last stage shows BTC reached the address', async () => {
+    const mine = await receiptFor(world());
+    function at(n: number) {
+      return { ...mine, depositIndex: n, createdAt: `2026-11-1${n}T12:00:00.000Z` };
+    }
+    const receipts = [at(0), at(1), at(2), at(3)];
+    const owner = {
+      stacksAddress: D.stacksAddress,
+      reclaimPublicKey: `02${D.reclaimPublicKey}`,
+      signersPublicKey: D.signersPublicKey,
+    };
+    function known(stage: Stage) {
+      return { stage, terminal: false, final: false, reclaimable: false };
+    }
+    const stages = {
+      [receiptId(at(0))]: known('minting'),
+      [receiptId(at(1))]: known('swapping'),
+      [receiptId(at(2))]: known('mint-failed'),
+    };
+    expect(paidDepositIndices(owner, receipts, stages)).toEqual([0, 2]);
+  });
+
+  it('keeps reserved but unpaid indices out of the draw without moving its window', async () => {
+    const reserved = [0, 1, 2];
+    function last(max: number) {
+      return max - 1;
+    }
+    const unpaid = await live(world(), {
+      randomInt: last,
+      localIndices: reserved,
+      paidLocalIndices: [],
+    });
+    expect(unpaid.receipt.depositIndex).toBe(DEPOSIT_INDEX_WINDOW - 1);
+    const paid = await live(world(), {
+      randomInt: last,
+      localIndices: reserved,
+      paidLocalIndices: reserved,
+    });
+    expect(paid.receipt.depositIndex).toBe(DEPOSIT_INDEX_WINDOW + 2);
+  });
+
   it('a preview quote uses index 0 and does not look anything up or reserve it', async () => {
     const w = world({ emilyIndices: [0] });
     const prepared = await prepareDeposit(config, w.backend, input, {
@@ -819,6 +863,22 @@ describe('checkProgress', () => {
     expect(w.posts).toHaveLength(1);
   });
 
+  it('with the provider status unreadable, ends by its payouts only a day past the quote deadline', async () => {
+    const w = world({ payoutVout: 0, mint: 'confirmed' });
+    const receipt = await receiptFor(w);
+    const deadline = Date.parse(receipt.quoteResponse.quoteRequest.deadline);
+    vi.useFakeTimers({ now: deadline + 60 * 60_000, toFake: ['Date'] });
+    try {
+      const soon = await checkProgress(config, w.backend, receipt, w.fetchFn);
+      expect(soon.progress).toMatchObject({ stage: 'done', terminal: false });
+      vi.setSystemTime(deadline + 25 * 60 * 60_000);
+      const later = await checkProgress(config, w.backend, receipt, w.fetchFn);
+      expect(later.progress).toMatchObject({ stage: 'done', terminal: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does not register twice', async () => {
     const w = world({ swap: 'SUCCESS', payoutVout: 0, mint: 'accepted' });
     const snap = await checkProgress(config, w.backend, await receiptFor(w), w.fetchFn);
@@ -882,10 +942,19 @@ describe('checkProgress: payments to the deposit address', () => {
     expect(snap.progress.message).not.toMatch(/swap status/);
   });
 
-  it('a minted output with the swap status unreadable keeps the page checking', async () => {
+  it('a minted output with the swap status unreadable keeps the page checking before the grace day', async () => {
     const w = world({ payoutVout: 0, mint: 'confirmed' });
-    const snap = await checkProgress(config, w.backend, await receiptFor(w), w.fetchFn);
-    expect(snap.progress).toMatchObject({ stage: 'done', terminal: false });
+    const receipt = await receiptFor(w);
+    vi.useFakeTimers({
+      now: Date.parse(receipt.quoteResponse.quoteRequest.deadline),
+      toFake: ['Date'],
+    });
+    try {
+      const snap = await checkProgress(config, w.backend, receipt, w.fetchFn);
+      expect(snap.progress).toMatchObject({ stage: 'done', terminal: false });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('a later unconfirmed 546-sat output does not hijack status or registration', async () => {

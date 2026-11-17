@@ -107,6 +107,7 @@ export async function checkProgress(
   try {
     observed = await observeDeposit(config, depositContextOf(receipt), status, {
       fetchFn,
+      swapDeadline: receipt.quoteResponse.quoteRequest.deadline,
       ...(known ? { known } : {}),
     });
   } catch (err) {
