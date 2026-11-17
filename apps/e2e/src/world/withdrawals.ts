@@ -250,18 +250,48 @@ export class WithdrawalWorld {
       options.requestId === undefined
         ? this.latestRequest()
         : this.stacks.request(options.requestId);
-    const swapAddress = this.swapAddressOf(r);
-    const payout = this.treasury.pay([
-      { script: scriptOfAddress(swapAddress), value: options.payoutSats ?? r.amountSats },
+    const payout = this.signersBroadcast({
+      requestId: r.requestId,
+      payoutSats: options.payoutSats,
+    });
+    this.signersRecord(payout, { requestId: r.requestId, feeSats: options.feeSats });
+    return payout;
+  }
+
+  signersBroadcast(options: { requestId?: number; payoutSats?: number } = {}): ChainTx {
+    const r =
+      options.requestId === undefined
+        ? this.latestRequest()
+        : this.stacks.request(options.requestId);
+    return this.treasury.pay([
+      { script: scriptOfAddress(this.swapAddressOf(r)), value: options.payoutSats ?? r.amountSats },
     ]);
+  }
+
+  signersReplace(payout: ChainTx): ChainTx {
+    return this.treasury.replace(
+      payout.txid,
+      payout.outputs.slice(0, -1).map(o => ({ script: o.script, value: o.value })),
+      { feeSats: 1_350, changeFirst: true }
+    );
+  }
+
+  signersRecord(payout: ChainTx, options: { requestId?: number; feeSats?: number } = {}): void {
+    const r =
+      options.requestId === undefined
+        ? this.latestRequest()
+        : this.stacks.request(options.requestId);
+    const script = scriptOfAddress(this.swapAddressOf(r));
     this.stacks.accept(r.requestId, {
       bitcoinTxid: payout.txid,
-      outputIndex: 0,
+      outputIndex: Math.max(
+        0,
+        payout.outputs.findIndex(o => o.script === script)
+      ),
       feeSats: options.feeSats ?? SIGNER_FEE_SATS,
       burnHash: this.bitcoin.tip.hash.padStart(64, '0').slice(-64),
       burnHeight: this.bitcoin.tip.height,
     });
-    return payout;
   }
 
   signersReject(requestId?: number): void {

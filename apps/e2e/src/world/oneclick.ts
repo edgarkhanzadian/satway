@@ -367,6 +367,14 @@ export class OneClick {
     swap.updatedAt = this.now().toISOString();
   }
 
+  renamePayout(swap: Swap, from: string, to: string): void {
+    for (const list of [swap.destinationTxHashes, swap.withheldHashes]) {
+      const at = list.indexOf(from);
+      if (at >= 0) list.splice(at, 1, to);
+    }
+    swap.updatedAt = this.now().toISOString();
+  }
+
   refund(swap: Swap, reason: string): void {
     swap.status = 'REFUNDED';
     swap.refundedAmount = swap.received;

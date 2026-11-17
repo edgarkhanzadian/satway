@@ -206,6 +206,25 @@ export class BitcoinChain {
     return tx;
   }
 
+  private readonly dropped = new Set<string>();
+
+  drop(txid: string): ChainTx {
+    const tx = this.txs.get(txid);
+    if (!tx) throw new Error(`Unknown transaction ${txid}`);
+    if (tx.height !== null) throw new Error(`Transaction ${txid} is already confirmed`);
+    if ([...this.txs.values()].some(t => t.inputs.some(i => i.txid === txid)))
+      throw new Error(`Transaction ${txid} has descendants`);
+    this.txs.delete(txid);
+    this.dropped.add(txid);
+    for (const input of tx.inputs) this.spentBy.delete(outpointKey(input));
+    return tx;
+  }
+
+  replace(txid: string, rawHex: string): ChainTx {
+    this.drop(txid);
+    return this.add(rawHex);
+  }
+
   mempool(): ChainTx[] {
     return [...this.txs.values()].filter(t => t.height === null);
   }
@@ -300,7 +319,10 @@ export class BitcoinChain {
     if (head === 'tx' && a) {
       const tx = this.transaction(a);
       if (!/^[0-9a-f]{64}$/.test(a)) return text('Invalid hex string', 400);
-      if (!tx) return text('Transaction not found', 404);
+      if (!tx) {
+        const missing = text('Transaction not found', 404);
+        return this.dropped.has(a) ? { ...missing, modelled404: true } : missing;
+      }
       if (b === undefined) return json(this.esploraTx(tx));
       if (b === 'hex' && c === undefined) return text(this.hexOverrides.get(tx.txid) ?? tx.hex);
       if (b === 'status' && c === undefined) return json(this.status(tx));
@@ -432,14 +454,16 @@ export class Wallet {
     this.coins.push({ txid: funded.txid, vout: 0, value: fundSats });
   }
 
-  pay(
-    outputs: { script: string; value: number }[],
-    options: { feeSats?: number; confirmedAt?: number } = {}
-  ): ChainTx {
-    const fee = options.feeSats ?? 450;
-    const needed = outputs.reduce((sum, o) => sum + o.value, 0) + fee;
-    const coin = this.coins.find(c => c.value >= needed + 1000);
-    if (!coin) throw new Error('The world treasury has no coin large enough');
+  private readonly funding = new Map<string, { txid: string; vout: number; value: number }>();
+
+  private signed(
+    coin: { txid: string; vout: number; value: number },
+    outputs: readonly PaymentOutput[],
+    fee: number,
+    changeFirst: boolean
+  ): { hex: string; changeVout: number; change: number } {
+    const change = coin.value - outputs.reduce((sum, o) => sum + o.value, 0) - fee;
+    if (change < 1000) throw new Error('The world treasury coin is too small for this payment');
     const tx = new btc.Transaction();
     tx.addInput({
       txid: coin.txid,
@@ -447,17 +471,58 @@ export class Wallet {
       witnessUtxo: { script: hex.decode(this.script), amount: BigInt(coin.value) },
       sequence: 0xfffffffd,
     });
-    for (const o of outputs)
-      tx.addOutput({ script: hex.decode(o.script), amount: BigInt(o.value) });
-    const change = coin.value - needed;
-    tx.addOutput({ script: hex.decode(this.script), amount: BigInt(change) });
+    const own = { script: this.script, value: change };
+    const all = changeFirst ? [own, ...outputs] : [...outputs, own];
+    for (const o of all) tx.addOutput({ script: hex.decode(o.script), amount: BigInt(o.value) });
     tx.sign(this.key.privateKey);
     tx.finalize();
-    const added = this.chain.add(tx.hex, { confirmedAt: options.confirmedAt });
+    return { hex: tx.hex, changeVout: changeFirst ? 0 : outputs.length, change };
+  }
+
+  pay(
+    outputs: PaymentOutput[],
+    options: { feeSats?: number; confirmedAt?: number; changeFirst?: boolean } = {}
+  ): ChainTx {
+    const fee = options.feeSats ?? 450;
+    const needed = outputs.reduce((sum, o) => sum + o.value, 0) + fee;
+    const coin = this.coins.find(c => c.value >= needed + 1000);
+    if (!coin) throw new Error('The world treasury has no coin large enough');
+    const built = this.signed(coin, outputs, fee, options.changeFirst === true);
+    const added = this.chain.add(built.hex, { confirmedAt: options.confirmedAt });
     this.coins = this.coins.filter(c => c !== coin);
-    this.coins.push({ txid: added.txid, vout: outputs.length, value: change });
+    this.coins.push({ txid: added.txid, vout: built.changeVout, value: built.change });
+    this.funding.set(added.txid, coin);
     return added;
   }
+
+  replace(
+    txid: string,
+    outputs: PaymentOutput[],
+    options: { feeSats: number; changeFirst?: boolean }
+  ): ChainTx {
+    const coin = this.funding.get(txid);
+    if (!coin) throw new Error(`The world treasury did not pay ${txid}`);
+    const built = this.signed(coin, outputs, options.feeSats, options.changeFirst === true);
+    const added = this.chain.replace(txid, built.hex);
+    this.funding.delete(txid);
+    this.funding.set(added.txid, coin);
+    this.coins = this.coins.filter(c => c.txid !== txid);
+    this.coins.push({ txid: added.txid, vout: built.changeVout, value: built.change });
+    return added;
+  }
+
+  evict(txid: string): void {
+    const coin = this.funding.get(txid);
+    if (!coin) throw new Error(`The world treasury did not pay ${txid}`);
+    this.chain.drop(txid);
+    this.funding.delete(txid);
+    this.coins = [...this.coins.filter(c => c.txid !== txid), coin];
+  }
+}
+
+export interface PaymentOutput {
+  script: string;
+  value: number;
 }
 
 export function depositOutputScript(depositScript: string, reclaimScript: string): string {

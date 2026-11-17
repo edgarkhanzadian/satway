@@ -606,6 +606,30 @@ export class World {
     return { swap, tx, outpoint: { txid: tx.txid, vout: 0 }, amountSats };
   }
 
+  replacePayout(
+    payout: PayoutResult,
+    options: { amountSats?: number; changeFirst?: boolean; rename?: boolean } = {}
+  ): PayoutResult {
+    const amountSats = options.amountSats ?? payout.amountSats;
+    const changeFirst = options.changeFirst === true;
+    const tx = this.treasury.replace(
+      payout.tx.txid,
+      [{ script: scriptOfAddress(payout.swap.recipient), value: amountSats }],
+      { feeSats: 1_350, changeFirst }
+    );
+    if (options.rename !== false) this.oneClick.renamePayout(payout.swap, payout.tx.txid, tx.txid);
+    return {
+      swap: payout.swap,
+      tx,
+      outpoint: { txid: tx.txid, vout: changeFirst ? 1 : 0 },
+      amountSats,
+    };
+  }
+
+  evictPayout(payout: PayoutResult): void {
+    this.treasury.evict(payout.tx.txid);
+  }
+
   payTo(address: string, amountSats: number): { tx: ChainTx; outpoint: Outpoint } {
     const tx = this.treasury.pay([{ script: scriptOfAddress(address), value: amountSats }]);
     return { tx, outpoint: { txid: tx.txid, vout: 0 } };

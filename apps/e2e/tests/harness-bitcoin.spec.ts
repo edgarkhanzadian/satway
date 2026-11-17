@@ -5,6 +5,7 @@ import { buildDepositAddress, buildReclaimPsbt, finalizeSignedReclaim } from '@s
 
 import type { Wallets } from '../src/browser/harness.js';
 import { expect, test } from '../src/fixtures.js';
+import { outpointKey } from '../src/world/bitcoin.js';
 import { field, parseJson, stringField } from '../src/world/http.js';
 import type { World } from '../src/world/world.js';
 
@@ -220,5 +221,53 @@ test.describe('harness self-checks: the Bitcoin world validates spends', () => {
       status: 400,
       body: rpcError(-25, 'bad-txns-inputs-missingorspent'),
     });
+  });
+});
+
+test.describe('harness self-checks: the Bitcoin world replaces and evicts unconfirmed payments', () => {
+  function seen(world: World, address: string, path: string): unknown[] {
+    const body = parseJson(world.bitcoin.serve('GET', `/api/address/${address}/${path}`, '').body);
+    return Array.isArray(body) ? body.map(t => field(t, 'txid')) : [];
+  }
+
+  test('a replacement spends the same coin, the original disappears and only the new one confirms', ({
+    world,
+    wallets,
+  }) => {
+    const deposit = depositFor(world, wallets);
+    world.reportDeposit({ depositAddress: world.liveSwapFor(deposit.address).depositAddress });
+    const original = world.completeSwap();
+    const replacement = world.replacePayout(original, {
+      amountSats: original.amountSats - 300,
+      changeFirst: true,
+    });
+    expect(replacement.tx.txid).not.toBe(original.tx.txid);
+    expect(replacement.tx.inputs.map(outpointKey)).toEqual(original.tx.inputs.map(outpointKey));
+    expect(replacement.outpoint.vout).toBe(1);
+    expect(world.bitcoin.serve('GET', `/api/tx/${original.tx.txid}`, '').status).toBe(404);
+    expect(seen(world, deposit.address, 'txs/mempool')).toEqual([replacement.tx.txid]);
+    expect(world.swap().destinationTxHashes).toEqual([replacement.tx.txid]);
+    expect(broadcast(world, original.tx.hex)).toMatchObject({
+      status: 400,
+      body: rpcError(-26, 'txn-mempool-conflict'),
+    });
+    world.mine(1);
+    expect(seen(world, deposit.address, 'txs/chain')).toEqual([replacement.tx.txid]);
+    expect(seen(world, deposit.address, 'txs/mempool')).toEqual([]);
+  });
+
+  test('an evicted payment leaves no trace and its coin can be spent again', ({
+    world,
+    wallets,
+  }) => {
+    const deposit = depositFor(world, wallets);
+    world.reportDeposit({ depositAddress: world.liveSwapFor(deposit.address).depositAddress });
+    const payout = world.completeSwap();
+    world.evictPayout(payout);
+    expect(world.bitcoin.serve('GET', `/api/tx/${payout.tx.txid}`, '').status).toBe(404);
+    expect(world.bitcoin.serve('GET', `/api/address/${deposit.address}/utxo`, '').body).toBe('[]');
+    expect(world.swap().destinationTxHashes).toEqual([payout.tx.txid]);
+    const again = world.payTo(deposit.address, 30_000);
+    expect(again.tx.inputs.map(outpointKey)).toEqual(payout.tx.inputs.map(outpointKey));
   });
 });
