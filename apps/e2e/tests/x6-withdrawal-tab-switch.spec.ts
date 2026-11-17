@@ -23,6 +23,13 @@ async function switchTabsAndBack(app: SatwayApp): Promise<void> {
   await app.page.getByRole('button', { name: 'Withdraw', exact: true }).click();
 }
 
+async function expectStillSigning(app: SatwayApp): Promise<void> {
+  await expect(
+    app.page.getByRole('button', { name: 'Confirm in your wallet…', exact: true })
+  ).toBeVisible();
+  await expect(app.page.getByRole('heading', { name: WAITING })).toHaveCount(0);
+}
+
 async function failEveryWrite(app: SatwayApp): Promise<void> {
   await app.page.addInitScript(() => {
     const original = Storage.prototype.setItem;
@@ -36,7 +43,7 @@ async function failEveryWrite(app: SatwayApp): Promise<void> {
 }
 
 test.describe('X6. switching tabs while a withdrawal is in flight', () => {
-  test('switching tabs during the wallet prompt: the page waits, then tracks once the wallet approves', async ({
+  test('switching tabs during the wallet prompt: the form still waits, then tracks once the wallet approves', async ({
     app,
     world,
     wallets,
@@ -49,7 +56,7 @@ test.describe('X6. switching tabs while a withdrawal is in flight', () => {
     await expect.poll(() => wallets.stacks.behaviour.calls('stx_callContract').length).toBe(1);
 
     await switchTabsAndBack(app);
-    await expect(app.page.getByRole('heading', { name: WAITING })).toBeVisible();
+    await expectStillSigning(app);
     await expect(app.page.getByRole('heading', { name: UNANSWERED })).toHaveCount(0);
     await expect(
       app.page.getByRole('button', { name: 'Nothing was sent. Discard it' })
@@ -83,7 +90,7 @@ test.describe('X6. switching tabs while a withdrawal is in flight', () => {
     await withdraw.signButton.click();
     await expect.poll(() => wallets.stacks.behaviour.calls('stx_callContract').length).toBe(1);
     await switchTabsAndBack(app);
-    await expect(app.page.getByRole('heading', { name: WAITING })).toBeVisible();
+    await expectStillSigning(app);
     late.release();
     await expect(
       app.page.getByRole('heading', { name: 'Withdraw sBTC to another chain' })
@@ -110,7 +117,7 @@ test.describe('X6. switching tabs while a withdrawal is in flight', () => {
     await withdraw.signButton.click();
     await expect.poll(() => wallets.stacks.behaviour.calls('stx_callContract').length).toBe(1);
     await switchTabsAndBack(app);
-    await expect(app.page.getByRole('heading', { name: WAITING })).toBeVisible();
+    await expectStillSigning(app);
     const downloaded = app.page.waitForEvent('download');
     late.release();
     await downloaded;

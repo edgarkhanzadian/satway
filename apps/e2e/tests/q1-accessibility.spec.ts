@@ -197,8 +197,7 @@ test.describe('Q1. accessibility of every main state, light and dark', () => {
     await expect(app.page.getByRole('alert')).toContainText('Could not load the asset list');
     await audit(app, 'asset list error', { tracking: false });
     harness.backendUp();
-    await app.openTab('Withdraw');
-    await app.page.getByRole('button', { name: 'Deposit' }).click();
+    await app.page.getByRole('button', { name: 'Load the asset list again' }).click();
     await app.connectEvmWallet();
     await app.fillDeposit({ amount: '100' });
     world.addFault({ service: 'hiro', outcome: 'network-error', times: 1 });

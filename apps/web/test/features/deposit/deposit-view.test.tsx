@@ -29,6 +29,7 @@ function render(active: boolean): string {
       onActive={() => undefined}
       onRoute={() => undefined}
       signReclaim={never}
+      shown
     />
   );
 }

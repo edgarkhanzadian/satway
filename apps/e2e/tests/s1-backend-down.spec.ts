@@ -28,7 +28,7 @@ async function readyToQuote(app: SatwayApp): Promise<void> {
 }
 
 test.describe('S1. our backend (the Worker) is down', () => {
-  test('at page load: the asset list cannot load, the app says so and stays usable, and reopening the form retries', async ({
+  test('at page load: the asset list cannot load, the app says so and stays usable, and a tab switch keeps the form as it was', async ({
     app,
     harness,
   }) => {
@@ -50,6 +50,10 @@ test.describe('S1. our backend (the Worker) is down', () => {
     harness.backendUp();
     await app.openTab('Withdraw');
     await app.page.getByRole('button', { name: 'Deposit' }).click();
+    await expect(app.page.getByRole('alert')).toHaveText(
+      `Could not load the asset list: ${FAILED_TO_FETCH}`
+    );
+    await app.page.getByRole('button', { name: 'Load the asset list again' }).click();
     await expect(app.assetSelect).toHaveValue(TOKENS.usdcBase.assetId);
     await expect(app.page.getByRole('alert')).toHaveCount(0);
     await app.fillDeposit({ amount: '100' });

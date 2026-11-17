@@ -57,6 +57,7 @@ function ReceiptFacts(props: { receipt: WithdrawalReceiptFile }) {
 }
 
 export function WithdrawalTracking(props: {
+  shown: boolean;
   backend: Backend;
   active: ActiveWithdrawal;
   onActive(update: (current: ActiveWithdrawal | null) => ActiveWithdrawal | null): void;
@@ -87,6 +88,7 @@ export function WithdrawalTracking(props: {
     case 'following':
       return (
         <Following
+          shown={props.shown}
           view={view}
           receiptUnsaved={props.active.receiptUnsaved}
           dispatch={dispatch}
@@ -194,18 +196,19 @@ function UnconfirmedSignature(props: {
 }
 
 function Following(props: {
+  shown: boolean;
   view: FollowingView;
   receiptUnsaved: boolean;
   dispatch(event: TrackingEvent): void;
   onDone(): void;
 }) {
-  const { view, dispatch } = props;
+  const { view, dispatch, shown } = props;
   const { receipt, progress, facts, milestones } = view;
   const headingRef = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
-    headingRef.current?.focus();
-  }, []);
+    if (shown) headingRef.current?.focus();
+  }, [shown]);
 
   return (
     <section className={sheet()}>

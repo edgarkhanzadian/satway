@@ -74,15 +74,15 @@ export class SatwayApp {
   }
 
   get assetSelect(): Locator {
-    return this.page.getByLabel('You send');
+    return this.page.getByLabel('You send').filter({ visible: true });
   }
 
   get amountInput(): Locator {
-    return this.page.getByLabel(/^Amount/);
+    return this.page.getByLabel(/^Amount/).filter({ visible: true });
   }
 
   get refundInput(): Locator {
-    return this.page.getByLabel(/^Refund address/);
+    return this.page.getByLabel(/^Refund address/).filter({ visible: true });
   }
 
   get sendButton(): Locator {

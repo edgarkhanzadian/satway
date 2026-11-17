@@ -77,6 +77,7 @@ export function Deposit(props: {
   onActive(active: ActiveDeposit | null): void;
   onRoute(route: RouteUpdate | null): void;
   signReclaim(psbtHex: string, account: WalletAccount): Promise<Uint8Array>;
+  shown: boolean;
 }) {
   const { backend, account, source, active, onActive, onRoute } = props;
   const [tokens, setTokens] = useState<OneClickToken[]>([]);
@@ -136,7 +137,7 @@ export function Deposit(props: {
         signReclaim={props.signReclaim}
         onFollow={(receipt: Receipt) => follow({ receipt, receiptUnsaved: false })}
         onRoute={setListRoute}
-        visible={tracked === null}
+        visible={props.shown && tracked === null}
       />
     </styled.div>
   );

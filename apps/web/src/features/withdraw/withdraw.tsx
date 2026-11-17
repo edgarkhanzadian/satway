@@ -34,6 +34,7 @@ export interface WithdrawProps {
   onActive(update: (current: ActiveWithdrawal | null) => ActiveWithdrawal | null): void;
   requestWithdrawal(call: WithdrawalContractCall): Promise<string>;
   onRoute(route: WithdrawalRouteUpdate | null): void;
+  shown: boolean;
 }
 
 export function storedActiveWithdrawal(): ActiveWithdrawal | null {
@@ -88,6 +89,7 @@ export function Withdraw(props: WithdrawProps) {
   if (active && !(active.walletPrompt && signingHere)) {
     return (
       <WithdrawalTracking
+        shown={props.shown}
         backend={props.backend}
         active={active}
         onActive={onActive}
@@ -115,6 +117,7 @@ export function Withdraw(props: WithdrawProps) {
       {active === null && (
         <styled.div marginTop="space.10">
           <WithdrawalList
+            visible={props.shown}
             backend={props.backend}
             onFollow={receipt => follow(storedWithdrawal(receipt) ?? receipt)}
             onLoaded={receipt => {

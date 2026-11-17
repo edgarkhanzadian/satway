@@ -36,6 +36,11 @@ export function App() {
   const [account, setAccount] = useState<WalletAccount | null>(null);
   const [source, setSource] = useState<SourceWallet | null>(null);
   const [tab, setTab] = useState<'deposit' | 'withdraw'>('deposit');
+  const [withdrawOpened, setWithdrawOpened] = useState(false);
+  function openTab(next: 'deposit' | 'withdraw') {
+    if (next === 'withdraw') setWithdrawOpened(true);
+    setTab(next);
+  }
   const quotes = useMemo(() => createWithdrawalBackend(API_URL), []);
   const [withdrawRoute, setWithdrawRoute] = useState<WithdrawalRouteUpdate | null>(null);
   const [activeWithdrawal, setActiveWithdrawal] = useState<ActiveWithdrawal | null>(
@@ -75,14 +80,16 @@ export function App() {
             <button
               className={button({ variant: 'tab' })}
               aria-pressed={tab === 'deposit'}
-              onClick={() => setTab('deposit')}
+              aria-controls="deposit-panel"
+              onClick={() => openTab('deposit')}
             >
               Deposit
             </button>
             <button
               className={button({ variant: 'tab' })}
               aria-pressed={tab === 'withdraw'}
-              onClick={() => setTab('withdraw')}
+              aria-controls="withdraw-panel"
+              onClick={() => openTab('withdraw')}
             >
               Withdraw
             </button>
@@ -153,7 +160,7 @@ export function App() {
             </styled.div>
           </styled.div>
 
-          {tab === 'deposit' && (
+          <div id="deposit-panel" hidden={tab !== 'deposit'}>
             <Deposit
               backend={backend}
               account={account}
@@ -162,21 +169,25 @@ export function App() {
               onActive={setActive}
               onRoute={setRoute}
               signReclaim={signReclaimWithWallet}
+              shown={tab === 'deposit'}
             />
-          )}
+          </div>
 
-          {tab === 'withdraw' && (
-            <Withdraw
-              backend={backend}
-              quotes={quotes}
-              account={account}
-              destinationWallet={source}
-              active={activeWithdrawal}
-              onActive={setActiveWithdrawal}
-              requestWithdrawal={requestWithdrawalWithWallet}
-              onRoute={setWithdrawRoute}
-            />
-          )}
+          <div id="withdraw-panel" hidden={tab !== 'withdraw'}>
+            {withdrawOpened && (
+              <Withdraw
+                backend={backend}
+                quotes={quotes}
+                account={account}
+                destinationWallet={source}
+                active={activeWithdrawal}
+                onActive={setActiveWithdrawal}
+                requestWithdrawal={requestWithdrawalWithWallet}
+                onRoute={setWithdrawRoute}
+                shown={tab === 'withdraw'}
+              />
+            )}
+          </div>
         </styled.main>
 
         <styled.footer

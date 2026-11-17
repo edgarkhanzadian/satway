@@ -86,8 +86,9 @@ export function WithdrawalList(props: {
   backend: Backend;
   onFollow(receipt: WithdrawalReceiptFile): void;
   onLoaded(receipt: WithdrawalReceiptFile): void;
+  visible: boolean;
 }) {
-  const { backend } = props;
+  const { backend, visible } = props;
   const [storageWorks] = useState(localStorageWorks);
   const flow = useFlow(
     listMachine,
@@ -102,8 +103,8 @@ export function WithdrawalList(props: {
   }
 
   useEffect(() => {
-    dispatch({ type: 'opened' });
-  }, [dispatch]);
+    if (visible) dispatch({ type: 'opened' });
+  }, [dispatch, visible]);
 
   const loading = file.kind === 'reading' || file.kind === 'resolving' || file.kind === 'verifying';
 

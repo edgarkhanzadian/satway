@@ -92,11 +92,11 @@ export class WithdrawPage {
   }
 
   get assetSelect(): Locator {
-    return this.page.getByLabel('You receive');
+    return this.page.getByLabel('You receive').filter({ visible: true });
   }
 
   get amountInput(): Locator {
-    return this.page.getByLabel(/^Amount of sBTC/);
+    return this.page.getByLabel(/^Amount of sBTC/).filter({ visible: true });
   }
 
   get recipientInput(): Locator {
