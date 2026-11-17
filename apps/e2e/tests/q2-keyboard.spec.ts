@@ -90,6 +90,7 @@ test.describe('Q2. keyboard only', () => {
     await tabTo(app, /^Withdraw$/);
     await press(app, 'Enter');
     await expect(app.page.getByRole('heading', { name: 'Your withdrawals' })).toBeVisible();
+    await expect(app.page.getByRole('button', { name: 'Check again', exact: true })).toBeVisible();
     const stops = await tabWalk(app.page);
     expect(stops.map(s => s.name)).toEqual([
       'Deposit',
