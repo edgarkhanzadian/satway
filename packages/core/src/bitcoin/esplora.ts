@@ -203,6 +203,7 @@ export interface DepositOutputs {
   outputs: AddressOutput[];
   truncated: boolean;
   foreignTxids: string[];
+  missingTxids: string[];
   requests: number;
 }
 
@@ -240,10 +241,14 @@ export async function fetchDepositOutputs(
     t => TXID.test(t) && !seenTxids.has(t)
   );
   const foreignTxids: string[] = [];
+  const missingTxids: string[] = [];
   for (const txid of txids.slice(0, MAX_DIRECT_TX_LOOKUPS)) {
     const tx = await fetchTransaction(btcApiUrl, txid, fetchFn);
     requests += 1;
-    if (!tx) continue;
+    if (!tx) {
+      missingTxids.push(txid);
+      continue;
+    }
     const found = seenInTx(tx, depositScriptPubKey);
     if (found.length === 0) foreignTxids.push(txid);
     addSeen(seen, found);
@@ -254,7 +259,7 @@ export async function fetchDepositOutputs(
     if (unspentKeys.has(key)) continue;
     outputs.push({ ...o, spent: o.confirmed });
   }
-  return { outputs, truncated: history.truncated, foreignTxids, requests };
+  return { outputs, truncated: history.truncated, foreignTxids, missingTxids, requests };
 }
 
 const addressStatsSchema = z.looseObject({

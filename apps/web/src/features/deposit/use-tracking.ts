@@ -69,7 +69,8 @@ export function useTracking(input: TrackingInput): Tracking {
       backend,
       records: sendRecords,
       registered: registeredThisSession,
-      checkProgress: (r, known) => checkProgress(config, backend, r, undefined, known),
+      checkProgress: (r, known, missing) =>
+        checkProgress(config, backend, r, undefined, known, missing),
       wallet: () => sourceRef.current,
       token: () => tokenRef.current,
       evmState: evmTransactionState,

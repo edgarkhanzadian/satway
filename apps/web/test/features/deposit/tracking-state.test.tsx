@@ -159,11 +159,18 @@ function harness(script: Script = {}) {
   const polls = [...(script.polls ?? [snapshot('PENDING_DEPOSIT')])];
   const registrations = [...(script.registrations ?? [REGISTERED])];
   const chain = [...(script.chain ?? ['pending'])];
-  const calls: { polls: number; registrations: number[]; sends: number; known: unknown[] } = {
+  const calls: {
+    polls: number;
+    registrations: number[];
+    sends: number;
+    known: unknown[];
+    missing: unknown[];
+  } = {
     polls: 0,
     registrations: [],
     sends: 0,
     known: [],
+    missing: [],
   };
   const effects: TrackingEffect[] = [];
   const registered = registeredSwapsInMemory();
@@ -199,9 +206,10 @@ function harness(script: Script = {}) {
     backend,
     records,
     registered,
-    checkProgress(_receipt, known) {
+    checkProgress(_receipt, known, missing) {
       calls.polls += 1;
       calls.known.push(known);
+      calls.missing.push(missing);
       const answer = next(polls);
       if (answer === undefined) return Promise.reject(new Error('no poll'));
       return answer instanceof Error ? Promise.reject(answer) : Promise.resolve(answer);
@@ -255,6 +263,17 @@ describe('tracking: polling', () => {
     await settle(1);
     expect(h.calls.polls).toBe(2);
     expect(h.calls.known).toEqual([undefined, mints]);
+  });
+
+  it('passes back the payout hashes the previous check could not find', async () => {
+    const missing = ['aa'.repeat(32)];
+    const h = harness({
+      polls: [snapshot('PROCESSING', [], { missingTxids: missing }), snapshot('PROCESSING')],
+    });
+    h.store.dispatch({ type: 'shown', first: undefined, registered: false });
+    await settle();
+    await settle(POLL_INTERVAL_MS);
+    expect(h.calls.missing).toEqual([undefined, missing]);
   });
 
   it('is done only when core says so, and stops polling then', async () => {
@@ -652,7 +671,13 @@ describe('tracking machine', () => {
     ];
     for (const effect of durable) expect(durableTrackingEffect(effect)).toBe(true);
     const dropped: TrackingEffect[] = [
-      { type: 'check-progress', request: 1, receipt: RECEIPT, known: undefined },
+      {
+        type: 'check-progress',
+        request: 1,
+        receipt: RECEIPT,
+        known: undefined,
+        missing: undefined,
+      },
       { type: 'wait', request: 1, delayMs: 1, due: { type: 'poll-due', request: 1 } },
       { type: 'register', request: 1, receipt: RECEIPT, swapAddress: SWAP },
       { type: 'chain-check', request: 1, target: TARGET },

@@ -35,7 +35,11 @@ export interface TrackingDeps {
   backend: Backend;
   records: SendRecords;
   registered: RegisteredSwaps;
-  checkProgress(receipt: Receipt, known: Snapshot['mints'] | undefined): Promise<Snapshot>;
+  checkProgress(
+    receipt: Receipt,
+    known: Snapshot['mints'] | undefined,
+    missing: Snapshot['missingTxids']
+  ): Promise<Snapshot>;
   wallet(): SourceWallet | null;
   token(): OneClickToken | undefined;
   evmState(provider: SourceWallet['provider'], hash: string): Promise<EvmTransactionState>;
@@ -64,7 +68,7 @@ export function createTrackingRunner(deps: TrackingDeps): TrackingRunner {
 
   async function checkProgress(effect: Extract<TrackingEffect, { type: 'check-progress' }>) {
     try {
-      const snapshot = await deps.checkProgress(effect.receipt, effect.known);
+      const snapshot = await deps.checkProgress(effect.receipt, effect.known, effect.missing);
       dispatch({ type: 'polled', request: effect.request, snapshot });
     } catch (err) {
       dispatch({

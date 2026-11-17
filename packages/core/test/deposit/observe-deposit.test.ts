@@ -252,6 +252,55 @@ describe('observeDeposit: what the swap status tells the progress', () => {
   });
 });
 
+describe('observeDeposit: the named payout transaction was replaced', () => {
+  const A = 'a1'.repeat(32);
+  const B = 'b2'.repeat(32);
+  const status = {
+    status: 'SUCCESS' as const,
+    updatedAt: '',
+    swapDetails: { originChainTxHashes: [], destinationChainTxHashes: [{ hash: A }] },
+  };
+
+  function replacedWorld() {
+    const urls: string[] = [];
+    const replacement = {
+      txid: B,
+      vout: [{ scriptpubkey: dep.scriptPubKey, value: 30_000 }],
+      status: { confirmed: false },
+    };
+    function route(url: string): Response {
+      urls.push(url);
+      if (url.endsWith('/limits'))
+        return json({ pegCap: null, perDepositMinimum: 10_000, perDepositCap: null });
+      if (url.endsWith('/blocks/tip/height')) return new Response(String(TIP));
+      if (url.endsWith('/txs/mempool')) return json([replacement]);
+      if (url.endsWith('/txs/chain')) return json([]);
+      if (url.endsWith('/utxo'))
+        return json([{ txid: B, vout: 0, value: 30_000, status: replacement.status }]);
+      return json({ message: 'not found' }, 404);
+    }
+    return { urls, fetchFn: (url: string) => Promise.resolve(route(url)) };
+  }
+
+  it('reports the named transaction as missing, and as vanished only on the second read in a row', async () => {
+    const w = replacedWorld();
+    const first = await observeDeposit(config, ctx, status, { fetchFn: w.fetchFn });
+    expect(w.urls).toContain(`${config.btcApiUrl}/tx/${A}`);
+    expect(first).toMatchObject({ missingTxids: [A], vanishedTxids: [], foreignTxids: [] });
+    expect(first.payouts.map(p => p.txid)).toEqual([B]);
+    expect(first.toRegister.map(o => o.txid)).toEqual([B]);
+    expect(first.progress).toMatchObject({ stage: 'awaiting-payout', terminal: false });
+
+    const second = await observeDeposit(config, ctx, status, {
+      fetchFn: w.fetchFn,
+      missingBefore: first.missingTxids,
+    });
+    expect(second).toMatchObject({ missingTxids: [A], vanishedTxids: [A] });
+    expect(second.payouts.map(p => p.txid)).toEqual([B]);
+    expect(second.progress).toMatchObject({ stage: 'payout-unconfirmed', terminal: false });
+  });
+});
+
 describe('observeDeposit: more spent-looking payouts than one check reads', () => {
   it('reads every one of them across checks a minute apart', async () => {
     const payments = Array.from({ length: 9 }, (_, i) => ({

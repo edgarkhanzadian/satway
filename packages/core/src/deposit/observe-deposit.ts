@@ -54,6 +54,8 @@ export interface DepositObservation {
   payouts: AddressOutput[];
   belowMinimum: AddressOutput[];
   foreignTxids: string[];
+  missingTxids: string[];
+  vanishedTxids: string[];
   truncated: boolean;
   tipHeight: number | null;
   perDepositMinimum: number | null;
@@ -116,6 +118,7 @@ function progressFor(
     | 'payouts'
     | 'belowMinimum'
     | 'foreignTxids'
+    | 'vanishedTxids'
     | 'mints'
     | 'tipHeight'
     | 'spenders'
@@ -140,6 +143,7 @@ function progressFor(
     payoutTxids: o.payoutTxids,
     belowMinimum: o.belowMinimum,
     foreignTxids: o.foreignTxids,
+    vanishedTxids: o.vanishedTxids,
     swapless: o.swapless,
     swapStartedAt: o.swapStartedAt,
     swapDeadline: o.swapDeadline,
@@ -238,11 +242,13 @@ export async function observeDeposit(
     fetchFn?: FetchLike;
     maxPages?: DepositOutputsOptions['maxPages'];
     known?: ReadonlyMap<string, MintStatus>;
+    missingBefore?: readonly string[];
     swapless?: boolean;
     swapDeadline?: string;
     now?: Date;
   } = {}
 ): Promise<DepositObservation> {
+  const missingBefore = new Set((options.missingBefore ?? []).map(t => t.toLowerCase()));
   const fetchFn = options.fetchFn;
   const [limits, tipHeight] = await Promise.all([
     optional(() => fetchLimits(config.sbtcApiUrl, fetchFn)),
@@ -318,6 +324,7 @@ export async function observeDeposit(
     payouts,
     belowMinimum,
     foreignTxids: fetched.foreignTxids,
+    vanishedTxids: fetched.missingTxids.filter(t => missingBefore.has(t)),
     mints,
     tipHeight,
     spenders,
@@ -327,6 +334,7 @@ export async function observeDeposit(
   return {
     ...observed,
     outputs,
+    missingTxids: fetched.missingTxids,
     truncated: fetched.truncated,
     perDepositMinimum,
     toRegister,

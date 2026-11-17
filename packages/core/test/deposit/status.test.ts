@@ -630,3 +630,65 @@ describe('deriveProgress: states that used to never end', () => {
     expect(old).toMatchObject({ stage: 'done', terminal: true });
   });
 });
+
+describe('deriveProgress: the payout 1Click names was replaced before it confirmed', () => {
+  const STARTED = 1_700_000_000_000;
+  const DEADLINE = STARTED + 2 * 3_600_000;
+  const replaced = 'a1'.repeat(32);
+  const replacement = payout({ txid: 'b2'.repeat(32), confirmed: false, blockHeight: null });
+  const after = { swapStartedAt: STARTED, swapDeadline: DEADLINE, now: STARTED + 3_600_000 };
+
+  function named(payouts: PayoutObservation[], vanished: string[]): Observations {
+    return {
+      ...obs({ swap: 'SUCCESS', payoutTxids: [replaced], payouts }),
+      ...after,
+      vanishedTxids: vanished,
+    };
+  }
+
+  it('waits as before while the named transaction has been missing for one read only', () => {
+    const p = deriveProgress(named([{ payout: replacement, mint: null }], []));
+    expect(p).toMatchObject({ stage: 'awaiting-payout', terminal: false });
+    expect(p.message).not.toMatch(/replaced/);
+  });
+
+  it('follows the payment that arrived after the swap began once the named one has vanished', () => {
+    const p = deriveProgress(named([{ payout: replacement, mint: null }], [replaced]));
+    expect(p).toMatchObject({
+      stage: 'payout-unconfirmed',
+      terminal: false,
+      needsNotification: true,
+    });
+    expect(p.message).toMatch(/^BTC is on its way.*no longer shows, most likely because it was/);
+    expect(p.message).not.toMatch(/payments arrived/);
+  });
+
+  it('reaches done when that payment is minted, with no second payment counted', () => {
+    const minted = { ...replacement, confirmed: true, blockHeight: 1_000 };
+    const p = deriveProgress(named([{ payout: minted, mint: 'confirmed' }], [replaced]));
+    expect(p).toMatchObject({ stage: 'done', terminal: true });
+    expect(p.condition).toBeUndefined();
+  });
+
+  it('does not adopt a payment that predates the swap', () => {
+    const early = {
+      ...payout({ txid: 'c3'.repeat(32) }),
+      blockTime: STARTED / 1000 - 10 * 3600,
+    };
+    const p = deriveProgress(named([{ payout: early, mint: 'confirmed' }], [replaced]));
+    expect(p).toMatchObject({ stage: 'awaiting-payout', terminal: false });
+  });
+
+  it('keeps naming the payout when only one of two named transactions vanished', () => {
+    const p = deriveProgress({
+      ...named([{ payout: replacement, mint: 'confirmed' }], [replaced]),
+      payoutTxids: [replaced, 'd4'.repeat(32)],
+    });
+    expect(p).toMatchObject({ stage: 'awaiting-payout', terminal: false });
+  });
+
+  it('with nothing at the address still says the named payout is not found a day after the deadline', () => {
+    const p = deriveProgress({ ...named([], [replaced]), now: DEADLINE + 25 * 3_600_000 });
+    expect(p).toMatchObject({ condition: 'payout-not-found', terminal: false });
+  });
+});

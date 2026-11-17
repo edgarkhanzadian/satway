@@ -239,6 +239,7 @@ describe('fetchDepositOutputs', () => {
       fetchFn: esplora.fetchFn,
     });
     expect(res.foreignTxids).toEqual(['ee'.repeat(32)]);
+    expect(res.missingTxids).toEqual(['ff'.repeat(32)]);
     expect(res.outputs.map(o => o.txid)).toEqual([txidOf(2)]);
   });
 

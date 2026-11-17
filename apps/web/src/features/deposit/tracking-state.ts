@@ -115,6 +115,7 @@ export type TrackingEffect =
       request: number;
       receipt: Receipt;
       known: Snapshot['mints'] | undefined;
+      missing: Snapshot['missingTxids'];
     }
   | { type: 'wait'; request: number; delayMs: number; due: TrackingEvent }
   | { type: 'register'; request: number; receipt: Receipt; swapAddress: string }
@@ -252,7 +253,13 @@ function withRecord(state: TrackingState, record: SendRecord | null): Step {
 function checkProgressNow(state: TrackingState): Step {
   const [next, request] = allocate(state);
   return step({ ...next, poll: { kind: 'running', request } }, [
-    { type: 'check-progress', request, receipt: next.receipt, known: next.snapshot?.mints },
+    {
+      type: 'check-progress',
+      request,
+      receipt: next.receipt,
+      known: next.snapshot?.mints,
+      missing: next.snapshot?.missingTxids,
+    },
   ]);
 }
 

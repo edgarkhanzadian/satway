@@ -30,6 +30,7 @@ export interface Snapshot {
   belowMinimum: AddressOutput[];
   perDepositMinimum?: number | null;
   foreignTxids: string[];
+  missingTxids?: string[];
   outputs: AddressOutput[];
   mints: ReadonlyMap<string, MintStatus>;
   mintUnknown: boolean;
@@ -92,7 +93,8 @@ export async function checkProgress(
   backend: Backend,
   receipt: Receipt,
   fetchFn?: FetchLike,
-  known?: ReadonlyMap<string, MintStatus>
+  known?: ReadonlyMap<string, MintStatus>,
+  missingBefore?: readonly string[]
 ): Promise<Snapshot> {
   let status: OneClickStatusResponse | null = null;
   const swapAddress = receipt.quoteResponse.quote.depositAddress;
@@ -110,6 +112,7 @@ export async function checkProgress(
       fetchFn,
       swapDeadline: receipt.quoteResponse.quoteRequest.deadline,
       ...(known ? { known } : {}),
+      ...(missingBefore ? { missingBefore } : {}),
     });
   } catch (err) {
     throw new ProgressReadError(
@@ -154,6 +157,7 @@ async function registerObserved(
     belowMinimum: o.belowMinimum,
     perDepositMinimum: o.perDepositMinimum,
     foreignTxids: o.foreignTxids,
+    missingTxids: o.missingTxids,
     outputs: o.outputs,
     mints: o.mints,
     mintUnknown: mintStatusUnknown(o.mints),

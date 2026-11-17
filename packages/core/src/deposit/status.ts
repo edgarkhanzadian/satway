@@ -39,6 +39,7 @@ export interface Observations {
   payoutTxids?: readonly string[];
   belowMinimum?: readonly ObservedPayout[];
   foreignTxids?: readonly string[];
+  vanishedTxids?: readonly string[];
   swapless?: boolean;
   swapStartedAt?: number | null;
   swapDeadline?: number | null;
@@ -374,7 +375,23 @@ const STATUS_UNKNOWN_NOTE = 'The swap status could not be read, so this page kee
 const STATUS_GONE_NOTE =
   'The swap status can no longer be read and its deadline passed more than a day ago, so these results are final.';
 
+export const REPLACED_PAYOUT_NOTE =
+  '1Click names a Bitcoin payout transaction that the Bitcoin network no longer shows, most likely because it was replaced, so the payment that arrived at your deposit address is followed instead.';
+
+function namedAllVanished(o: Observations): boolean {
+  const named = o.payoutTxids ?? [];
+  const vanished = o.vanishedTxids ?? [];
+  if (named.length === 0 || !named.every(t => vanished.includes(t))) return false;
+  return o.payouts.some(p => arrivedAfterStart(o, p.payout));
+}
+
 export function deriveProgress(o: Observations): Progress {
+  if (!namedAllVanished(o)) return deriveNamed(o);
+  const followed = deriveNamed({ ...o, payoutTxids: [] });
+  return { ...followed, message: `${followed.message} ${REPLACED_PAYOUT_NOTE}` };
+}
+
+function deriveNamed(o: Observations): Progress {
   const missing = namedPayoutMissing(o);
   if (missing) return missing;
   if (o.payouts.length === 0) {
