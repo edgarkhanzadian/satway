@@ -92,8 +92,12 @@ test.describe('R8. the Worker watch for a deposit whose tab was closed', () => {
       notifierRun({
         watched: 1,
         notified: [{ address: receipt.depositAddress, txid: payout.outpoint.txid, vout: 0 }],
-        finished: [receipt.depositAddress],
       })
+    );
+    expect(api.watched()).toEqual([receipt.depositAddress]);
+    world.mine(1);
+    expect(await api.runScheduled()).toEqual(
+      notifierRun({ watched: 1, finished: [receipt.depositAddress] })
     );
     expect(api.watched()).toEqual([]);
     expectRegisteredWithEmily(world, receipt, payout.outpoint, 'notifier');
@@ -139,6 +143,7 @@ test.describe('R8. the Worker watch for a deposit whose tab was closed', () => {
     const payout = world.completeSwap({ depositAddress: ownSwap });
     world.reportDeposit({ depositAddress: other.swapDepositAddress });
     const theirs = world.completeSwap({ depositAddress: other.swapDepositAddress });
+    world.mine(1);
     world.addFault({
       service: 'emily',
       method: 'POST',
@@ -219,6 +224,7 @@ test.describe('R8. the Worker watch for a deposit whose tab was closed', () => {
     await app.page.close();
     world.reportDeposit();
     const payout = world.completeSwap();
+    world.mine(1);
     expect(await api.runScheduled()).toEqual(
       notifierRun({
         watched: 1,

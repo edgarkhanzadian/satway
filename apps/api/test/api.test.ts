@@ -22,6 +22,7 @@ import {
   WORKER_REQUEST_TIMEOUT_MS,
   retryDelayMs,
   runNotifier,
+  settledInView,
   swapsFinal,
 } from '../src/notifier/index.js';
 import {
@@ -980,5 +981,111 @@ describe('runNotifier: a registration that keeps failing', () => {
     const again = await runNotifier(kv, endpoints, w.fetchFn, day(5));
     expect(again.notified).toEqual([]);
     expect(outpointsPosted(w).filter(o => o === `${CHAIN[3]?.txid}:3`)).toHaveLength(1);
+  });
+});
+
+describe('runNotifier: a payout replaced before it confirms', () => {
+  const A = `${D.txid}:0`;
+  const B = `${CHAIN[3]?.txid}:3`;
+  function minutes(n: number) {
+    return { now: new Date(NOW.getTime() + n * 60_000) };
+  }
+
+  function replace(w: World, next: ReturnType<typeof payoutTx>) {
+    w.state.txs = w.state.txs.filter(t => t.txid !== D.txid);
+    w.state.txs.push(next);
+  }
+
+  function confirm(w: World, txid: string | undefined) {
+    w.state.txs = w.state.txs.map(t =>
+      t.txid === txid ? { ...t, status: payoutTx(0).status } : t
+    );
+  }
+
+  it('settledInView counts a registered output only once the address shows it confirmed', () => {
+    const output = {
+      txid: D.txid,
+      vout: 0,
+      amountSats: 35_000,
+      confirmed: false,
+      blockHeight: null,
+      blockTime: null,
+      spent: false,
+    };
+    expect(settledInView([A, B], [output])).toEqual({ settled: [], unseen: [B] });
+    expect(settledInView([A], [{ ...output, confirmed: true }])).toEqual({
+      settled: [A],
+      unseen: [],
+    });
+    expect(settledInView([A], null)).toEqual({ settled: [], unseen: [A] });
+  });
+
+  it('registers an unconfirmed payout at once but ends the watch only after it confirms', async () => {
+    const w = world({
+      txs: [payoutTx(0, { confirmed: false })],
+      swaps: { '0xswap0': { hashes: [D.txid] } },
+    });
+    const kv = await watching(w);
+    const first = await runNotifier(kv, endpoints, w.fetchFn, run);
+    expect(first).toMatchObject({ notified: [{ txid: D.txid, vout: 0 }], finished: [] });
+    expect(record(kv)).toMatchObject({ registered: [A] });
+    confirm(w, D.txid);
+    expect((await runNotifier(kv, endpoints, w.fetchFn, minutes(2))).finished).toEqual([D.address]);
+  });
+
+  it('registers the replacement, and ends once 1Click names it and it confirms', async () => {
+    const swap = { hashes: [D.txid] };
+    const w = world({ txs: [payoutTx(0, { confirmed: false })], swaps: { '0xswap0': swap } });
+    const kv = await watching(w);
+    await runNotifier(kv, endpoints, w.fetchFn, run);
+    replace(w, payoutTx(3, { confirmed: false }));
+
+    const second = await runNotifier(kv, endpoints, w.fetchFn, minutes(2));
+    expect(second).toMatchObject({ notified: [{ txid: CHAIN[3]?.txid, vout: 3 }], finished: [] });
+    expect(record(kv)).toMatchObject({ registered: [A, B].sort() });
+
+    confirm(w, CHAIN[3]?.txid);
+    const stale = await runNotifier(kv, endpoints, w.fetchFn, minutes(4));
+    expect(stale).toMatchObject({ notified: [], finished: [] });
+    expect(w.hits(`https://btc.example/tx/${D.txid}`).length).toBeGreaterThan(0);
+
+    swap.hashes = [CHAIN[3]?.txid ?? ''];
+    expect((await runNotifier(kv, endpoints, w.fetchFn, minutes(6))).finished).toEqual([D.address]);
+  });
+
+  it('a vanished output never satisfies the single-swap rule for a hashless SUCCESS', async () => {
+    const w = world({ txs: [payoutTx(0, { confirmed: false })] });
+    const kv = await watching(w);
+    await runNotifier(kv, endpoints, w.fetchFn, run);
+    w.state.txs = [];
+    const gone = await runNotifier(kv, endpoints, w.fetchFn, minutes(2));
+    expect(gone.finished).toEqual([]);
+    expect(record(kv)).toMatchObject({ registered: [A] });
+    w.arrive(payoutTx(3, { confirmed: false }));
+    expect((await runNotifier(kv, endpoints, w.fetchFn, minutes(4))).finished).toEqual([]);
+    confirm(w, CHAIN[3]?.txid);
+    expect((await runNotifier(kv, endpoints, w.fetchFn, minutes(6))).finished).toEqual([D.address]);
+  });
+
+  it('a registered payout swept between visits is looked up once and ends the watch', async () => {
+    const w = world({ txs: [payoutTx(0, { confirmed: false })] });
+    const kv = await watching(w);
+    await runNotifier(kv, endpoints, w.fetchFn, run);
+    confirm(w, D.txid);
+    w.state.spent.add(A);
+    const report = await runNotifier(kv, endpoints, w.fetchFn, minutes(2));
+    expect(report.finished).toEqual([D.address]);
+    expect(w.calls.filter(c => c.url === `https://btc.example/tx/${D.txid}`)).toHaveLength(1);
+  });
+
+  it('ends the watch for a refunded swap even when its registered payout vanished', async () => {
+    const swap: { status: string } = { status: 'PROCESSING' };
+    const w = world({ txs: [payoutTx(0, { confirmed: false })], swaps: { '0xswap0': swap } });
+    const kv = await watching(w);
+    await runNotifier(kv, endpoints, w.fetchFn, run);
+    w.state.txs = [];
+    expect((await runNotifier(kv, endpoints, w.fetchFn, minutes(2))).finished).toEqual([]);
+    swap.status = 'REFUNDED';
+    expect((await runNotifier(kv, endpoints, w.fetchFn, minutes(4))).finished).toEqual([D.address]);
   });
 });

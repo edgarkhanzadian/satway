@@ -112,6 +112,7 @@ test.describe('R3. registering the payout with Emily', () => {
     expect(world.emily.get(payout.outpoint.txid, 0)).toBeNull();
 
     world.clearFaults();
+    world.mine(1);
     expect(await api.runScheduled()).toEqual(
       notifierRun({
         watched: 1,

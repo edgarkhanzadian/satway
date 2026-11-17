@@ -92,13 +92,17 @@ test.describe('A. USDC on Base from the injected EVM wallet', () => {
     expectRegisteredWithEmily(world, receipt, payout.outpoint, 'page');
     await expect(app.sendButton).toHaveCount(0);
 
-    const report = await api.runScheduled();
-    expect(report).toEqual(notifierRun({ watched: 1, finished: [receipt.depositAddress] }));
-    expect(api.watched()).toEqual([]);
+    expect(await api.runScheduled()).toEqual(notifierRun({ watched: 1 }));
+    expect(api.watched()).toEqual([receipt.depositAddress]);
     expectRegisteredWithEmily(world, receipt, payout.outpoint, 'page');
 
     world.mine(1);
     await app.waitForProgress(PROGRESS.minting);
+    expect(await api.runScheduled()).toEqual(
+      notifierRun({ watched: 1, finished: [receipt.depositAddress] })
+    );
+    expect(api.watched()).toEqual([]);
+    expectRegisteredWithEmily(world, receipt, payout.outpoint, 'page');
     await app.expectRouteAt('sBTC on Stacks', 'In progress');
 
     world.signers.mint(payout.outpoint);
@@ -131,12 +135,15 @@ test.describe('A. USDC on Base from the injected EVM wallet', () => {
       notifierRun({
         watched: 1,
         notified: [{ address: receipt.depositAddress, txid: payout.outpoint.txid, vout: 0 }],
-        finished: [receipt.depositAddress],
       })
     );
     expectRegisteredWithEmily(world, receipt, payout.outpoint, 'notifier');
-    expect(api.watched()).toEqual([]);
+    expect(api.watched()).toEqual([receipt.depositAddress]);
     world.mine(1);
+    expect(await api.runScheduled()).toEqual(
+      notifierRun({ watched: 1, finished: [receipt.depositAddress] })
+    );
+    expect(api.watched()).toEqual([]);
 
     const later = await app.newTab();
     await later.open();

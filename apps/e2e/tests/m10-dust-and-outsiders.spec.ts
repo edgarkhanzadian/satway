@@ -88,6 +88,7 @@ test.describe('M10. dust and outsiders on the public Bitcoin deposit address', (
 
     world.reportDeposit();
     const payout = world.completeSwap();
+    world.mine(1);
     expect(await api.runScheduled()).toEqual(
       notifierRun({
         watched: 1,

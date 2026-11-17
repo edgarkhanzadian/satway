@@ -273,6 +273,7 @@ export function world(opts: WorldOptions = {}) {
     signerKey: opts.signerKey ?? D.signerKey,
     hiroDown: opts.hiroDown ?? false,
     oneClickDown: opts.oneClickDown ?? false,
+    spent: new Set<string>(),
   };
   function visible(): Tx[] {
     return state.arrived ? state.txs : [];
@@ -303,7 +304,7 @@ export function world(opts: WorldOptions = {}) {
       return jsonRes(
         visible().flatMap(tx =>
           tx.vout.flatMap((o, vout) =>
-            o.scriptpubkey === D.scriptPubKey
+            o.scriptpubkey === D.scriptPubKey && !state.spent.has(`${tx.txid}:${vout}`)
               ? [{ txid: tx.txid, vout, value: o.value, status: tx.status }]
               : []
           )
@@ -316,6 +317,11 @@ export function world(opts: WorldOptions = {}) {
       return jsonRes(visible().filter(t => t.status.confirmed));
     if (url.startsWith(`${btc}/address/`)) return jsonRes([]);
     if (url === `${btc}/blocks/tip/height`) return new Response(String(TIP));
+    const lookup = new RegExp(`^${btc}/tx/([0-9a-f]{64})$`).exec(url);
+    if (lookup) {
+      const tx = visible().find(t => t.txid === lookup[1]);
+      return tx ? jsonRes(tx) : new Response('Transaction not found', { status: 404 });
+    }
     if (url.startsWith(`${btc}/tx/`)) {
       const known = Object.values(CHAIN).find(t => url.endsWith(`/tx/${t.txid}/hex`));
       if (!known) return new Response('Transaction not found', { status: 404 });

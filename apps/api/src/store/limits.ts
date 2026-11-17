@@ -10,6 +10,8 @@ export const PERSIST_COST = 2;
 export const SHARED_LOOKUP_COST = 2;
 export const REGISTRATION_COST = 4;
 export const SWAP_STATUS_COST = 1;
+export const SETTLE_LOOKUP_COST = 1;
+export const MAX_SETTLE_LOOKUPS = 2;
 export const MAX_ADDRESSES_PER_RUN = 16;
 export const MIN_REGISTRATIONS_PER_RUN = 2;
 

@@ -11,6 +11,7 @@ import {
   fetchDeposit,
   fetchLimits,
   fetchTipHeight,
+  fetchTransaction,
   fetchUnspentOutputs,
   notifyDeposit,
   outpointOf,
@@ -32,6 +33,7 @@ import {
   MAX_ADDRESSES_PER_RUN,
   MAX_LIST_PAGES_PER_RUN,
   MAX_PENDING,
+  MAX_SETTLE_LOOKUPS,
   MAX_SWAPS_FOLLOWED,
   MAX_SWAPS_PER_WATCH,
   MAX_UNFOLDED_ADMITTED,
@@ -43,6 +45,7 @@ import {
   RETRY_MAX_MINUTES,
   RUN_SUBREQUEST_BUDGET,
   type Rotation,
+  SETTLE_LOOKUP_COST,
   SHARED_LOOKUP_COST,
   STUCK_OUTPUT_GRACE_HOURS,
   SWAP_STATUS_COST,
@@ -407,7 +410,45 @@ async function readSwap(ctx: RunContext, swap: WatchSwap): Promise<SwapReading> 
 
 type WatchEnd = 'finished' | 'expired' | 'deferred' | null;
 
-async function watchEnd(ctx: RunContext, watch: Watch): Promise<WatchEnd> {
+export function settledInView(
+  registered: readonly string[],
+  unspent: readonly AddressOutput[] | null
+): { settled: string[]; unseen: string[] } {
+  const seen = new Map((unspent ?? []).map(o => [outpointOf(o), o.confirmed]));
+  return {
+    settled: registered.filter(op => seen.get(op) === true),
+    unseen: registered.filter(op => !seen.has(op)),
+  };
+}
+
+async function settledOutpoints(
+  ctx: RunContext,
+  watch: Watch,
+  unspent: readonly AddressOutput[] | null
+): Promise<string[] | 'deferred'> {
+  const { settled, unseen } = settledInView(watch.registered, unspent);
+  const txids = [...new Set(unseen.map(txidOfOutpoint))].slice(0, MAX_SETTLE_LOOKUPS);
+  const confirmed = new Set<string>();
+  for (const txid of txids) {
+    if (ctx.budget.remaining() < SETTLE_LOOKUP_COST + watch.swaps.length + ctx.reserve) {
+      return 'deferred';
+    }
+    const tx = await orNull(() => fetchTransaction(ctx.config.btcApiUrl, txid, ctx.fetchFn));
+    if (tx?.status.confirmed === true) confirmed.add(txid);
+  }
+  return [...settled, ...unseen.filter(op => confirmed.has(txidOfOutpoint(op)))];
+}
+
+function txidOfOutpoint(outpoint: string): string {
+  const [txid = ''] = outpoint.split(':');
+  return txid;
+}
+
+async function watchEnd(
+  ctx: RunContext,
+  watch: Watch,
+  unspent: readonly AddressOutput[] | null
+): Promise<WatchEnd> {
   const live = watch.swaps.filter(s => !deadlinePassed(s.deadline, ctx.now));
   if (live.length === 0) {
     if (ctx.budget.remaining() < watch.swaps.length + ctx.reserve) return 'deferred';
@@ -422,7 +463,10 @@ async function watchEnd(ctx: RunContext, watch: Watch): Promise<WatchEnd> {
     const unread = !read.has(swap) && !deadlinePassed(swap.deadline, ctx.now);
     readings.push(unread ? null : await readSwap(ctx, swap));
   }
-  return swapsFinal(readings, watch.registered, watch.swaps.length) ? 'finished' : null;
+  if (!swapsFinal(readings, watch.registered, watch.swaps.length)) return null;
+  const settled = await settledOutpoints(ctx, watch, unspent);
+  if (settled === 'deferred') return 'deferred';
+  return swapsFinal(readings, settled, watch.swaps.length) ? 'finished' : null;
 }
 
 async function endWatch(ctx: RunContext, watch: Watch): Promise<void> {
@@ -451,8 +495,8 @@ async function endWatches(ctx: RunContext, visits: readonly Visit[]): Promise<vo
   );
   const offset = candidates.length === 0 ? 0 : mod(ctx.runIndex, candidates.length);
   const ordered = [...candidates.slice(offset), ...candidates.slice(0, offset)];
-  for (const { watch } of ordered) {
-    const end = await watchEnd(ctx, watch);
+  for (const { watch, unspent } of ordered) {
+    const end = await watchEnd(ctx, watch, unspent);
     if (end === 'deferred') ctx.report.deferred.push(watch.address);
     if (end === 'finished' || end === 'expired') {
       await endWatch(ctx, watch);
